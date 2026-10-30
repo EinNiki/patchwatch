@@ -34,6 +34,11 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/patchwatch-agent dist/patchwatch-agent-${{ matrix.arch }}-linux
           (cd dist && sha256sum patchwatch-agent-${{ matrix.arch }}-linux > patchwatch-agent-${{ matrix.arch }}-linux.sha256)
+          # install.sh wird einmal (x86_64-Lauf) mit veröffentlicht.
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            cp agent/dist/install.sh dist/install.sh
+            (cd dist && sha256sum install.sh > install.sh.sha256)
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agent-${{ matrix.arch }}

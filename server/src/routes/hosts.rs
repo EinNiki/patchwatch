@@ -123,20 +123,34 @@ pub struct HostCveRow {
     reviewed_by: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct CvesQuery {
+    limit: Option<i64>,
+}
+
+/// CVE-Bewertungen eines Hosts, dringlichste zuerst (verwundbar, Neustart nötig, Fix angekündigt, unbekannt …).
+/// Die Sortierung erfolgt vor dem Limit, damit bei sehr vielen Zeilen nie kritische abgeschnitten werden.
 pub async fn cves(
     _: Admin,
     State(st): State<AppState>,
     Path(id): Path<i64>,
+    Query(q): Query<CvesQuery>,
 ) -> ApiResult<Json<Vec<HostCveRow>>> {
+    let limit = q.limit.unwrap_or(500).clamp(1, 5000);
     let rows = sqlx::query_as::<_, HostCveRow>(
         "SELECT s.cve_id, s.status, s.reason, s.computed_at, s.sources, c.description, c.priority, \
                 (w.cve_id IS NOT NULL) AS watched, m.reviewed_at, m.reviewed_by \
          FROM host_cve_status s JOIN cves c ON c.id = s.cve_id JOIN hosts h ON h.id = s.host_id \
          LEFT JOIN cve_watchlist w ON w.cve_id = s.cve_id \
          LEFT JOIN manual_reviews m ON m.host_id = s.host_id AND m.cve_id = s.cve_id AND m.kernel_version = h.running_kernel \
-         WHERE s.host_id = $1 ORDER BY (w.cve_id IS NOT NULL) DESC, s.cve_id DESC LIMIT 2000",
+         WHERE s.host_id = $1 \
+         ORDER BY CASE s.status WHEN 'vulnerable' THEN 0 WHEN 'fixed_installed_reboot_required' THEN 1 \
+                                WHEN 'fix_pending' THEN 2 WHEN 'unknown' THEN 3 ELSE 4 END, \
+                  (w.cve_id IS NOT NULL) DESC, s.cve_id DESC \
+         LIMIT $2",
     )
     .bind(id)
+    .bind(limit)
     .fetch_all(&st.pool)
     .await?;
     Ok(Json(rows))

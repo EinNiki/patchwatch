@@ -115,3 +115,36 @@ Größenlimits und Retry mit Backoff; nach 3 Fehlschlägen in Folge gibt es gena
   die Watchlist, bei Debian alle Kernel-CVEs. Gespeichert werden nur Ergebnisse mit Handlungsbezug (verwundbar,
   Fix angekündigt, Neustart nötig, unbekannt) und alle Watchlist-Einträge; die Matrix berechnet weitere Zellen live.
 - Hosts, die einen Kernel aus einem Repository ohne passende Tracker-Daten nutzen (z. B. Backports), werden UNKNOWN.
+
+## Web-UI
+
+Next.js (App Router, TypeScript, Tailwind) in `web/`. Die UI hat **kein eigenes Backend**: Sie spricht nur mit der
+Rust-API unter `/api/v1` (Sitzungs-Cookie + CSRF-Token). Seiten: Host-Übersicht (sortier- und filterbar, URL-Zustand),
+Host-Detail (Kernel, Neustart, Updates, CVE-Bewertung mit Begründung, Verlauf), CVE-Liste mit Watchlist und
+Feed-Zustand je Quelle („veraltet seit …“), Einstellungen (Hosts, Agent-Tokens einmalig anzeigen, erneuern, löschen).
+Die Matrix-Seite folgt; die Navigation hat den Platz („Matrix – bald“) bereits.
+
+Design und Barrierefreiheit sind in [`web/DESIGN.md`](web/DESIGN.md) festgelegt (Palette mit gemessenen Kontrasten,
+Schriften, Statusdarstellung: immer Icon + Text + Farbe, nie „grün“ bei fehlender Datenlage). Hell/Dunkel folgt dem System.
+Mit axe-core gegen Hell, Dunkel und Mobil geprüft: keine Verstöße.
+
+### Betrieb mit TLS
+
+`docker compose up -d` startet Postgres, Server und Web (nur auf `127.0.0.1`). Für TLS gibt es einen optionalen
+Caddy-Proxy (`/api` → Server, alles andere → Web): `PATCHWATCH_DOMAIN` in `.env` setzen und
+`docker compose --profile proxy up -d`. Hinter einem eigenen Proxy genügt: `/api/*` an `127.0.0.1:8080`, der Rest
+an `127.0.0.1:3000`, und dem Server `PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
+
+### Entwicklung
+
+```sh
+docker run -d --name pw-pg -e POSTGRES_USER=patchwatch -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=patchwatch -p 127.0.0.1:5432:5432 postgres:17-alpine
+export PATCHWATCH_DATABASE_URL=postgres://patchwatch:dev@127.0.0.1:5432/patchwatch PATCHWATCH_COOKIE_SECURE=false
+cargo run -p patchwatch-server -- create-admin admin      # Passwort per stdin oder PATCHWATCH_ADMIN_PASSWORD
+cargo run -p patchwatch-server                             # API auf :8080
+python3 scripts/dev-seed.py http://127.0.0.1:8080 admin    # Beispielhosts und -reports
+cd web && npm ci && npm run dev                            # UI auf :3000, /api wird an :8080 weitergereicht
+```
+
+Tests: `cargo test --workspace` (Integrationstests brauchen `DATABASE_URL` auf eine Postgres-Instanz), im Web
+`npm run lint && npm run typecheck && npm run build`.

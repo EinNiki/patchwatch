@@ -1,0 +1,18 @@
+# TLS-Reverse-Proxy: /api geht an den Server, alles andere an die Web-UI.
+# PATCHWATCH_DOMAIN z. B. patchwatch.example.org (öffentliches Zertifikat per ACME).
+# Nur über VPN/WireGuard erreichbar? Dann "tls internal" aktivieren (eigene CA) oder ein eigenes Zertifikat nutzen.
+{$PATCHWATCH_DOMAIN:localhost} {
+	encode zstd gzip
+	# tls internal
+
+	handle /api/* {
+		reverse_proxy server:8080
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

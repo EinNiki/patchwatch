@@ -646,3 +646,63 @@ async fn health_endpoints(pool: PgPool) {
         StatusCode::OK
     );
 }
+
+/// Regression: bei sehr vielen Zeilen müssen die dringlichsten zuerst kommen und dürfen nie abgeschnitten werden.
+#[sqlx::test(migrations = "./migrations")]
+async fn host_cves_are_ordered_by_severity_before_limit(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let (session, _) = login(&app, &pool).await;
+    let cookie = [("cookie", session.as_str())];
+    // 300 harmlosere Zeilen mit hohen IDs, eine verwundbare mit der niedrigsten ID.
+    sqlx::query(
+        "INSERT INTO cves (id) SELECT 'CVE-2026-' || (10000 + n) FROM generate_series(1, 300) n",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO cves (id) VALUES ('CVE-2001-0001')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO host_cve_status (host_id, cve_id, status, reason) SELECT $1, 'CVE-2026-' || (10000 + n), 'fix_pending', 'x' FROM generate_series(1, 300) n")
+        .bind(id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO host_cve_status (host_id, cve_id, status, reason) VALUES ($1, 'CVE-2001-0001', 'vulnerable', 'x')")
+        .bind(id).execute(&pool).await.unwrap();
+
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/hosts/{id}/cves?limit=5"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let list = r.json.as_array().unwrap();
+    assert_eq!(list.len(), 5);
+    assert_eq!(
+        list[0]["cve_id"], "CVE-2001-0001",
+        "verwundbare CVE muss trotz niedriger ID zuerst kommen"
+    );
+    assert_eq!(list[0]["status"], "vulnerable");
+    // Standard-Limit begrenzt, ungültige Werte werden geklemmt.
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/hosts/{id}/cves"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(r.json.as_array().unwrap().len(), 301);
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/hosts/{id}/cves?limit=0"),
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(r.json.as_array().unwrap().len(), 1);
+}
