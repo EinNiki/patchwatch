@@ -1,0 +1,10 @@
+[package]
+name = "debversion"
+version = "0.1.0"
+description = "Debian package version parsing and comparison (dpkg rules)"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
