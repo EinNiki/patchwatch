@@ -1,5 +1,5 @@
 mod auth;
-mod cves;
+pub mod cves;
 mod feeds;
 mod health;
 mod hosts;
@@ -17,6 +17,7 @@ use std::time::Duration;
 use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
+pub use cves::valid_cve_id;
 
 /// Allgemeines Limit je Client-IP für die ganze API.
 async fn api_rate_limit(
@@ -47,12 +48,17 @@ pub fn router(state: AppState) -> Router {
         .route("/hosts/{id}/rotate-token", post(hosts::rotate_token))
         .route("/hosts/{id}/history", get(hosts::history))
         .route("/hosts/{id}/cves", get(hosts::cves))
+        .route(
+            "/hosts/{id}/cves/{cve}/review",
+            put(hosts::review).delete(hosts::unreview),
+        )
         .route("/cves", get(cves::list))
         .route("/cves/{id}", get(cves::detail))
         .route("/watchlist", get(cves::watchlist))
         .route("/watchlist/{id}", put(cves::watch).delete(cves::unwatch))
         .route("/matrix", get(matrix::matrix))
         .route("/feeds", get(feeds::list))
+        .route("/feeds/refresh", post(feeds::refresh))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             api_rate_limit,

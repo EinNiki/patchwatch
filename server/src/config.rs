@@ -34,6 +34,48 @@ impl Ntfy {
     }
 }
 
+/// CVE-Feeds: Intervall, aktive Quellen, Limits. URLs sind überschreibbar (Tests, Spiegel).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CveConfig {
+    pub enabled: bool,
+    pub interval_minutes: u64,
+    /// Aktive Quellen: "ubuntu", "debian", "osv" (OSV standardmäßig aus).
+    pub sources: Vec<String>,
+    pub ubuntu_url: String,
+    pub debian_url: String,
+    pub osv_url: String,
+    /// Seiten (je 20 CVEs, ca. 3,7 MB) beim allerersten Ubuntu-Abruf.
+    pub ubuntu_backfill_pages: u32,
+    /// Obergrenze an Seiten pro Lauf; wird sie vor dem Cursor erreicht, gilt der Abruf als fehlgeschlagen.
+    pub ubuntu_max_pages: u32,
+    pub ubuntu_max_page_bytes: u64,
+    pub debian_max_bytes: u64,
+    pub request_timeout_secs: u64,
+    pub retries: u32,
+    pub retry_base_delay_ms: u64,
+}
+
+impl Default for CveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_minutes: 60,
+            sources: vec!["ubuntu".into(), "debian".into()],
+            ubuntu_url: "https://ubuntu.com".into(),
+            debian_url: "https://security-tracker.debian.org/tracker/data/json".into(),
+            osv_url: "https://api.osv.dev".into(),
+            ubuntu_backfill_pages: 5,
+            ubuntu_max_pages: 50,
+            ubuntu_max_page_bytes: 32 * 1024 * 1024,
+            debian_max_bytes: 200 * 1024 * 1024,
+            request_timeout_secs: 120,
+            retries: 3,
+            retry_base_delay_ms: 2000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -50,6 +92,7 @@ pub struct Config {
     /// Uhrzeit der Tageszusammenfassung, "HH:MM" in `timezone`.
     pub daily_summary_time: String,
     pub ntfy: Ntfy,
+    pub cve: CveConfig,
 }
 
 impl Default for Config {
@@ -65,6 +108,7 @@ impl Default for Config {
             timezone: "Europe/Berlin".into(),
             daily_summary_time: "08:00".into(),
             ntfy: Ntfy::default(),
+            cve: CveConfig::default(),
         }
     }
 }
@@ -141,6 +185,28 @@ impl Config {
         if let Some(v) = s("NTFY_TOKEN") {
             c.ntfy.token = Some(Secret(v));
         }
+        if let Some(v) = s("CVE_ENABLED") {
+            c.cve.enabled = parse_bool("CVE_ENABLED", &v)?;
+        }
+        if let Some(v) = s("CVE_INTERVAL_MINUTES") {
+            c.cve.interval_minutes = v.parse().context("CVE_INTERVAL_MINUTES")?;
+        }
+        if let Some(v) = s("CVE_SOURCES") {
+            c.cve.sources = v
+                .split(',')
+                .map(|x| x.trim().to_ascii_lowercase())
+                .filter(|x| !x.is_empty())
+                .collect();
+        }
+        if let Some(v) = s("CVE_UBUNTU_URL") {
+            c.cve.ubuntu_url = v;
+        }
+        if let Some(v) = s("CVE_DEBIAN_URL") {
+            c.cve.debian_url = v;
+        }
+        if let Some(v) = s("CVE_OSV_URL") {
+            c.cve.osv_url = v;
+        }
         c.validate()?;
         Ok(c)
     }
@@ -159,6 +225,26 @@ impl Config {
             bail!(
                 "stale_after_hours, report_retention_days und session_ttl_hours müssen >= 1 sein"
             );
+        }
+        if self.cve.interval_minutes < 5 {
+            bail!("cve.interval_minutes muss >= 5 sein");
+        }
+        if let Some(bad) = self
+            .cve
+            .sources
+            .iter()
+            .find(|s| !["ubuntu", "debian", "osv"].contains(&s.as_str()))
+        {
+            bail!("unbekannte CVE-Quelle {bad:?} (erlaubt: ubuntu, debian, osv)");
+        }
+        for u in [
+            &self.cve.ubuntu_url,
+            &self.cve.debian_url,
+            &self.cve.osv_url,
+        ] {
+            if !(u.starts_with("https://") || u.starts_with("http://")) {
+                bail!("CVE-Feed-URLs müssen mit http(s):// beginnen");
+            }
         }
         if let Some(u) = &self.ntfy.url {
             if !(u.starts_with("https://") || u.starts_with("http://")) {
@@ -237,6 +323,30 @@ mod tests {
         .unwrap();
         let dbg = format!("{c:?}");
         assert!(!dbg.contains("geheim"), "{dbg}");
+    }
+
+    #[test]
+    fn cve_defaults_and_overrides() {
+        let c = Config::default();
+        assert!(c.cve.enabled && c.cve.interval_minutes == 60);
+        assert_eq!(c.cve.sources, ["ubuntu", "debian"]);
+        let c = Config::from_sources(
+            None,
+            &env_of(&[
+                ("PATCHWATCH_CVE_SOURCES", "Ubuntu, osv"),
+                ("PATCHWATCH_CVE_INTERVAL_MINUTES", "30"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(c.cve.sources, ["ubuntu", "osv"]);
+        assert_eq!(c.cve.interval_minutes, 30);
+        assert!(
+            Config::from_sources(None, &env_of(&[("PATCHWATCH_CVE_SOURCES", "redhat")])).is_err()
+        );
+        assert!(
+            Config::from_sources(None, &env_of(&[("PATCHWATCH_CVE_INTERVAL_MINUTES", "1")]))
+                .is_err()
+        );
     }
 
     #[test]

@@ -1,0 +1,366 @@
+{
+ "linux": {
+  "CVE-2024-1086": {
+   "description": "A use-after-free vulnerability in the Linux kernel's netfilter: nf_tables component can be exploited to achieve local privilege escalation.    The nft_verdict_init() function allows positive values as drop error within the hook verdict, and hence the nf_hook_slow() function can cause a double free vulnerability when NF_DROP is issued with a drop error which resembles NF_ACCEPT.    We recommend upgrading past commit f342de4e2f33e0e39165d8639387aa6c19dff660.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "fixed_version": "6.1.76-1",
+     "urgency": "not yet assigned"
+    },
+    "forky": {
+     "status": "resolved",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "fixed_version": "6.6.15-1",
+     "urgency": "not yet assigned"
+    },
+    "sid": {
+     "status": "resolved",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "fixed_version": "6.6.15-1",
+     "urgency": "not yet assigned"
+    },
+    "trixie": {
+     "status": "resolved",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "fixed_version": "6.6.15-1",
+     "urgency": "not yet assigned"
+    }
+   }
+  },
+  "CVE-2004-0230": {
+   "description": "TCP, when using a large Window Size, makes it easier for remote attackers to guess sequence numbers and cause a denial of service (connection loss) to persistent TCP connections by repeatedly injecting a TCP RST packet, especially in protocols that use long-lived connections, such as BGP.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "open",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "urgency": "unimportant"
+    },
+    "forky": {
+     "status": "open",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "urgency": "unimportant"
+    },
+    "sid": {
+     "status": "open",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "urgency": "unimportant"
+    },
+    "trixie": {
+     "status": "open",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "urgency": "unimportant"
+    }
+   }
+  },
+  "CVE-2005-3660": {
+   "description": "Linux kernel 2.4 and 2.6 allows attackers to cause a denial of service (memory exhaustion and panic) by creating a large number of connected file descriptors or socketpairs and setting a large data transfer buffer, then preventing Linux from being able to finish the transfer by causing the process to become a zombie, or closing the file descriptor without closing an associated reference.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "open",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "urgency": "unimportant"
+    },
+    "forky": {
+     "status": "open",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "urgency": "unimportant"
+    },
+    "sid": {
+     "status": "open",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "urgency": "unimportant"
+    },
+    "trixie": {
+     "status": "open",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "urgency": "unimportant"
+    }
+   }
+  },
+  "CVE-2020-0347": {
+   "description": "In iptables, there is a possible out of bounds write due to an incorrect bounds check. This could lead to local escalation of privilege with System execution privileges needed. User interaction is not needed for exploitation.Product: AndroidVersions: Android-11Android ID: A-136658008",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "undetermined",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "urgency": "not yet assigned"
+    },
+    "forky": {
+     "status": "undetermined",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "urgency": "not yet assigned"
+    },
+    "sid": {
+     "status": "undetermined",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "urgency": "not yet assigned"
+    },
+    "trixie": {
+     "status": "undetermined",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "urgency": "not yet assigned"
+    }
+   }
+  },
+  "CVE-2003-1604": {
+   "description": "The redirect_target function in net/ipv4/netfilter/ipt_REDIRECT.c in the Linux kernel before 2.6.0 allows remote attackers to cause a denial of service (NULL pointer dereference and OOPS) by sending packets to an interface that has a 0.0.0.0 IP address, a related issue to CVE-2015-8787.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "fixed_version": "0",
+     "urgency": "unimportant"
+    },
+    "forky": {
+     "status": "resolved",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "fixed_version": "0",
+     "urgency": "unimportant"
+    },
+    "sid": {
+     "status": "resolved",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "fixed_version": "0",
+     "urgency": "unimportant"
+    },
+    "trixie": {
+     "status": "resolved",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "fixed_version": "0",
+     "urgency": "unimportant"
+    }
+   }
+  },
+  "TEMP-0000000-1E2093": {
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "fixed_version": "4.0.2-1",
+     "urgency": "not yet assigned"
+    },
+    "forky": {
+     "status": "resolved",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "fixed_version": "4.0.2-1",
+     "urgency": "not yet assigned"
+    },
+    "sid": {
+     "status": "resolved",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "fixed_version": "4.0.2-1",
+     "urgency": "not yet assigned"
+    },
+    "trixie": {
+     "status": "resolved",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "fixed_version": "4.0.2-1",
+     "urgency": "not yet assigned"
+    }
+   }
+  },
+  "TEMP-0000000-3D1157": {
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm": "6.1.176-1",
+      "bookworm-security": "6.1.190-1"
+     },
+     "fixed_version": "3.16.7-ckt7-1",
+     "urgency": "not yet assigned"
+    },
+    "forky": {
+     "status": "resolved",
+     "repositories": {
+      "forky": "7.2.12-1"
+     },
+     "fixed_version": "3.16.7-ckt7-1",
+     "urgency": "not yet assigned"
+    },
+    "sid": {
+     "status": "resolved",
+     "repositories": {
+      "sid": "7.2.13-1"
+     },
+     "fixed_version": "3.16.7-ckt7-1",
+     "urgency": "not yet assigned"
+    },
+    "trixie": {
+     "status": "resolved",
+     "repositories": {
+      "trixie": "6.12.107-1",
+      "trixie-security": "6.12.113-1"
+     },
+     "fixed_version": "3.16.7-ckt7-1",
+     "urgency": "not yet assigned"
+    }
+   }
+  }
+ },
+ "linux-6.12": {
+  "CVE-2024-52560": {
+   "description": "In the Linux kernel, the following vulnerability has been resolved:  fs/ntfs3: Mark inode as bad as soon as error detected in mi_enum_attr()  Extended the `mi_enum_attr()` function interface with an additional parameter, `struct ntfs_inode *ni`, to allow marking the inode as bad as soon as an error is detected.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm-security": "6.12.113-1~deb12u1"
+     },
+     "fixed_version": "6.12.111-1~deb12u1",
+     "urgency": "not yet assigned"
+    }
+   }
+  }
+ },
+ "linux-atm": {
+  "CVE-2003-0396": {
+   "description": "Buffer overflow in les for ATM on Linux (linux-atm) before 2.4.1, if used setuid, allows local users to gain privileges via a long -f command line argument.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm": "1:2.5.1-4"
+     },
+     "fixed_version": "2.4.1",
+     "urgency": "not yet assigned"
+    },
+    "forky": {
+     "status": "resolved",
+     "repositories": {
+      "forky": "1:2.5.1-9"
+     },
+     "fixed_version": "2.4.1",
+     "urgency": "not yet assigned"
+    },
+    "sid": {
+     "status": "resolved",
+     "repositories": {
+      "sid": "1:2.5.1-9"
+     },
+     "fixed_version": "2.4.1",
+     "urgency": "not yet assigned"
+    },
+    "trixie": {
+     "status": "resolved",
+     "repositories": {
+      "trixie": "1:2.5.1-7"
+     },
+     "fixed_version": "2.4.1",
+     "urgency": "not yet assigned"
+    }
+   }
+  }
+ },
+ "openssl": {
+  "CVE-2000-1254": {
+   "description": "crypto/rsa/rsa_gen.c in OpenSSL before 0.9.6 mishandles C bitwise-shift operations that exceed the size of an expression, which makes it easier for remote attackers to defeat cryptographic protection mechanisms by leveraging improper RSA key generation on 64-bit HP-UX platforms.",
+   "scope": "local",
+   "releases": {
+    "bookworm": {
+     "status": "resolved",
+     "repositories": {
+      "bookworm": "3.0.20-1~deb12u2",
+      "bookworm-security": "3.0.22-1~deb12u2"
+     },
+     "fixed_version": "0.9.6-1",
+     "urgency": "not yet assigned"
+    },
+    "forky": {
+     "status": "resolved",
+     "repositories": {
+      "forky": "3.6.5-1"
+     },
+     "fixed_version": "0.9.6-1",
+     "urgency": "not yet assigned"
+    },
+    "sid": {
+     "status": "resolved",
+     "repositories": {
+      "sid": "3.6.5-1"
+     },
+     "fixed_version": "0.9.6-1",
+     "urgency": "not yet assigned"
+    },
+    "trixie": {
+     "status": "resolved",
+     "repositories": {
+      "trixie": "3.5.7-1~deb13u2",
+      "trixie-security": "3.5.7-1~deb13u3"
+     },
+     "fixed_version": "0.9.6-1",
+     "urgency": "not yet assigned"
+    }
+   }
+  }
+ }
+}

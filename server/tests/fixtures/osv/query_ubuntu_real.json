@@ -1,0 +1,248 @@
+{
+ "vulns": [
+  {
+   "id": "UBUNTU-CVE-2020-12351",
+   "details": "Improper input validation in BlueZ may allow an unauthenticated user to potentially enable escalation of privilege via adjacent access.",
+   "modified": "2026-10-08T12:50:12.663165513Z",
+   "published": "2020-10-14T00:00:00Z",
+   "related": [
+    "USN-4591-1",
+    "USN-4592-1",
+    "USN-7179-1",
+    "USN-7179-2",
+    "USN-7179-3",
+    "USN-7179-4",
+    "USN-7183-1",
+    "USN-7186-1",
+    "USN-7186-2",
+    "USN-7194-1"
+   ],
+   "upstream": [
+    "CVE-2020-12351"
+   ],
+   "references": [
+    {
+     "type": "REPORT",
+     "url": "https://ubuntu.com/security/CVE-2020-12351"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:24.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=noble"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        },
+        {
+         "fixed": "6.8.0-35.35"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux-lts-xenial",
+      "ecosystem": "Ubuntu:Pro:14.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux-lts-xenial?arch=source&distro=esm-infra-legacy%2Ftrusty"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        },
+        {
+         "fixed": "4.4.0-262.296~14.04.1"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.0"
+  },
+  {
+   "id": "UBUNTU-CVE-2020-12352",
+   "details": "Improper access control in BlueZ may allow an unauthenticated user to potentially enable information disclosure via adjacent access.",
+   "modified": "2026-10-28T08:18:48.672830019Z",
+   "published": "2020-10-14T00:00:00Z",
+   "related": [
+    "USN-4591-1",
+    "USN-4592-1",
+    "USN-4657-1",
+    "USN-7179-1",
+    "USN-7179-2",
+    "USN-7179-3",
+    "USN-7179-4",
+    "USN-7183-1",
+    "USN-7186-1",
+    "USN-7186-2",
+    "USN-7194-1"
+   ],
+   "upstream": [
+    "CVE-2020-12352"
+   ],
+   "references": [
+    {
+     "type": "REPORT",
+     "url": "https://ubuntu.com/security/CVE-2020-12352"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:24.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=noble"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        },
+        {
+         "fixed": "6.8.0-35.35"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:Pro:14.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=esm-infra-legacy%2Ftrusty"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.2"
+  },
+  {
+   "id": "UBUNTU-CVE-2012-4542",
+   "details": "block/scsi_ioctl.c in the Linux kernel through 3.8 does not properly consider the SCSI device class during authorization of SCSI commands, which allows local us",
+   "modified": "2026-10-30T09:06:37.475220357Z",
+   "published": "2013-02-28T19:55:00Z",
+   "upstream": [
+    "CVE-2012-4542"
+   ],
+   "references": [
+    {
+     "type": "REPORT",
+     "url": "https://ubuntu.com/security/CVE-2012-4542"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:24.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=noble"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:Pro:14.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=esm-infra-legacy%2Ftrusty"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.2"
+  },
+  {
+   "id": "UBUNTU-CVE-2012-4542",
+   "details": "block/scsi_ioctl.c in the Linux kernel through 3.8 does not properly consider the SCSI device class during authorization of SCSI commands, which allows local us",
+   "modified": "2026-10-30T09:06:37.475220357Z",
+   "published": "2013-02-28T19:55:00Z",
+   "upstream": [
+    "CVE-2012-4542"
+   ],
+   "references": [
+    {
+     "type": "REPORT",
+     "url": "https://ubuntu.com/security/CVE-2012-4542"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:24.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=noble"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Ubuntu:Pro:14.04:LTS",
+      "purl": "pkg:deb/ubuntu/linux?arch=source&distro=esm-infra-legacy%2Ftrusty"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.2"
+  }
+ ],
+ "next_page_token": "fixture-token-ignored",
+ "_fixture_note": "Getrimmte echte Antwort von POST https://api.osv.dev/v1/query (Ubuntu:24.04:LTS, linux, 2026-10-30); affected[].versions entfernt, nur ein passender und ein fremder affected-Eintrag je Vuln."
+}

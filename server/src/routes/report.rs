@@ -300,5 +300,15 @@ pub async fn post_report(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    // Kernel kann sich geändert haben: CVE-Bewertung neu berechnen. Ein Fehler hier lässt den Report nicht scheitern.
+    if let Err(e) = crate::cve::reeval::evaluate_host(
+        &st.pool,
+        host_id,
+        Duration::hours(st.cfg.stale_after_hours),
+    )
+    .await
+    {
+        tracing::error!(host = host_id, error = %e, "CVE-Bewertung nach Report fehlgeschlagen");
+    }
     Ok(StatusCode::NO_CONTENT)
 }

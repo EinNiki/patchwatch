@@ -42,9 +42,27 @@ pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
     .fetch_all(&mut *tx)
     .await?;
     for (id, kind, payload) in &events {
-        if kind == "host_status_changed" && state.cfg.ntfy.enabled() {
+        if state.cfg.ntfy.enabled() {
             let s = |k: &str| payload.get(k).and_then(Value::as_str).unwrap_or("");
-            if let Some(m) = notify::status_change_message(s("name"), s("from"), s("to")) {
+            let msg = match kind.as_str() {
+                "host_status_changed" => {
+                    notify::status_change_message(s("name"), s("from"), s("to"))
+                }
+                "host_cve_status_changed" => notify::host_cve_message(payload),
+                "cve_new" | "cve_status_changed" => {
+                    // Nur Watchlist-CVEs sind eine Meldung wert.
+                    let watched: bool = sqlx::query_scalar(
+                        "SELECT EXISTS (SELECT 1 FROM cve_watchlist WHERE cve_id = $1)",
+                    )
+                    .bind(s("cve_id"))
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    watched.then(|| notify::cve_change_message(kind, payload))
+                }
+                "feed_failing" => Some(notify::feed_failing_message(payload)),
+                _ => None,
+            };
+            if let Some(m) = msg {
                 let msg = json!({ "title": m.title, "body": m.body, "priority": m.priority, "tags": m.tags });
                 jobs::enqueue(&mut tx, "notify", msg, Utc::now(), None).await?;
             }

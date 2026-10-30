@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod config;
+pub mod cve;
 pub mod error;
 pub mod extract;
 pub mod hostops;

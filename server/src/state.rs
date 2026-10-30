@@ -9,6 +9,8 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub limiter: Arc<RateLimiter>,
     pub http: reqwest::Client,
+    /// Verhindert parallele Feed-Läufe (Scheduler und manueller Abruf).
+    pub refresh_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -22,6 +24,7 @@ impl AppState {
             cfg: Arc::new(cfg),
             limiter: Arc::new(RateLimiter::default()),
             http,
+            refresh_lock: Arc::default(),
         })
     }
 }

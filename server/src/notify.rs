@@ -1,4 +1,5 @@
 use crate::config::Ntfy;
+use crate::cve::eval::CveStatus;
 use crate::status::HostStatus;
 use anyhow::{bail, Result};
 use serde_json::json;
@@ -62,6 +63,93 @@ pub fn status_change_message(name: &str, from: &str, to: &str) -> Option<Message
     })
 }
 
+fn str_of<'a>(v: &'a serde_json::Value, k: &str) -> &'a str {
+    v.get(k).and_then(serde_json::Value::as_str).unwrap_or("")
+}
+
+/// Statuswechsel einer CVE auf einem Host (nur Watchlist-CVEs). UNKNOWN löst nie einen Alarm aus
+/// (z. B. Proxmox-Kernel: "manuell prüfen" erscheint im UI, nicht per ntfy).
+pub fn host_cve_message(p: &serde_json::Value) -> Option<Message> {
+    let to = str_of(p, "to");
+    if to == "unknown" || p.get("watched") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    let from = p
+        .get("from")
+        .and_then(serde_json::Value::as_str)
+        .map_or("neu", CveStatus::label_de);
+    let (priority, tags) = if to == "vulnerable" {
+        (4, vec!["warning"])
+    } else {
+        (3, vec!["information_source"])
+    };
+    Some(Message {
+        title: format!(
+            "Watchlist {} auf {}: {}",
+            str_of(p, "cve_id"),
+            str_of(p, "host"),
+            CveStatus::label_de(to)
+        ),
+        body: format!("{from} → {}", CveStatus::label_de(to)),
+        priority,
+        tags,
+    })
+}
+
+/// Neue CVE oder geänderte Quellenangabe zu einer Watchlist-CVE.
+pub fn cve_change_message(kind: &str, p: &serde_json::Value) -> Message {
+    let changes: Vec<String> = p
+        .get("changes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(3)
+        .map(|c| {
+            let fix = c
+                .get("fix_version")
+                .and_then(serde_json::Value::as_str)
+                .map(|f| format!(" ({f})"))
+                .unwrap_or_default();
+            format!(
+                "{}/{}: {}{fix}",
+                str_of(c, "release"),
+                str_of(c, "package"),
+                CveStatus::label_de(str_of(c, "to"))
+            )
+        })
+        .collect();
+    let what = if kind == "cve_new" {
+        "neu in den Feeds"
+    } else {
+        "Quellenstatus geändert"
+    };
+    Message {
+        title: format!(
+            "Watchlist {}: {what} ({})",
+            str_of(p, "cve_id"),
+            str_of(p, "source")
+        ),
+        body: changes.join("\n"),
+        priority: 3,
+        tags: vec!["mag"],
+    }
+}
+
+pub fn feed_failing_message(p: &serde_json::Value) -> Message {
+    Message {
+        title: format!("CVE-Feed {} nicht erreichbar", str_of(p, "source")),
+        body: format!(
+            "{} Fehlversuche in Folge. Letzter Fehler: {}. Der alte Stand bleibt erhalten.",
+            p.get("failures")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0),
+            str_of(p, "error")
+        ),
+        priority: 3,
+        tags: vec!["warning"],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +157,38 @@ mod tests {
     #[test]
     fn first_healthy_report_is_silent() {
         assert!(status_change_message("web1", "pending", "ok").is_none());
+    }
+
+    #[test]
+    fn unknown_never_alerts_even_on_watchlist() {
+        let p = |to: &str, watched: bool| serde_json::json!({"cve_id": "CVE-2024-1086", "host": "pve1", "from": null, "to": to, "watched": watched});
+        assert!(host_cve_message(&p("unknown", true)).is_none());
+        assert!(host_cve_message(&p("vulnerable", false)).is_none());
+        let m = host_cve_message(&p("vulnerable", true)).unwrap();
+        assert_eq!(m.priority, 4);
+        assert!(m.title.contains("CVE-2024-1086") && m.title.contains("pve1"));
+        assert!(
+            host_cve_message(&p("fixed_installed_reboot_required", true))
+                .unwrap()
+                .title
+                .contains("Neustart nötig")
+        );
+    }
+
+    #[test]
+    fn cve_and_feed_messages() {
+        let p = serde_json::json!({"cve_id": "CVE-2024-1086", "source": "ubuntu",
+            "changes": [{"release": "noble", "package": "linux", "from": "vulnerable", "to": "fixed", "fix_version": "6.8.0-35.35"}]});
+        let m = cve_change_message("cve_status_changed", &p);
+        assert!(
+            m.body.contains("noble/linux: behoben (6.8.0-35.35)"),
+            "{}",
+            m.body
+        );
+        let f = feed_failing_message(
+            &serde_json::json!({"source": "debian", "failures": 3, "error": "HTTP 503"}),
+        );
+        assert!(f.title.contains("debian") && f.body.contains("alte Stand"));
     }
 
     #[test]

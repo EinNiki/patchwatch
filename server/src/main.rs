@@ -89,6 +89,7 @@ async fn main() -> Result<()> {
             let listen = cfg.listen.clone();
             let state = AppState::new(pool, cfg)?;
             tokio::spawn(worker::scheduler(state.clone()));
+            tokio::spawn(patchwatch_server::cve::refresh::run(state.clone()));
             let w = state.clone();
             tokio::spawn(async move {
                 if let Err(e) = worker::run(w).await {

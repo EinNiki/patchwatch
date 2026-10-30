@@ -118,6 +118,9 @@ pub struct HostCveRow {
     description: Option<String>,
     priority: Option<String>,
     watched: bool,
+    /// Manuelle Prüfung (z. B. Proxmox); gilt nur für den Kernel, bei dem sie gesetzt wurde.
+    reviewed_at: Option<DateTime<Utc>>,
+    reviewed_by: Option<String>,
 }
 
 pub async fn cves(
@@ -127,8 +130,10 @@ pub async fn cves(
 ) -> ApiResult<Json<Vec<HostCveRow>>> {
     let rows = sqlx::query_as::<_, HostCveRow>(
         "SELECT s.cve_id, s.status, s.reason, s.computed_at, s.sources, c.description, c.priority, \
-                (w.cve_id IS NOT NULL) AS watched \
-         FROM host_cve_status s JOIN cves c ON c.id = s.cve_id LEFT JOIN cve_watchlist w ON w.cve_id = s.cve_id \
+                (w.cve_id IS NOT NULL) AS watched, m.reviewed_at, m.reviewed_by \
+         FROM host_cve_status s JOIN cves c ON c.id = s.cve_id JOIN hosts h ON h.id = s.host_id \
+         LEFT JOIN cve_watchlist w ON w.cve_id = s.cve_id \
+         LEFT JOIN manual_reviews m ON m.host_id = s.host_id AND m.cve_id = s.cve_id AND m.kernel_version = h.running_kernel \
          WHERE s.host_id = $1 ORDER BY (w.cve_id IS NOT NULL) DESC, s.cve_id DESC LIMIT 2000",
     )
     .bind(id)
@@ -211,4 +216,51 @@ pub async fn remove(
     } else {
         Ok(StatusCode::NO_CONTENT)
     }
+}
+
+/// "Geprüft am …": Admin hat die CVE für diesen Host manuell geprüft. Der Status bleibt unverändert
+/// (UNKNOWN); die Markierung verfällt, sobald sich der laufende Kernel ändert.
+pub async fn review(
+    CsrfAdmin(admin): CsrfAdmin,
+    State(st): State<AppState>,
+    Path((id, cve)): Path<(i64, String)>,
+) -> ApiResult<StatusCode> {
+    if !crate::routes::valid_cve_id(&cve) {
+        return Err(ApiError::BadRequest("ungültige CVE-ID".into()));
+    }
+    let kernel: Option<Option<String>> =
+        sqlx::query_scalar("SELECT running_kernel FROM hosts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&st.pool)
+            .await?;
+    let Some(Some(kernel)) = kernel else {
+        return Err(ApiError::Conflict(
+            "Host hat noch keinen Kernel gemeldet".into(),
+        ));
+    };
+    sqlx::query(
+        "INSERT INTO manual_reviews (host_id, cve_id, reviewed_by, kernel_version) VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (host_id, cve_id) DO UPDATE SET reviewed_at = now(), reviewed_by = EXCLUDED.reviewed_by, \
+           kernel_version = EXCLUDED.kernel_version",
+    )
+    .bind(id)
+    .bind(&cve)
+    .bind(&admin.username)
+    .bind(kernel)
+    .execute(&st.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn unreview(
+    CsrfAdmin(_): CsrfAdmin,
+    State(st): State<AppState>,
+    Path((id, cve)): Path<(i64, String)>,
+) -> ApiResult<StatusCode> {
+    sqlx::query("DELETE FROM manual_reviews WHERE host_id = $1 AND cve_id = $2")
+        .bind(id)
+        .bind(&cve)
+        .execute(&st.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -1,3 +1,4 @@
+use crate::cve::reeval;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Admin;
 use crate::routes::cves::valid_cve_id;
@@ -30,6 +31,10 @@ struct Cell {
     reason: String,
     computed_at: Option<DateTime<Utc>>,
     sources: Value,
+    /// `true`, wenn die Zelle ad hoc berechnet wurde (noch kein gespeicherter Status).
+    live: bool,
+    /// Manuelle Prüfung für den aktuellen Kernel des Hosts.
+    manual_review: Option<Value>,
 }
 
 /// Zellen für die Matrix-Ansicht. Fehlende Bewertungen werden als `unknown` geliefert, nie als grün.
@@ -89,19 +94,68 @@ pub async fn matrix(
         .map(|(h, c, s, r, t, src)| ((h, c), (s, r, t, src)))
         .collect();
 
+    // Nicht gespeicherte Zellen (CVE ohne Handlungsbezug, z. B. "behoben") live berechnen.
+    let missing_hosts: Vec<i64> = host_ids
+        .iter()
+        .copied()
+        .filter(|h| {
+            cve_ids
+                .iter()
+                .any(|c| !known.contains_key(&(*h, c.clone())))
+        })
+        .collect();
+    let live = reeval::evaluate_live(&st.pool, &missing_hosts, &cve_ids).await?;
+
+    // Manuelle Prüfungen gelten nur, solange der Host denselben Kernel läuft.
+    let reviews: Vec<(i64, String, DateTime<Utc>, String)> = sqlx::query_as(
+        "SELECT m.host_id, m.cve_id, m.reviewed_at, m.reviewed_by FROM manual_reviews m \
+         JOIN hosts h ON h.id = m.host_id AND h.running_kernel = m.kernel_version \
+         WHERE m.host_id = ANY($1) AND m.cve_id = ANY($2)",
+    )
+    .bind(&host_ids)
+    .bind(&cve_ids)
+    .fetch_all(&st.pool)
+    .await?;
+    let reviews: HashMap<(i64, String), Value> = reviews
+        .into_iter()
+        .map(|(h, c, at, by)| {
+            (
+                (h, c),
+                serde_json::json!({ "reviewed_at": at, "reviewed_by": by }),
+            )
+        })
+        .collect();
+
+    let now = Utc::now();
     let mut cells = Vec::with_capacity(hosts.len() * cve_ids.len());
     for (hid, _, _) in &hosts {
         for cve in &cve_ids {
-            cells.push(match known.remove(&(*hid, cve.clone())) {
-                Some((status, reason, at, sources)) => Cell {
+            let key = (*hid, cve.clone());
+            let manual_review = reviews.get(&key).cloned();
+            let cell = if let Some((status, reason, at, sources)) = known.remove(&key) {
+                Cell {
                     host_id: *hid,
                     cve_id: cve.clone(),
                     status,
                     reason,
                     computed_at: Some(at),
                     sources,
-                },
-                None => Cell {
+                    live: false,
+                    manual_review,
+                }
+            } else if let Some(v) = live.get(&key) {
+                Cell {
+                    host_id: *hid,
+                    cve_id: cve.clone(),
+                    status: v.status.as_str().into(),
+                    reason: v.reason.clone(),
+                    computed_at: Some(now),
+                    sources: Value::Array(v.sources.clone()),
+                    live: true,
+                    manual_review,
+                }
+            } else {
+                Cell {
                     host_id: *hid,
                     cve_id: cve.clone(),
                     status: "unknown".into(),
@@ -109,8 +163,11 @@ pub async fn matrix(
                         .into(),
                     computed_at: None,
                     sources: Value::Array(vec![]),
-                },
-            });
+                    live: false,
+                    manual_review,
+                }
+            };
+            cells.push(cell);
         }
     }
     let hosts: Vec<Value> = hosts

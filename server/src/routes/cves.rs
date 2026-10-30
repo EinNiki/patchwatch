@@ -163,6 +163,9 @@ pub async fn watch(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    if let Err(e) = crate::cve::reeval::reevaluate_all(&st).await {
+        tracing::error!(error = %e, "Neubewertung nach Watchlist-Änderung fehlgeschlagen");
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

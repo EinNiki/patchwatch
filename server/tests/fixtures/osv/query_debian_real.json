@@ -1,0 +1,223 @@
+{
+ "vulns": [
+  {
+   "id": "DEBIAN-CVE-2024-14027",
+   "details": "In the Linux kernel, the following vulnerability has been resolved:  fs/xattr: missing fdput() in fremovexattr error path  In the Linux kernel, the fremovexattr",
+   "modified": "2026-09-15T09:02:58.727158926Z",
+   "published": "2026-03-09T16:16:14.313Z",
+   "upstream": [
+    "CVE-2024-14027"
+   ],
+   "references": [
+    {
+     "type": "ADVISORY",
+     "url": "https://security-tracker.debian.org/tracker/CVE-2024-14027"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:13",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=trixie"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        },
+        {
+         "fixed": "6.12.85-1"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:14",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=forky"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        },
+        {
+         "fixed": "6.16.3-1"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.0"
+  },
+  {
+   "id": "DEBIAN-CVE-2024-52560",
+   "details": "In the Linux kernel, the following vulnerability has been resolved:  fs/ntfs3: Mark inode as bad as soon as error detected in mi_enum_attr()  Extended the `mi_e",
+   "modified": "2026-10-04T14:00:06.787547697Z",
+   "published": "2025-02-27T03:15:10.573Z",
+   "upstream": [
+    "CVE-2024-52560"
+   ],
+   "references": [
+    {
+     "type": "ADVISORY",
+     "url": "https://security-tracker.debian.org/tracker/CVE-2024-52560"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:13",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=trixie"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        },
+        {
+         "fixed": "6.12.111-1"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=bookworm"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.0"
+  },
+  {
+   "id": "DEBIAN-CVE-2004-0230",
+   "details": "TCP, when using a large Window Size, makes it easier for remote attackers to guess sequence numbers and cause a denial of service (connection loss) to persisten",
+   "modified": "2026-10-10T00:00:03.244825669Z",
+   "published": "2004-08-18T04:00:00Z",
+   "upstream": [
+    "CVE-2004-0230"
+   ],
+   "references": [
+    {
+     "type": "ADVISORY",
+     "url": "https://security-tracker.debian.org/tracker/CVE-2004-0230"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:13",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=trixie"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=bookworm"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.0"
+  },
+  {
+   "id": "DEBIAN-CVE-2004-0230",
+   "details": "TCP, when using a large Window Size, makes it easier for remote attackers to guess sequence numbers and cause a denial of service (connection loss) to persisten",
+   "modified": "2026-10-10T00:00:03.244825669Z",
+   "published": "2004-08-18T04:00:00Z",
+   "upstream": [
+    "CVE-2004-0230"
+   ],
+   "references": [
+    {
+     "type": "ADVISORY",
+     "url": "https://security-tracker.debian.org/tracker/CVE-2004-0230"
+    }
+   ],
+   "affected": [
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:13",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=trixie"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "package": {
+      "name": "linux",
+      "ecosystem": "Debian:12",
+      "purl": "pkg:deb/debian/linux?arch=source&distro=bookworm"
+     },
+     "ranges": [
+      {
+       "type": "ECOSYSTEM",
+       "events": [
+        {
+         "introduced": "0"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "schema_version": "1.9.0"
+  }
+ ],
+ "next_page_token": "fixture-token-ignored",
+ "_fixture_note": "Getrimmte echte Antwort von POST https://api.osv.dev/v1/query (Debian:13, linux, 2026-10-30); affected[].versions entfernt, nur ein passender und ein fremder affected-Eintrag je Vuln."
+}

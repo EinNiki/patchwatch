@@ -73,3 +73,45 @@ gespeichert), CSRF-Token für alle verändernden Aufrufe, Rate-Limits (Login je 
 Reports, allgemeine API), strikte Eingabevalidierung, Body-Limit 4 MB. Server nur über
 VPN/WireGuard oder hinter einem TLS-Reverse-Proxy erreichbar machen; `trust_proxy=true` nur
 setzen, wenn ein vertrauenswürdiger Proxy davorsteht und den echten Client in `X-Forwarded-For` anhängt.
+
+## CVE-Abgleich
+
+Ein Hintergrund-Scheduler im Server ruft alle 60 Minuten (konfigurierbar, mit bis zu 10 % Jitter) die Feeds ab.
+Jede Quelle ist ein Adapter hinter dem Trait `CveSource` (`server/src/cve/`); weitere Quellen wie Red Hat
+oder Alpine kommen als eigener Adapter dazu. Zunächst nur Kernel-Pakete (`linux`, `linux-hwe-6.8`, `linux-aws` …),
+das Datenmodell (`cve_source_status` je CVE, Quelle, Release, Paket) ist für beliebige Pakete ausgelegt.
+
+| Quelle | Abruf | Besonderheit (an echten Antworten geprüft) |
+|---|---|---|
+| Ubuntu `cves.json` | inkrementell | Die API hat **keinen** „updated since“-Filter. Es wird absteigend nach `updated` paginiert (20 CVEs, ca. 3,7 MB je Seite) und am gespeicherten Cursor gestoppt. Erstabruf: die neuesten 5 Seiten; Watchlist-CVEs außerhalb davon werden einzeln nachgeladen. |
+| Debian Security Tracker | bedingt | Es gibt **keinen ETag**, aber `Last-Modified`: `If-Modified-Since` ergibt bei Unverändertem 304 und es passiert nichts. 87 MB entpackt, daher streamendes Parsen (nur Kernel-Pakete) und hartes Größenlimit. |
+| OSV.dev (optional, `PATCHWATCH_CVE_SOURCES=ubuntu,debian,osv`) | je Host-Kernelversion | Ergänzend; Distributions-Tracker haben Vorrang. Antworten enthalten fremde Ökosysteme (werden gefiltert) und sind paginiert. |
+
+**Bewertung** (`fixed`, `vulnerable`, `fix pending`, `not affected`, `UNKNOWN`) erfolgt pro Host und CVE für den
+**laufenden** Kernel, mit dpkg-Versionsvergleich (Crate `debversion`). Zusätzlich gibt es **„gefixt installiert,
+Neustart nötig“**: Der Fix steckt in einem installierten, aber noch nicht gebooteten Kernel. Jede Bewertung
+speichert eine Begründung und die zugrunde liegenden Quelleneinträge (Klick in der Matrix).
+
+**Änderungserkennung:** Je (CVE, Quelle, Release, Paket) wird der normalisierte Status gespeichert. Eine neue CVE
+oder ein geänderter Status (z. B. `vulnerable` → `fixed in 6.8.0-35.35`) erzeugt sofort ein Event, betroffene Hosts
+werden neu bewertet, und ein Wechsel des Host-Status löst die Benachrichtigung aus. Der erste Import einer Quelle
+erzeugt bewusst keine Event-Flut. Watchlist-CVEs werden im UI hervorgehoben und bei Änderungen gemeldet.
+
+**Fehlerrobustheit:** Ist ein Feed nicht erreichbar oder hat sich sein Format geändert, bleibt der alte Stand
+erhalten, der Fehler wird gespeichert und unter `GET /api/v1/feeds` als „veraltet seit …“ ausgewiesen (auch wenn
+der Scheduler hängt). Nie wird eine Quelle stillschweigend als gesund gewertet. Abrufe haben Timeouts,
+Größenlimits und Retry mit Backoff; nach 3 Fehlschlägen in Folge gibt es genau eine Benachrichtigung.
+
+### Grenzen der CVE-Bewertung
+
+- **Proxmox-Kernel (`-pve`) haben keine belastbare CVE-Quelle.** Sie werden immer als **UNKNOWN** bewertet („manuell
+  prüfen“, Link zu den [Proxmox Security Advisories](https://forum.proxmox.com/forums/security-advisories.26/)),
+  nie als „grün“, und lösen **keinen** ntfy-Alarm aus. Im UI lässt sich „geprüft am …“ setzen; die Markierung
+  verfällt, sobald sich der laufende Kernel ändert.
+- UNKNOWN gilt auch bei fehlender Datenlage (kein Eintrag im Tracker, Quellpaket nicht zuordenbar, unbekannter
+  Status, ungültige Version), nie „behoben“.
+- Ubuntu-Status `ignored` und `deferred` zählen als verwundbar (der Hersteller behebt nicht). Ubuntu `DNE` wird ignoriert.
+- Es werden nur CVEs bewertet, die in den geladenen Feeddaten vorkommen: bei Ubuntu die zuletzt aktualisierten und
+  die Watchlist, bei Debian alle Kernel-CVEs. Gespeichert werden nur Ergebnisse mit Handlungsbezug (verwundbar,
+  Fix angekündigt, Neustart nötig, unbekannt) und alle Watchlist-Einträge; die Matrix berechnet weitere Zellen live.
+- Hosts, die einen Kernel aus einem Repository ohne passende Tracker-Daten nutzen (z. B. Backports), werden UNKNOWN.

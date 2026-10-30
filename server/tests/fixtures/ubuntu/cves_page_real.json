@@ -1,0 +1,1462 @@
+{
+ "cves": [
+  {
+   "id": "CVE-2026-98059",
+   "published": "2026-09-25T00:00:00",
+   "updated_at": "2026-10-30T20:17:09.744430+00:00",
+   "description": "\nIn the Linux kernel, the following vulnerability has been resolved:\nbpf: Mark sched_process_wait argument as nullable\ndo_wait() passes wo->wo_pid to the sched_process_wait tracepoint.\nkernel_wait4() leaves wo_pid NULL for wait4(-1), and\nkernel_waitid_prepare() does likewise for waitid(P_ALL).\nbtf_ctx_access() currently types argument 0 as PTR_TO_BTF_ID |\nPTR_TRUSTED. Without PTR_MAYBE_NULL, the verifier accepts an unchecked\ndereference. Trusted pointer loads have no fault protection, so a wait for\nany child can then cause a NULL pointer dereference in JITed BPF code.\nAdd sched_process_wait to raw_tp_null_args[] with argument 0 marked\nnullable. The verifier rejects an unchecked dereference while preserving\naccess after the program checks the pointer for NULL.",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "medium",
+   "cvss3": 5.5,
+   "impact": {
+    "baseMetricV3": {
+     "cvssV3": {
+      "version": "3.1",
+      "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+      "attackVector": "LOCAL",
+      "attackComplexity": "LOW",
+      "privilegesRequired": "LOW",
+      "userInteraction": "NONE",
+      "scope": "UNCHANGED",
+      "confidentialityImpact": "NONE",
+      "integrityImpact": "NONE",
+      "availabilityImpact": "HIGH",
+      "baseScore": 5.5,
+      "baseSeverity": "MEDIUM"
+     }
+    }
+   },
+   "status": "active",
+   "mitigation": null,
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2026-98059",
+    "https://git.kernel.org/stable/c/bee862c79cb7e0e5c33b2df2e3a31d164705120d"
+   ],
+   "bugs": [],
+   "patches": {},
+   "tags": {
+    "linux": [
+     "review-break-fix"
+    ]
+   },
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux",
+     "debian": "https://tracker.debian.org/pkg/linux",
+     "statuses": [
+      {
+       "release_codename": "bionic",
+       "status": "not-affected",
+       "description": "4.13.0-16.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "not-affected",
+       "description": "5.4.0-9.12",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "5.13.0-19.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "6.5.0-9.9",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "not-affected",
+       "description": "3.11.0-12.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc2, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "not-affected",
+       "description": "4.4.0-2.16",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-42.42",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "not-affected",
+       "description": "7.3.0-5.5",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-hwe-6.8",
+     "source": "https://ubuntu.com/security/cve?package=linux-hwe-6.8",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-hwe-6.8",
+     "debian": "https://tracker.debian.org/pkg/linux-hwe-6.8",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "6.8.0-38.38~22.04.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc2, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-aws",
+     "source": "https://ubuntu.com/security/cve?package=linux-aws",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-aws",
+     "debian": "https://tracker.debian.org/pkg/linux-aws",
+     "statuses": [
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-1016.17",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "not-affected",
+       "description": "4.15.0-1001.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "not-affected",
+       "description": "5.4.0-1005.5",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "5.13.0-1005.6",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "6.5.0-1008.8",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "not-affected",
+       "description": "4.4.0-1002.2",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc2, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "not-affected",
+       "description": "4.4.0-1001.10",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "not-affected",
+       "description": "7.3.0-1001.1",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ],
+   "notices_ids": [],
+   "notices": []
+  },
+  {
+   "id": "CVE-2026-99999",
+   "published": "2026-10-15T00:00:00",
+   "updated_at": "2026-10-30T20:06:39.464057+00:00",
+   "description": "\nIn the Linux kernel, the following vulnerability has been resolved:\nipv4: validate checksum_start before completing checksum\nIf a packet with bad checksum metadata gets into the ipv4 stack,\nskb_checksum_help can corrupt the network header and cause a bunch of\nmischief.\nThis was discovered and reported by Paulos, and has been reporoduced\nby others independently since.\nWe really shouldn't allow such packets in, but as a defence\nin depth measure, let's also check before we complete the checksum.\nA more complete validation at input is forthcoming, but needs more work.\nipv4: validate checksum_start before completing checksum\nIf a packet with bad checksum metadata gets into the ipv4 stack,\nskb_checksum_help can corrupt the network header and cause a bunch of\nmischief.\nThis was discovered and reported by Paulos, and has been reporoduced\nby others independently since.\nWe really shouldn't allow such packets in, but as a defence\nin depth measure, let's also check before we complete the checksum.\nA more complete validation at input is forthcoming, but needs more work.",
+   "ubuntu_description": "",
+   "notes": [
+    {
+     "author": "",
+     "note": "Priority reason:\nSee ubuntu cvss score"
+    }
+   ],
+   "codename": null,
+   "priority": "medium",
+   "cvss3": 9.3,
+   "impact": {
+    "baseMetricV3": {
+     "cvssV3": {
+      "version": "3.1",
+      "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+      "attackVector": "LOCAL",
+      "attackComplexity": "LOW",
+      "privilegesRequired": "NONE",
+      "userInteraction": "NONE",
+      "scope": "CHANGED",
+      "confidentialityImpact": "HIGH",
+      "integrityImpact": "HIGH",
+      "availabilityImpact": "HIGH",
+      "baseScore": 9.3,
+      "baseSeverity": "CRITICAL"
+     }
+    },
+    "baseMetricV4": {
+     "cvssV4": {
+      "version": "4.0",
+      "vectorString": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:H/SC:N/SI:N/SA:N",
+      "baseMetrics": {
+       "exploitabilityMetrics": {
+        "attackVector": "LOCAL",
+        "attackComplexity": "LOW",
+        "attackRequirements": "NONE",
+        "privilegesRequired": "LOW",
+        "userInteraction": "NONE"
+       },
+       "vulnerableSystemImpactMetrics": {
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "LOW",
+        "availabilityImpact": "HIGH"
+       },
+       "subsequentSystemImpactMetrics": {
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       }
+      },
+      "baseScore": 6.9,
+      "baseSeverity": "MEDIUM"
+     }
+    }
+   },
+   "status": "active",
+   "mitigation": null,
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2026-99999",
+    "https://git.kernel.org/linus/6785011f8b16abf40b1e9d8b2e332232b3e68822 (6.3-rc7)"
+   ],
+   "bugs": [],
+   "patches": {},
+   "tags": {
+    "linux": [
+     "kernel-team-break-fix-verified-agent",
+     "kernel-team-severity-assessed-agent",
+     "kernel-team-expedite"
+    ]
+   },
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux",
+     "debian": "https://tracker.debian.org/pkg/linux",
+     "statuses": [
+      {
+       "release_codename": "stonking",
+       "status": "pending",
+       "description": "7.3.0-10.10",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "pending",
+       "description": "5.15.0-203.213",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-149.149",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-43.43",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "ignored",
+       "description": "end of standard support, was needed",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc7, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-hwe-6.8",
+     "source": "https://ubuntu.com/security/cve?package=linux-hwe-6.8",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-hwe-6.8",
+     "debian": "https://tracker.debian.org/pkg/linux-hwe-6.8",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "pending",
+       "description": "6.8.0-149.149~22.04.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc7, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-aws",
+     "source": "https://ubuntu.com/security/cve?package=linux-aws",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-aws",
+     "debian": "https://tracker.debian.org/pkg/linux-aws",
+     "statuses": [
+      {
+       "release_codename": "stonking",
+       "status": "pending",
+       "description": "7.3.0-1004.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "pending",
+       "description": "5.15.0-1120.127",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-1069.74",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-1017.18",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "ignored",
+       "description": "end of standard support, was needed",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc7, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ],
+   "notices_ids": [],
+   "notices": []
+  },
+  {
+   "id": "CVE-2026-98859",
+   "published": "2026-10-18T16:17:00",
+   "updated_at": "2026-10-30T20:05:37.320822+00:00",
+   "description": "\nIn the Linux kernel, the following vulnerability has been resolved:\nHID: multitouch: stop the release timer from being rearmed on remove\nmt_remove() quiesces the sticky-finger timer before stopping the\nhardware:\n    timer_delete_sync(&td->release_timer);\n    sysfs_remove_group(&hdev->dev.kobj, &mt_attribute_group);\n    hid_hw_stop(hdev);\ntimer_delete_sync() waits for a running callback and dequeues the timer,\nbut it does not stop the timer from being armed again. The transport is\nstill delivering reports at that point, and the report path rearms it:\n    if (app->quirks & MT_QUIRK_STICKY_FINGERS) {\n        if (td->mt_io_flags & MT_IO_SLOTS_MASK)\n            mod_timer(&td->release_timer,\n                      jiffies + msecs_to_jiffies(100));\nA report that arrives after timer_delete_sync() has returned therefore\nleaves the timer queued. td is allocated with devm_kzalloc() against\nhdev->dev, so it is freed when the driver is unbound, after mt_remove()\nreturns. When the timer fires afterwards, mt_expired_timeout()\ndereferences the freed td:\n    struct mt_device *td = timer_container_of(td, t, release_timer);\n    struct hid_device *hdev = td->hdev;\n    if (test_and_set_bit_lock(MT_IO_FLAGS_RUNNING, &td->mt_io_flags))\nSimply moving the teardown after hid_hw_stop() does not fix this on its\nown, because mt_expired_timeout() calls mt_release_contacts(), which\nwalks hdev->inputs; the timer still has to be quiesced before\nhid_hw_stop() tears the input devices down.\nUse timer_shutdown_sync() instead, which additionally makes any later\nmod_timer() a no-op, so neither ordering constraint has to be traded off\nagainst the other. This is the final-teardown pattern the function was\nintroduced for, and hid-wiimote already uses it for the same reason.",
+   "ubuntu_description": "",
+   "notes": [
+    {
+     "author": "",
+     "note": "Priority reason:\nSee ubuntu cvss score"
+    }
+   ],
+   "codename": null,
+   "priority": "medium",
+   "cvss3": null,
+   "impact": {
+    "baseMetricV4": {
+     "cvssV4": {
+      "version": "4.0",
+      "vectorString": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+      "baseMetrics": {
+       "exploitabilityMetrics": {
+        "attackVector": "PHYSICAL",
+        "attackComplexity": "HIGH",
+        "attackRequirements": "PRESENT",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE"
+       },
+       "vulnerableSystemImpactMetrics": {
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "HIGH",
+        "availabilityImpact": "HIGH"
+       },
+       "subsequentSystemImpactMetrics": {
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       }
+      },
+      "baseScore": 5.4,
+      "baseSeverity": "MEDIUM"
+     }
+    }
+   },
+   "status": "active",
+   "mitigation": null,
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2026-98859",
+    "https://git.kernel.org/stable/c/0c19a6c1d25fd5ed66d1f80dc6f6e56cc1f0a787"
+   ],
+   "bugs": [],
+   "patches": {},
+   "tags": {
+    "linux": [
+     "kernel-team-break-fix-verified-agent",
+     "kernel-team-severity-assessed-agent"
+    ]
+   },
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux",
+     "debian": "https://tracker.debian.org/pkg/linux",
+     "statuses": [
+      {
+       "release_codename": "bionic",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "not-affected",
+       "description": "7.3.0-9.9",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "not-affected",
+       "description": "3.11.0-12.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc6, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "not-affected",
+       "description": "4.4.0-2.16",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-149.149",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-43.43",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-hwe-6.8",
+     "source": "https://ubuntu.com/security/cve?package=linux-hwe-6.8",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-hwe-6.8",
+     "debian": "https://tracker.debian.org/pkg/linux-hwe-6.8",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc6, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "pending",
+       "description": "6.8.0-149.149~22.04.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-aws",
+     "source": "https://ubuntu.com/security/cve?package=linux-aws",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-aws",
+     "debian": "https://tracker.debian.org/pkg/linux-aws",
+     "statuses": [
+      {
+       "release_codename": "bionic",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "not-affected",
+       "description": "7.3.0-1003.3",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "not-affected",
+       "description": "4.4.0-1002.2",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc6, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "not-affected",
+       "description": "4.4.0-1001.10",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-1069.74",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-1017.18",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ],
+   "notices_ids": [],
+   "notices": []
+  },
+  {
+   "id": "CVE-2026-98835",
+   "published": "2026-10-18T16:17:00",
+   "updated_at": "2026-10-30T20:03:38.442698+00:00",
+   "description": "\nIn the Linux kernel, the following vulnerability has been resolved:\niio: accel: kionix-kx022a: Fix array boundary check\nThe driver performs a sanity check for an array size, when converting a\nregister value to an array index. The check incorrectly accepts the\nsizeof(array) as a last index, when last valid index should be\nsizeof(array) - 1.\nFix the check by bailing out when index >= sizeof(array).",
+   "ubuntu_description": "",
+   "notes": [
+    {
+     "author": "",
+     "note": "Priority reason:\nSee ubuntu cvss score"
+    }
+   ],
+   "codename": null,
+   "priority": "negligible",
+   "cvss3": null,
+   "impact": {
+    "baseMetricV4": {
+     "cvssV4": {
+      "version": "4.0",
+      "vectorString": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+      "baseMetrics": {
+       "exploitabilityMetrics": {
+        "attackVector": "PHYSICAL",
+        "attackComplexity": "LOW",
+        "attackRequirements": "NONE",
+        "privilegesRequired": "LOW",
+        "userInteraction": "NONE"
+       },
+       "vulnerableSystemImpactMetrics": {
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       },
+       "subsequentSystemImpactMetrics": {
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       }
+      },
+      "baseScore": 0.0,
+      "baseSeverity": "NEGLIGIBLE"
+     }
+    }
+   },
+   "status": "active",
+   "mitigation": null,
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2026-98835",
+    "https://git.kernel.org/stable/c/0e65412aee4f651d2c9785f542a13e4b44002a75"
+   ],
+   "bugs": [],
+   "patches": {},
+   "tags": {
+    "linux": [
+     "kernel-team-break-fix-verified-agent",
+     "kernel-team-severity-assessed-agent"
+    ]
+   },
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux",
+     "debian": "https://tracker.debian.org/pkg/linux",
+     "statuses": [
+      {
+       "release_codename": "bionic",
+       "status": "not-affected",
+       "description": "4.13.0-16.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "not-affected",
+       "description": "5.4.0-9.12",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "5.13.0-19.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "not-affected",
+       "description": "7.3.0-9.9",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "not-affected",
+       "description": "3.11.0-12.19",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc6, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "not-affected",
+       "description": "4.4.0-2.16",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-149.149",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-43.43",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-hwe-6.8",
+     "source": "https://ubuntu.com/security/cve?package=linux-hwe-6.8",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-hwe-6.8",
+     "debian": "https://tracker.debian.org/pkg/linux-hwe-6.8",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc6, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "pending",
+       "description": "6.8.0-149.149~22.04.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "bionic",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "DNE",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    },
+    {
+     "name": "linux-aws",
+     "source": "https://ubuntu.com/security/cve?package=linux-aws",
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-aws",
+     "debian": "https://tracker.debian.org/pkg/linux-aws",
+     "statuses": [
+      {
+       "release_codename": "bionic",
+       "status": "not-affected",
+       "description": "4.15.0-1001.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "focal",
+       "status": "not-affected",
+       "description": "5.4.0-1005.5",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "5.13.0-1005.6",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "stonking",
+       "status": "not-affected",
+       "description": "7.3.0-1003.3",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "trusty",
+       "status": "not-affected",
+       "description": "4.4.0-1002.2",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "upstream",
+       "status": "released",
+       "description": "7.3~rc6, 6.8.y, 6.17.y, 7.0.y",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "xenial",
+       "status": "not-affected",
+       "description": "4.4.0-1001.10",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-1069.74",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "resolute",
+       "status": "pending",
+       "description": "7.0.0-1017.18",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ],
+   "notices_ids": [],
+   "notices": []
+  },
+  {
+   "bugs": [],
+   "codename": null,
+   "cvss3": 7.8,
+   "description": "\nA use-after-free vulnerability in the Linux kernel's netfilter: nf_tables\ncomponent can be exploited to achieve local privilege escalation.\nThe nft_verdict_init() function allows positive values as drop error within\nthe hook verdict, and hence the nf_hook_slow() function can cause a double\nfree vulnerability when NF_DROP is issued with a drop error which resembles\nNF_ACCEPT.\nWe recommend upgrading past commit\nf342de4e2f33e0e39165d8639387aa6c19dff660.",
+   "id": "CVE-2024-1086",
+   "impact": {
+    "baseMetricV3": {
+     "cvssV3": {
+      "attackComplexity": "LOW",
+      "attackVector": "LOCAL",
+      "availabilityImpact": "HIGH",
+      "baseScore": 7.8,
+      "baseSeverity": "HIGH",
+      "confidentialityImpact": "HIGH",
+      "integrityImpact": "HIGH",
+      "privilegesRequired": "LOW",
+      "scope": "UNCHANGED",
+      "userInteraction": "NONE",
+      "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "version": "3.1"
+     }
+    }
+   },
+   "mitigation": null,
+   "notes": [
+    {
+     "author": "",
+     "note": "Priority reason:\nBy passing a positive value such as NF_ACCEPT, a local attacker can elevate privileges due to a use-after-free error."
+    },
+    {
+     "author": "rodrigo-zaiden",
+     "note": "from Google kCTF.\nthe fix commit reverts the break commit."
+    }
+   ],
+   "notices": [],
+   "notices_ids": [
+    "USN-6688-1",
+    "USN-6701-1"
+   ],
+   "packages": [
+    {
+     "debian": "https://tracker.debian.org/pkg/linux",
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "component": null,
+       "description": "4.15.0-223.235",
+       "pocket": "esm-infra",
+       "release_codename": "bionic",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "4.4.0-252.286",
+       "pocket": "esm-infra",
+       "release_codename": "xenial",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "5.4.0-174.193",
+       "pocket": "security",
+       "release_codename": "focal",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "5.15.0-101.111",
+       "pocket": "security",
+       "release_codename": "jammy",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "6.5.0-26.26",
+       "pocket": "security",
+       "release_codename": "mantic",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "3.11.0-12.19",
+       "pocket": "security",
+       "release_codename": "trusty",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.8.0-11.11",
+       "pocket": "security",
+       "release_codename": "noble",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.8~rc2",
+       "pocket": "security",
+       "release_codename": "upstream",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "6.8.0-31.31",
+       "pocket": "security",
+       "release_codename": "oracular",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.11.0-8.8",
+       "pocket": "security",
+       "release_codename": "plucky",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.17.0-5.5",
+       "pocket": "security",
+       "release_codename": "resolute",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.14.0-15.15",
+       "pocket": "security",
+       "release_codename": "questing",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "7.2.0-5.5",
+       "pocket": "security",
+       "release_codename": "stonking",
+       "status": "not-affected"
+      }
+     ],
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux"
+    },
+    {
+     "debian": "https://tracker.debian.org/pkg/linux-aws",
+     "name": "linux-aws",
+     "source": "https://ubuntu.com/security/cve?package=linux-aws",
+     "statuses": [
+      {
+       "component": null,
+       "description": "4.4.0-1167.182",
+       "pocket": "esm-infra",
+       "release_codename": "xenial",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "4.15.0-1166.179",
+       "pocket": "esm-infra",
+       "release_codename": "bionic",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "4.4.0-1129.135",
+       "pocket": "esm-infra",
+       "release_codename": "trusty",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "5.15.0-1056.61",
+       "pocket": "security",
+       "release_codename": "jammy",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "5.4.0-1121.131",
+       "pocket": "security",
+       "release_codename": "focal",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "6.5.0-1016.16",
+       "pocket": "security",
+       "release_codename": "mantic",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "6.8.0-1001.1",
+       "pocket": "security",
+       "release_codename": "noble",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.8~rc2",
+       "pocket": "security",
+       "release_codename": "upstream",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "6.8.0-1008.8",
+       "pocket": "security",
+       "release_codename": "oracular",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.11.0-1004.4",
+       "pocket": "security",
+       "release_codename": "plucky",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.17.0-1002.2",
+       "pocket": "security",
+       "release_codename": "resolute",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.14.0-1005.5",
+       "pocket": "security",
+       "release_codename": "questing",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "7.0.0-1004.4",
+       "pocket": "security",
+       "release_codename": "stonking",
+       "status": "not-affected"
+      }
+     ],
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-aws"
+    },
+    {
+     "debian": "https://tracker.debian.org/pkg/linux-hwe-6.8",
+     "name": "linux-hwe-6.8",
+     "source": "https://ubuntu.com/security/cve?package=linux-hwe-6.8",
+     "statuses": [
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "trusty",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "xenial",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "bionic",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "focal",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "noble",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "6.8.0-38.38~22.04.1",
+       "pocket": "security",
+       "release_codename": "jammy",
+       "status": "not-affected"
+      },
+      {
+       "component": null,
+       "description": "6.8~rc2",
+       "pocket": "security",
+       "release_codename": "upstream",
+       "status": "released"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "oracular",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "plucky",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "resolute",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "questing",
+       "status": "DNE"
+      },
+      {
+       "component": null,
+       "description": "",
+       "pocket": "security",
+       "release_codename": "stonking",
+       "status": "DNE"
+      }
+     ],
+     "ubuntu": "https://packages.ubuntu.com/search?suite=all&section=all&arch=any&searchon=sourcenames&keywords=linux-hwe-6.8"
+    }
+   ],
+   "patches": {},
+   "priority": "high",
+   "published": "2024-01-31T13:15:00",
+   "references": [
+    "https://kernel.dance/f342de4e2f33e0e39165d8639387aa6c19dff660",
+    "https://git.kernel.org/linus/f342de4e2f33e0e39165d8639387aa6c19dff660 (6.8-rc2)"
+   ],
+   "status": "active",
+   "tags": {
+    "linux": [
+     "kernel-team-severity-assessed-agent",
+     "binary-exclude:linux-libc-dev",
+     "kernel-team-break-fix-verified-agent"
+    ]
+   },
+   "ubuntu_description": "\nNotselwyn discovered that the netfilter subsystem in the Linux kernel did\nnot properly handle verdict parameters in certain cases, leading to a use-\nafter-free vulnerability. A local attacker could use this to cause a denial\nof service (system crash) or possibly execute arbitrary code.",
+   "updated_at": "2026-10-28T15:26:30.152276+00:00"
+  }
+ ],
+ "offset": 0,
+ "limit": 5,
+ "total_results": 22307,
+ "_fixture_note": "Getrimmte echte Antwort von https://ubuntu.com/security/cves.json?package=linux&limit=20&order=descending&sort_by=updated (2026-10-30); notices/bugs/patches entfernt, nur linux, linux-hwe-6.8, linux-aws, linux-firmware, openssl behalten."
+}
