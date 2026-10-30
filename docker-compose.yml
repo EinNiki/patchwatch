@@ -1,0 +1,46 @@
+# Betrieb hinter einem TLS-Reverse-Proxy (siehe README). Der Server veröffentlicht den Port
+# nur auf localhost; Postgres ist nicht von außen erreichbar. Kein Redis: Queue und Events
+# laufen über Postgres (SKIP LOCKED, LISTEN/NOTIFY).
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: patchwatch
+      POSTGRES_DB: patchwatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patchwatch -d patchwatch"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    security_opt: ["no-new-privileges:true"]
+
+  server:
+    image: ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PATCHWATCH_DATABASE_URL: postgres://patchwatch:${POSTGRES_PASSWORD}@postgres:5432/patchwatch
+      # Hinter dem Reverse-Proxy: Client-IP aus X-Forwarded-For für die Rate-Limits.
+      PATCHWATCH_TRUST_PROXY: "true"
+      PATCHWATCH_TIMEZONE: ${PATCHWATCH_TIMEZONE:-Europe/Berlin}
+      PATCHWATCH_DAILY_SUMMARY_TIME: ${PATCHWATCH_DAILY_SUMMARY_TIME:-08:00}
+      PATCHWATCH_NTFY_URL: ${PATCHWATCH_NTFY_URL:-}
+      PATCHWATCH_NTFY_TOPIC: ${PATCHWATCH_NTFY_TOPIC:-}
+      PATCHWATCH_NTFY_TOKEN: ${PATCHWATCH_NTFY_TOKEN:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  pgdata:

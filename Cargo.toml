@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/debversion", "agent"]
+members = ["crates/debversion", "agent", "server"]
 
 [workspace.package]
 edition = "2021"
@@ -14,3 +14,13 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# argon2 im Debug-Build sonst sehr langsam (Tests mit Login).
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+
+# Server: Geschwindigkeit vor Größe (opt-level "z" gilt für den Agent).
+[profile.release.package.patchwatch-server]
+opt-level = 2

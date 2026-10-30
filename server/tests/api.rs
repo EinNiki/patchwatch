@@ -1,0 +1,648 @@
+use axum::body::Body;
+use axum::http::{header, Method, Request, StatusCode};
+use axum::Router;
+use chrono::{Duration, Utc};
+use http_body_util::BodyExt;
+use patchwatch_server::config::Config;
+use patchwatch_server::{admin, hostops, jobs, router, security, worker, AppState};
+use serde_json::{json, Value};
+use sqlx::PgPool;
+use tower::ServiceExt;
+
+const TOKEN: &str = "pw_test-token-nur-fuer-tests-0123456789abcdef";
+const PASSWORD: &str = "ein-langes-test-passwort";
+
+fn state(pool: PgPool, env: &'static [(&'static str, &'static str)]) -> AppState {
+    let cfg = Config::from_sources(None, &|k| {
+        env.iter()
+            .find(|(n, _)| *n == k)
+            .map(|(_, v)| (*v).to_owned())
+    })
+    .unwrap();
+    AppState::new(pool, cfg).unwrap()
+}
+
+async fn add_host(pool: &PgPool, name: &str, token: &str) -> i64 {
+    sqlx::query_scalar("INSERT INTO hosts (name, token_hash) VALUES ($1, $2) RETURNING id")
+        .bind(name)
+        .bind(security::sha256(token))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+struct Resp {
+    status: StatusCode,
+    headers: axum::http::HeaderMap,
+    json: Value,
+}
+
+async fn call(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    headers: &[(&str, &str)],
+    body: Option<Value>,
+) -> Resp {
+    let mut b = Request::builder().method(method).uri(uri);
+    for (k, v) in headers {
+        b = b.header(*k, *v);
+    }
+    let req = match body {
+        Some(v) => b
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(v.to_string()))
+            .unwrap(),
+        None => b.body(Body::empty()).unwrap(),
+    };
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let (parts, body) = resp.into_parts();
+    let bytes = body.collect().await.unwrap().to_bytes();
+    Resp {
+        status: parts.status,
+        headers: parts.headers,
+        json: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    }
+}
+
+fn report(
+    hostname: &str,
+    running_ver: &str,
+    newest_ver: &str,
+    security: i32,
+    pending: i32,
+) -> Value {
+    json!({
+        "schema_version": 1, "agent_version": "0.1.0", "hostname": hostname, "collected_at_unix": 1,
+        "os": {"id": "ubuntu", "version_id": "24.04", "codename": "noble", "pretty_name": "Ubuntu 24.04.3 LTS"},
+        "kernel": {
+            "running_release": "6.8.0-31-generic",
+            "running_package": {"name": "linux-image-6.8.0-31-generic", "version": running_ver,
+                                "source": "linux-signed", "source_version": running_ver},
+            "newest_installed_release": "6.8.0-35-generic",
+            "newest_installed_package": {"name": "linux-image-6.8.0-35-generic", "version": newest_ver,
+                                         "source": "linux-signed", "source_version": newest_ver},
+            "reboot_needed_kernel": running_ver != newest_ver
+        },
+        "reboot_required_file": false,
+        "updates": {"pending": pending, "security": security},
+        "uptime_seconds": 1234, "proxmox": null, "packages": null
+    })
+}
+
+fn bearer(t: &str) -> String {
+    format!("Bearer {t}")
+}
+
+async fn login(app: &Router, pool: &PgPool) -> (String, String) {
+    admin::upsert_admin(pool, "admin", PASSWORD).await.unwrap();
+    let r = call(
+        app,
+        Method::POST,
+        "/api/v1/auth/login",
+        &[],
+        Some(json!({"username": "admin", "password": PASSWORD})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let cookie = r
+        .headers
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let session = cookie.split(';').next().unwrap().to_owned();
+    (session, r.json["csrf_token"].as_str().unwrap().to_owned())
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn report_updates_host_and_stores_only_token_hash(pool: PgPool) {
+    let st = state(pool.clone(), &[]);
+    let app = router(st);
+    let id = add_host(&pool, "web1", TOKEN).await;
+
+    let auth = bearer(TOKEN);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/report",
+        &[("authorization", &auth)],
+        Some(report("web1", "6.8.0-31.31", "6.8.0-35.35", 2, 5)),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+
+    let (status, kernel, reboot, sec): (String, String, Option<bool>, i32) = sqlx::query_as(
+        "SELECT status, running_kernel, reboot_needed_kernel, updates_security FROM hosts WHERE id = $1")
+        .bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(status, "security_updates");
+    assert_eq!(kernel, "6.8.0-31-generic");
+    assert_eq!(reboot, Some(true));
+    assert_eq!(sec, 2);
+
+    // Der Klartext-Token darf nirgends in der Datenbank stehen.
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM hosts WHERE name = $1 OR token_hash = convert_to($1, 'UTF8')",
+    )
+    .bind(TOKEN)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0);
+    let hash_len: i32 = sqlx::query_scalar("SELECT length(token_hash) FROM hosts WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(hash_len, 32, "erwartet SHA-256");
+    let reports: i64 = sqlx::query_scalar("SELECT count(*) FROM reports WHERE host_id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(reports, 1);
+    // Statuswechsel pending -> security_updates erzeugt ein Event.
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM events WHERE kind = 'host_status_changed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(events, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn report_rejects_bad_token_and_invalid_input(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    add_host(&pool, "web1", TOKEN).await;
+    let good = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/report",
+        &[("authorization", "Bearer falsch")],
+        Some(good.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/report",
+        &[],
+        Some(good.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    let mut bad = good.clone();
+    bad["hostname"] = json!("evil host; drop table");
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(bad))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    let mut bad = good.clone();
+    bad["schema_version"] = json!(99);
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(bad))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    let mut bad = good.clone();
+    bad["updates"] = json!({"pending": 1, "security": 5});
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(bad))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Zu großer Body wird abgelehnt.
+    let huge = "x".repeat(5 * 1024 * 1024);
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/report")
+        .header("authorization", &auth)
+        .body(Body::from(huge))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(req).await.unwrap().status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn package_list_is_replaced_and_kept_out_of_history(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+
+    let mut r1 = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+    r1["packages"] = json!([{"name": "bash", "version": "5.2-1", "source": "bash", "source_version": "5.2-1"},
+                            {"name": "old-pkg", "version": "1.0", "source": null, "source_version": null}]);
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(r1))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    let mut r2 = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+    r2["packages"] =
+        json!([{"name": "bash", "version": "5.2-2", "source": "bash", "source_version": "5.2-2"}]);
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(r2))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+
+    let pk: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, version FROM host_packages WHERE host_id = $1 ORDER BY name")
+            .bind(id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pk, vec![("bash".to_owned(), "5.2-2".to_owned())]);
+    let raw_has_pkgs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM reports WHERE raw ? 'packages'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(raw_has_pkgs, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn auth_csrf_and_host_management(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+
+    // Ohne Login kein Zugriff.
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/hosts", &[], None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    let (session, csrf) = login(&app, &pool).await;
+    let cookie = [("cookie", session.as_str())];
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/hosts", &cookie, None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+
+    // Verändernde Anfrage ohne bzw. mit falschem CSRF-Token wird abgelehnt.
+    let body = json!({"name": "db1"});
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/hosts",
+            &cookie,
+            Some(body.clone())
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+    let wrong = [("cookie", session.as_str()), ("x-csrf-token", "falsch")];
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/hosts",
+            &wrong,
+            Some(body.clone())
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+
+    let ok = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(&app, Method::POST, "/api/v1/hosts", &ok, Some(body.clone())).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let token = r.json["token"].as_str().unwrap().to_owned();
+    assert!(token.starts_with("pw_"));
+    // Doppelter Name -> 409, ungültiger Name -> 400.
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/hosts", &ok, Some(body))
+            .await
+            .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/hosts",
+            &ok,
+            Some(json!({"name": "a b"}))
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Der neue Token funktioniert, nach Rotation nicht mehr.
+    let id = r.json["id"].as_i64().unwrap();
+    let rep = report("db1", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+    let a = bearer(&token);
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/report",
+            &[("authorization", &a)],
+            Some(rep.clone())
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+    let rot = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/hosts/{id}/rotate-token"),
+        &ok,
+        None,
+    )
+    .await;
+    assert_eq!(rot.status, StatusCode::OK);
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/report",
+            &[("authorization", &a)],
+            Some(rep)
+        )
+        .await
+        .status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Logout beendet die Session.
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/auth/logout", &ok, None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/hosts", &cookie, None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn login_cookie_flags_and_rate_limit(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    admin::upsert_admin(&pool, "admin", PASSWORD).await.unwrap();
+
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/auth/login",
+        &[],
+        Some(json!({"username": "admin", "password": PASSWORD})),
+    )
+    .await;
+    let c = r.headers.get(header::SET_COOKIE).unwrap().to_str().unwrap();
+    for flag in ["HttpOnly", "Secure", "SameSite=Strict", "Path=/"] {
+        assert!(c.contains(flag), "{flag} fehlt in {c}");
+    }
+
+    // Falsche Passwörter: erst 401, dann 429 mit Retry-After.
+    let mut last = StatusCode::OK;
+    let mut retry = None;
+    for _ in 0..12 {
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/auth/login",
+            &[],
+            Some(json!({"username": "admin", "password": "falsch"})),
+        )
+        .await;
+        last = r.status;
+        retry = r.headers.get(header::RETRY_AFTER).cloned();
+        if last == StatusCode::TOO_MANY_REQUESTS {
+            break;
+        }
+        assert_eq!(last, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    assert!(retry.is_some());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn matrix_never_reports_missing_data_as_ok(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let (session, csrf) = login(&app, &pool).await;
+    let ok = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+
+    assert_eq!(
+        call(
+            &app,
+            Method::PUT,
+            "/api/v1/watchlist/CVE-2024-1086",
+            &ok,
+            Some(json!({"note": "wichtig"}))
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&app, Method::PUT, "/api/v1/watchlist/kaputt", &ok, None)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    let wl = call(&app, Method::GET, "/api/v1/watchlist", &ok, None).await;
+    assert_eq!(wl.json[0]["id"], "CVE-2024-1086");
+    assert_eq!(wl.json[0]["watched"], true);
+
+    let m = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/matrix?cves=CVE-2024-1086&hosts={id}"),
+        &ok,
+        None,
+    )
+    .await;
+    assert_eq!(m.status, StatusCode::OK);
+    let cell = &m.json["cells"][0];
+    assert_eq!(cell["status"], "unknown");
+    assert!(cell["reason"]
+        .as_str()
+        .unwrap()
+        .contains("Noch nicht bewertet"));
+
+    // Standard ohne Parameter: Watchlist x alle Hosts.
+    let m = call(&app, Method::GET, "/api/v1/matrix", &ok, None).await;
+    assert_eq!(m.json["cells"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/matrix?cves=nope", &ok, None)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn stale_hosts_get_event_and_notification_job(pool: PgPool) {
+    let st = state(
+        pool.clone(),
+        &[
+            ("PATCHWATCH_NTFY_URL", "http://127.0.0.1:9"),
+            ("PATCHWATCH_NTFY_TOPIC", "t"),
+        ],
+    );
+    let id = add_host(&pool, "web1", TOKEN).await;
+    sqlx::query("UPDATE hosts SET status = 'ok', last_report_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(Utc::now() - Duration::hours(27))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let n = hostops::mark_stale_hosts(&pool, Duration::hours(26))
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+    let status: String = sqlx::query_scalar("SELECT status FROM hosts WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "stale");
+    // Zweiter Lauf ändert nichts (kein Dauer-Alarm).
+    assert_eq!(
+        hostops::mark_stale_hosts(&pool, Duration::hours(26))
+            .await
+            .unwrap(),
+        0
+    );
+
+    assert_eq!(worker::process_events(&st).await.unwrap(), 1);
+    let (kind, payload): (String, Value) = sqlx::query_as("SELECT kind, payload FROM jobs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kind, "notify");
+    assert!(payload["title"].as_str().unwrap().starts_with("web1:"));
+    assert_eq!(worker::process_events(&st).await.unwrap(), 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn no_notification_job_without_ntfy_config(pool: PgPool) {
+    let st = state(pool.clone(), &[]);
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let mut tx = pool.begin().await.unwrap();
+    hostops::set_status(&mut tx, id, "stale").await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(worker::process_events(&st).await.unwrap(), 1);
+    let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(jobs, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn cleanup_removes_only_old_reports(pool: PgPool) {
+    let st = state(pool.clone(), &[]);
+    let id = add_host(&pool, "web1", TOKEN).await;
+    for days in [200, 181, 179, 1] {
+        sqlx::query("INSERT INTO reports (host_id, received_at, status, raw) VALUES ($1, now() - make_interval(days => $2), 'ok', '{}')")
+            .bind(id).bind(days).execute(&pool).await.unwrap();
+    }
+    worker::cleanup(&st).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM reports")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 2);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn job_queue_dedupes_retries_with_backoff_and_gives_up(pool: PgPool) {
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(
+        jobs::enqueue(&mut conn, "cleanup", json!({}), Utc::now(), Some("k1"))
+            .await
+            .unwrap()
+    );
+    assert!(
+        !jobs::enqueue(&mut conn, "cleanup", json!({}), Utc::now(), Some("k1"))
+            .await
+            .unwrap()
+    );
+    drop(conn);
+
+    // Ein Job kann nur einmal gleichzeitig geclaimt werden.
+    let j = jobs::claim(&pool).await.unwrap().unwrap();
+    assert_eq!(j.attempts, 1);
+    assert!(jobs::claim(&pool).await.unwrap().is_none());
+
+    // Fehlschlag: Job wird in die Zukunft verschoben.
+    jobs::fail(&pool, &j, "boom").await.unwrap();
+    assert!(jobs::claim(&pool).await.unwrap().is_none());
+    let (done, err): (Option<chrono::DateTime<Utc>>, Option<String>) =
+        sqlx::query_as("SELECT done_at, last_error FROM jobs WHERE id = $1")
+            .bind(j.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(done.is_none());
+    assert_eq!(err.as_deref(), Some("boom"));
+
+    // Nach MAX_ATTEMPTS wird aufgegeben.
+    let mut last = jobs::Job {
+        id: j.id,
+        kind: j.kind,
+        payload: j.payload,
+        attempts: jobs::MAX_ATTEMPTS,
+    };
+    last.attempts = jobs::MAX_ATTEMPTS;
+    jobs::fail(&pool, &last, "endgültig").await.unwrap();
+    let done: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT done_at FROM jobs WHERE id = $1")
+            .bind(j.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(done.is_some());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn health_endpoints(pool: PgPool) {
+    let app = router(state(pool, &[]));
+    assert_eq!(
+        call(&app, Method::GET, "/healthz", &[], None).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(&app, Method::GET, "/readyz", &[], None).await.status,
+        StatusCode::OK
+    );
+}
