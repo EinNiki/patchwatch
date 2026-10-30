@@ -1,0 +1,15 @@
+[package]
+name = "patchwatch-agent"
+version = "0.1.0"
+description = "Einmaliger Patch- und Kernel-Report für patchwatch"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+debversion = { path = "../crates/debversion" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }

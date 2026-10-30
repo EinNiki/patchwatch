@@ -1,0 +1,5 @@
+Inst libc6 [2.35-0ubuntu3.7] (2.35-0ubuntu3.8 Ubuntu:22.04/jammy-updates, Ubuntu:22.04/jammy-security [amd64])
+Inst linux-image-5.15.0-118-generic (5.15.0-118.128 Ubuntu:22.04/jammy-updates, Ubuntu:22.04/jammy-security [amd64])
+Inst vim [2:8.2.3995-1ubuntu2.17] (2:8.2.3995-1ubuntu2.18 Ubuntu:22.04/jammy-updates [amd64])
+Conf libc6 (2.35-0ubuntu3.8 Ubuntu:22.04/jammy-updates, Ubuntu:22.04/jammy-security [amd64])
+Conf vim (2:8.2.3995-1ubuntu2.18 Ubuntu:22.04/jammy-updates [amd64])
