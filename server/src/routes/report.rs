@@ -5,7 +5,7 @@ use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 
 pub const MAX_BODY: usize = 4 * 1024 * 1024;
@@ -250,13 +250,8 @@ pub async fn post_report(
             .await?;
     }
 
-    let status = hostops::recompute_host(
-        &mut tx,
-        host_id,
-        Duration::hours(st.cfg.stale_after_hours),
-        now,
-    )
-    .await?;
+    let stale_after = crate::schedule::stale_after(&st.pool, st.cfg.stale_after_hours).await;
+    let status = hostops::recompute_host(&mut tx, host_id, stale_after, now).await?;
     sqlx::query(
         "INSERT INTO reports (host_id, received_at, running_kernel, updates_pending, updates_security, reboot_needed, status, raw) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
@@ -274,13 +269,7 @@ pub async fn post_report(
     crate::live::notify(&mut tx, "report_received", Some(host_id), None).await;
     tx.commit().await?;
     // Kernel kann sich geändert haben: CVE-Bewertung neu berechnen. Ein Fehler hier lässt den Report nicht scheitern.
-    if let Err(e) = crate::cve::reeval::evaluate_host(
-        &st.pool,
-        host_id,
-        Duration::hours(st.cfg.stale_after_hours),
-    )
-    .await
-    {
+    if let Err(e) = crate::cve::reeval::evaluate_host(&st.pool, host_id, stale_after).await {
         tracing::error!(host = host_id, error = %e, "CVE-Bewertung nach Report fehlgeschlagen");
     }
     Ok(StatusCode::NO_CONTENT)

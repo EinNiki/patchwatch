@@ -23,6 +23,7 @@ struct FeedDb {
 pub struct FeedRow {
     source: String,
     configured: bool,
+    interval_minutes: i64,
     /// `ok`, `stale` (Fehler oder zu lange kein Erfolg) oder `never` (noch nie erfolgreich abgerufen).
     state: &'static str,
     healthy: bool,
@@ -55,14 +56,16 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
     .fetch_all(&st.pool)
     .await?;
     let now = Utc::now();
-    // Ohne Erfolg seit 3 Intervallen gilt ein Feed auch dann als veraltet, wenn kein Fehler gespeichert wurde.
-    let max_age = Duration::minutes(3 * st.cfg.cve.interval_minutes as i64);
     let configured = &st.cfg.cve.sources;
-    let mut out: Vec<FeedRow> = rows
-        .into_iter()
-        .map(|f| {
-            let (state, stale_since) = classify(&f, now, max_age);
+    let default = st.cfg.cve.interval_minutes as i64;
+    let mut out: Vec<FeedRow> = Vec::new();
+    for f in rows {
+        // Ohne Erfolg seit 3 Intervallen gilt ein Feed auch dann als veraltet, wenn kein Fehler gespeichert wurde.
+        let interval = crate::schedule::feed_interval_minutes(&st.pool, &f.source, default).await;
+        let (state, stale_since) = classify(&f, now, Duration::minutes(3 * interval));
+        out.push({
             FeedRow {
+                interval_minutes: interval,
                 configured: configured.contains(&f.source),
                 healthy: state == "ok",
                 state,
@@ -74,12 +77,14 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
                 last_error_at: f.last_error_at,
                 consecutive_failures: f.consecutive_failures,
             }
-        })
-        .collect();
+        });
+    }
     // Konfigurierte, aber noch nie gelaufene Quellen sichtbar machen (nie stillschweigend "grün").
     for s in configured {
         if !out.iter().any(|r| &r.source == s) {
             out.push(FeedRow {
+                interval_minutes: crate::schedule::feed_interval_minutes(&st.pool, s, default)
+                    .await,
                 source: s.clone(),
                 configured: true,
                 state: "never",

@@ -177,19 +177,64 @@ pub async fn refresh_all(state: &AppState) -> Vec<(&'static str, Outcome)> {
     out
 }
 
-/// Hintergrund-Scheduler: alle `interval_minutes` (Standard 60) plus bis zu 10 % Jitter.
+/// Fällig ist eine Quelle, wenn der letzte Versuch länger als ihr Intervall zurückliegt (oder es noch keinen gab).
+fn is_due(
+    last_attempt: Option<chrono::DateTime<chrono::Utc>>,
+    interval_minutes: i64,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    last_attempt.is_none_or(|t| now - t >= chrono::Duration::minutes(interval_minutes))
+}
+
+/// Hintergrund-Scheduler: prüft alle 30 s, welche Quellen nach ihrem eigenen Intervall fällig sind.
+/// Die Intervalle stehen in den Einstellungen und werden bei jedem Durchlauf neu gelesen (wirkt ohne Neustart).
 pub async fn run(state: AppState) {
     if !state.cfg.cve.enabled {
         tracing::info!("CVE-Feeds sind deaktiviert");
         return;
     }
-    let interval = Duration::from_secs(state.cfg.cve.interval_minutes * 60);
     tokio::time::sleep(Duration::from_secs(20) + jitter(10_000)).await;
     loop {
         // Läuft nie parallel zu einem manuell ausgelösten Abruf.
         if let Ok(_guard) = state.refresh_lock.try_lock() {
-            refresh_all(&state).await;
+            for src in build_sources(&state.cfg) {
+                let name = src.name();
+                let minutes = crate::schedule::feed_interval_minutes(
+                    &state.pool,
+                    name,
+                    state.cfg.cve.interval_minutes as i64,
+                )
+                .await;
+                let last: Option<chrono::DateTime<chrono::Utc>> =
+                    sqlx::query_scalar("SELECT last_attempt_at FROM feed_state WHERE source = $1")
+                        .bind(name)
+                        .fetch_optional(&state.pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .flatten();
+                if !is_due(last, minutes, chrono::Utc::now()) {
+                    continue;
+                }
+                if let Err(e) = refresh_source(&state, src.as_ref()).await {
+                    tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
+                }
+            }
         }
-        tokio::time::sleep(interval + jitter(interval.as_millis() as u64 / 10)).await;
+        tokio::time::sleep(Duration::from_secs(30) + jitter(2_000)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_due;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn due_after_interval() {
+        let now = Utc::now();
+        assert!(is_due(None, 60, now));
+        assert!(!is_due(Some(now - Duration::minutes(59)), 60, now));
+        assert!(is_due(Some(now - Duration::minutes(60)), 60, now));
     }
 }

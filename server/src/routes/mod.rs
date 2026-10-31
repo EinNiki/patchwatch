@@ -3,7 +3,7 @@ mod auth;
 pub mod cves;
 mod feeds;
 mod health;
-mod hosts;
+pub mod hosts;
 mod live;
 mod matrix;
 mod notifications;

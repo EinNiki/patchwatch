@@ -3,7 +3,7 @@ use crate::jobs::{self, Job};
 use crate::live;
 use crate::notify::{self, events, store};
 use crate::state::AppState;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde_json::{json, Value};
 use sqlx::postgres::PgListener;
 use std::time::Duration as StdDuration;
@@ -222,6 +222,22 @@ fn known_tag(t: &str) -> Option<&'static str> {
     .find(|k| *k == t)
 }
 
+/// Serverseitiger Report-Zeitplan: zur fälligen Zeit wird bei allen Hosts ein Report angefordert.
+/// Das Beanspruchen des Laufs ist atomar (auch bei mehreren Instanzen kein doppeltes Auslösen).
+async fn request_reports_if_due(state: &AppState) -> anyhow::Result<()> {
+    let sched = crate::schedule::report_schedule(&state.pool).await;
+    let now = Utc::now();
+    let last = crate::schedule::reports_last_run(&state.pool).await;
+    let Some(due) = sched.last_due(last, now) else {
+        return Ok(());
+    };
+    if crate::schedule::claim_report_run(&state.pool, due, now).await? {
+        let (requested, total) = crate::routes::hosts::request_all(&state.pool).await?;
+        tracing::info!(requested, total, "Geplante Report-Anforderung");
+    }
+    Ok(())
+}
+
 /// Minütlicher Scheduler: Stale-Erkennung, tägliches Cleanup, Tageszusammenfassung.
 pub async fn scheduler(state: AppState) {
     let mut interval = tokio::time::interval(StdDuration::from_secs(60));
@@ -234,8 +250,9 @@ pub async fn scheduler(state: AppState) {
 }
 
 pub async fn schedule_once(state: &AppState) -> anyhow::Result<()> {
-    let stale_after = Duration::hours(state.cfg.stale_after_hours);
+    let stale_after = crate::schedule::stale_after(&state.pool, state.cfg.stale_after_hours).await;
     hostops::mark_stale_hosts(&state.pool, stale_after).await?;
+    request_reports_if_due(state).await?;
 
     let now = Utc::now();
     let mut conn = state.pool.acquire().await?;

@@ -583,3 +583,152 @@ async fn settings_retention_is_validated_and_used_by_cleanup(pool: PgPool) {
         "nur der 100 Tage alte Report fliegt raus (UI-Wert 30 schlägt Standard 180)"
     );
 }
+
+async fn put_settings(app: &Router, s: &(String, String), body: Value) -> Resp {
+    call(app, Method::PUT, "/api/v1/settings", Some(s), Some(body))
+        .await
+        .0
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn schedule_settings_are_validated_atomically(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let (r, _) = call(&app, Method::GET, "/api/v1/settings", Some(&s), None).await;
+    assert_eq!(r.json["stale_after_hours"], 26);
+    assert_eq!(r.json["report_schedule"]["mode"], "off");
+    assert!(r.json["checkin_interval_hint"]
+        .as_str()
+        .unwrap()
+        .contains("agent.toml"));
+    assert_eq!(r.json["feeds"][0]["interval_minutes"], 60);
+
+    for bad in [
+        json!({"stale_after_hours": 0}),
+        json!({"stale_after_hours": 721}),
+        json!({"feed_intervals": {"ubuntu": 14}}),
+        json!({"feed_intervals": {"ubuntu": 1441}}),
+        json!({"feed_intervals": {"gibtsnicht": 60}}),
+        json!({"feed_intervals": {"x'; DROP TABLE settings;--": 60}}),
+        json!({"report_schedule": {"mode": "interval", "every_hours": 0}}),
+        json!({"report_schedule": {"mode": "daily", "at": "25:00", "tz": "UTC"}}),
+        json!({"report_schedule": {"mode": "daily", "at": "04:00", "tz": "Mars/Base"}}),
+        json!({"report_schedule": {"mode": "cron", "expr": "* * * * *"}}),
+        // ein ungültiger Teil verwirft die ganze Anfrage
+        json!({"stale_after_hours": 48, "feed_intervals": {"ubuntu": 5}}),
+    ] {
+        let r = put_settings(&app, &s, bad.clone()).await;
+        assert!(r.status.is_client_error(), "{bad}");
+    }
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM settings WHERE key LIKE 'schedule.%' OR key = 'stale_after_hours'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 0, "abgelehnte Anfragen schreiben nichts");
+
+    let r = put_settings(
+        &app,
+        &s,
+        json!({
+            "stale_after_hours": 48,
+            "feed_intervals": {"ubuntu": 15},
+            "report_schedule": {"mode": "daily", "at": "04:00", "tz": "Europe/Berlin"},
+        }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let (r, _) = call(&app, Method::GET, "/api/v1/settings", Some(&s), None).await;
+    assert_eq!(r.json["stale_after_hours"], 48);
+    assert_eq!(r.json["report_schedule"]["tz"], "Europe/Berlin");
+    let ubuntu = r.json["feeds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["source"] == "ubuntu")
+        .unwrap();
+    assert_eq!(ubuntu["interval_minutes"], 15);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn report_schedule_requests_reports_once_per_due_time(pool: PgPool) {
+    use chrono::{Duration, Utc};
+    use patchwatch_server::schedule;
+    let (app, s) = setup(&pool).await;
+    let h = host(&pool, "web1", "noble").await;
+    let r = put_settings(
+        &app,
+        &s,
+        json!({"report_schedule": {"mode": "interval", "every_hours": 1}}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let st = AppState::new(pool.clone(), Config::from_sources(None, &|_| None).unwrap()).unwrap();
+
+    // Gerade gespeichert: noch nicht fällig, nichts passiert.
+    worker::schedule_once(&st).await.unwrap();
+    let requested = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT report_requested_at IS NOT NULL FROM hosts WHERE id = $1",
+        )
+        .bind(h)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    assert!(!requested(pool.clone()).await);
+
+    // Letzter Lauf vor 61 Minuten: fällig, setzt die Anforderung genau einmal.
+    let old = (Utc::now() - Duration::minutes(61)).to_rfc3339();
+    schedule::set(&pool, schedule::REPORTS_LAST_RUN_KEY, &json!(old))
+        .await
+        .unwrap();
+    worker::schedule_once(&st).await.unwrap();
+    assert!(requested(pool.clone()).await);
+    sqlx::query("UPDATE hosts SET report_requested_at = NULL, last_report_request_at = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    worker::schedule_once(&st).await.unwrap();
+    assert!(
+        !requested(pool.clone()).await,
+        "zweiter Durchlauf löst nicht doppelt aus"
+    );
+
+    // Der Claim ist atomar: derselbe Zeitpunkt lässt sich nur einmal beanspruchen.
+    let due = Utc::now() + Duration::hours(2);
+    let now = due + Duration::seconds(1);
+    assert!(schedule::claim_report_run(&pool, due, now).await.unwrap());
+    assert!(!schedule::claim_report_run(&pool, due, now).await.unwrap());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn stale_threshold_from_settings_applies_without_restart(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let h = host(&pool, "web1", "noble").await;
+    sqlx::query(
+        "UPDATE hosts SET last_report_at = now() - interval '5 hours', status = 'ok' WHERE id = $1",
+    )
+    .bind(h)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let st = AppState::new(pool.clone(), Config::from_sources(None, &|_| None).unwrap()).unwrap();
+    worker::schedule_once(&st).await.unwrap();
+    let status = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, String>("SELECT status FROM hosts WHERE id = $1")
+            .bind(h)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(status(pool.clone()).await, "ok", "Standard 26 h");
+    assert_eq!(
+        put_settings(&app, &s, json!({"stale_after_hours": 2}))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    worker::schedule_once(&st).await.unwrap();
+    assert_eq!(status(pool.clone()).await, "stale", "2 h gilt sofort");
+}

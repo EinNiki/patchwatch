@@ -324,12 +324,10 @@ pub async fn request_report(
     Ok(Json(json!({ "requested": 1 })))
 }
 
-/// "Alle aktualisieren": gleiche Regel je Host; Hosts im Cooldown werden übersprungen.
-pub async fn request_report_all(
-    CsrfAdmin(_): CsrfAdmin,
-    State(st): State<AppState>,
-) -> ApiResult<Json<Value>> {
-    let mut tx = st.pool.begin().await?;
+/// Fordert bei allen Hosts einen Report an (Cooldown je Host); liefert (angefordert, gesamt).
+/// Der Server sagt dem Agent weiterhin nur "jetzt melden"; genutzt von der Route und vom Zeitplan.
+pub async fn request_all(pool: &sqlx::PgPool) -> sqlx::Result<(i64, i64)> {
+    let mut tx = pool.begin().await?;
     let requested = sqlx::query(
         "UPDATE hosts SET report_requested_at = now(), report_dispatched_at = NULL, last_report_request_at = now() \
          WHERE last_report_request_at IS NULL OR last_report_request_at < now() - make_interval(secs => $1)",
@@ -345,6 +343,15 @@ pub async fn request_report_all(
         crate::live::notify(&mut tx, "report_requested", None, None).await;
     }
     tx.commit().await?;
+    Ok((requested, total))
+}
+
+/// "Alle aktualisieren": gleiche Regel je Host; Hosts im Cooldown werden übersprungen.
+pub async fn request_report_all(
+    CsrfAdmin(_): CsrfAdmin,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Value>> {
+    let (requested, total) = request_all(&st.pool).await?;
     Ok(Json(
         json!({ "requested": requested, "skipped": total - requested }),
     ))

@@ -9,6 +9,7 @@ pub mod live;
 pub mod notify;
 pub mod ratelimit;
 pub mod routes;
+pub mod schedule;
 pub mod security;
 pub mod state;
 pub mod status;
