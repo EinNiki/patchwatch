@@ -232,6 +232,12 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
           <Mono>openssl rand -base64 32</Mono>, sichere ihn getrennt von der Datenbank und starte den Server neu.
         </p>
       ) : null}
+      {ch.last_error ? (
+        <p role="status" className="mb-4 flex max-w-prose items-start gap-2 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
+          <Icon name="warn" />
+          Letzter Versand fehlgeschlagen: {ch.last_error}.
+        </p>
+      ) : null}
       {error ? <div className="mb-4 max-w-prose"><ErrorNote message={error} /></div> : null}
       {test ? (
         <p role="status" className={`mb-4 flex max-w-prose items-start gap-2 border-l-4 px-3 py-2 ${test.ok ? "border-ok bg-ok-soft text-ok" : "border-warn bg-warn-soft text-warn"}`}>
@@ -241,9 +247,10 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
       ) : null}
       {saved ? <p role="status" className="mb-4 text-ok">Gespeichert.</p> : null}
 
-      <form onSubmit={(e) => void save(e)} className="max-w-xl">
+      <form onSubmit={(e) => void save(e)} className="max-w-xl xl:max-w-[64rem]">
         <Checkbox className="mb-4" label="Kanal aktiv" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
 
+        <div className="xl:grid xl:grid-cols-2 xl:items-start xl:gap-x-12">
         {spec.config.length > 0 || spec.secret ? (
           <fieldset className="mb-6 flex flex-col gap-4">
             <legend className="mb-2 text-lg font-semibold">Zugang</legend>
@@ -357,6 +364,8 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
           ) : null}
           <p className="mt-3 text-xs text-fg3">Proxmox-Hosts mit unbekannter CVE-Lage lösen bewusst keinen Alarm aus.</p>
         </fieldset>
+
+        </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" variant="primary" busy={saving} disabled={!dirty}>

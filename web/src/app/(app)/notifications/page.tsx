@@ -29,8 +29,7 @@ export default function NotificationsPage() {
         n.error ? null : <Loading what="Kanäle" />
       ) : (
         <>
-        <p className="hidden text-fg3 lg:block">Wähle links einen Kanal, um Zugang und Ereignisse einzustellen.</p>
-        <div className="lg:hidden">
+        <div>
           <table className="tbl stack">
             <caption>Benachrichtigungskanäle mit Zustand</caption>
             <thead>
@@ -38,7 +37,7 @@ export default function NotificationsPage() {
                 <th scope="col"><span className="th-pad">Kanal</span></th>
                 <th scope="col"><span className="th-pad">Zustand</span></th>
                 <th scope="col"><span className="th-pad">Ereignisse</span></th>
-                <th scope="col"><span className="th-pad">Letztes Ergebnis</span></th>
+                <th scope="col"><span className="th-pad">Letzte Testnachricht / Versand</span></th>
               </tr>
             </thead>
             <tbody>

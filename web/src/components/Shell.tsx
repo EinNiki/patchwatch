@@ -7,7 +7,7 @@ import { useApi } from "@/lib/useApi";
 import { CHANNELS } from "@/lib/channels";
 import { useLiveState } from "@/lib/live";
 import { useStoredFlag } from "@/lib/useStoredFlag";
-import type { Feed } from "@/lib/types";
+import type { Feed, ChannelView, NotificationsResponse } from "@/lib/types";
 import { useAuth } from "./AuthProvider";
 import { feedSummary } from "./FeedStatus";
 import { Icon, Logo, NavIcon, type NavIconName } from "./Icons";
@@ -38,6 +38,14 @@ function pageName(pathname: string): string {
 }
 
 /** Nur in der Icon-Rail (768–1023 px) ausgeblendet: Text bleibt für Screenreader erhalten. */
+/** Zustand eines Kanals für die Seitenleiste: Symbol plus Text, nie nur Farbe. */
+function channelState(ch: ChannelView | undefined): { icon: "ok" | "warn" | "pending"; tone: string; text: string } | null {
+  if (!ch) return null;
+  if (ch.last_error) return { icon: "warn", tone: "text-warn", text: `Fehler, ${ch.last_error}` };
+  if (ch.enabled) return { icon: "ok", tone: "text-ok", text: "aktiv" };
+  return { icon: "pending", tone: "text-fg3", text: "aus" };
+}
+
 const RAIL_SR = "md:max-lg:sr-only";
 
 function FeedStrip() {
@@ -91,6 +99,7 @@ function NavLinks({ pathname }: { pathname: string }) {
   const [stored, setStored] = useStoredFlag("pw-nav:notifications");
   const onSub = pathname.startsWith("/notifications/");
   const expanded = onSub || stored === true;
+  const channels = useApi<NotificationsResponse>("/notifications", 60_000).data?.channels;
 
   return (
     <nav aria-label="Hauptnavigation" className="flex flex-col gap-0.5 px-2">
@@ -139,14 +148,22 @@ function NavLinks({ pathname }: { pathname: string }) {
                     {CHANNELS.map((c) => {
                       const href = `/notifications/${c.kind}`;
                       const here = pathname === href;
+                      const st = channelState(channels?.find((x) => x.kind === c.kind));
                       return (
                         <li key={c.kind}>
                           <Link
                             href={href}
                             aria-current={here ? "page" : undefined}
-                            className={`flex min-h-9 items-center rounded-sm border-l-2 py-1 pl-10 pr-3 no-underline max-md:min-h-11 ${rowState(here)}`}
+                            aria-label={st ? `${c.label}: ${st.text}` : undefined}
+                            title={st ? `${c.label}: ${st.text}` : undefined}
+                            className={`flex min-h-9 items-center gap-2 rounded-sm border-l-2 py-1 pl-10 pr-3 no-underline max-md:min-h-11 ${rowState(here)}`}
                           >
-                            {c.label}
+                            <span className="min-w-0 flex-1 truncate">{c.label}</span>
+                            {st ? (
+                              <span aria-hidden="true" className={st.tone}>
+                                <Icon name={st.icon} size={16} />
+                              </span>
+                            ) : null}
                           </Link>
                         </li>
                       );
