@@ -28,7 +28,7 @@ await page.getByLabel("Passwort").fill(pw);
 await page.getByRole("button", { name: "Anmelden" }).click();
 await page.waitForURL((u) => !u.pathname.startsWith("/login"));
 await page.goto("http://127.0.0.1:3100/agents");
-await page.getByText("Live", { exact: true }).waitFor();
+await page.locator("span:visible", { hasText: /^Live$/ }).first().waitFor();
 await page.evaluate(() => (window.__noReload = true));
 const row = page.getByRole("row").filter({ hasText: "e2e-agent" });
 await row.waitFor();
