@@ -3,13 +3,9 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
-import { absTime } from "@/lib/format";
-import type { CveDetail, CveListItem, Feed } from "@/lib/types";
-import type { StatusInfo } from "@/lib/status";
-import { StatusBadge } from "@/components/StatusBadge";
-import { Mono } from "@/components/Version";
+import type { CveDetail, CveListItem } from "@/lib/types";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
@@ -18,15 +14,10 @@ import { useFlash } from "@/lib/useFlash";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { DistroChip } from "@/components/DistroChip";
 import { PageHeader } from "@/components/PageHeader";
+import { FeedSources } from "@/components/FeedSources";
 
 const PAGE = 100;
 const CVE_RE = /^CVE-\d{4}-\d{4,7}$/;
-
-const FEED_STATE: Record<Feed["state"], StatusInfo> = {
-  ok: { label: "Aktuell", tone: "ok", icon: "ok", rank: 0 },
-  stale: { label: "Veraltet", tone: "warn", icon: "clock", rank: 1 },
-  never: { label: "Noch nie abgerufen", tone: "unknown", icon: "unknown", rank: 2 },
-};
 
 const FIX_LABEL: Record<string, string> = { fixed: "gefixt", open: "offen" };
 const LEGACY_SPLIT: Record<string, { debian: string; ubuntu: string }> = {
@@ -42,89 +33,6 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => clearTimeout(t);
   }, [value, ms]);
   return v;
-}
-
-function FeedPanel() {
-  const feeds = useApi<Feed[]>("/feeds", 30_000);
-  const [note, setNote] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  async function refresh() {
-    setProblem(null);
-    try {
-      await api.post("/feeds/refresh");
-      setNote("Abruf gestartet. Die Anzeige aktualisiert sich in einigen Sekunden.");
-      setTimeout(() => void feeds.reload(), 5000);
-      setTimeout(() => void feeds.reload(), 20_000);
-    } catch (e) {
-      setProblem(e instanceof ApiError && e.status === 409 ? "Ein Abruf läuft bereits." : "Abruf konnte nicht gestartet werden.");
-    }
-  }
-
-  return (
-    <section id="feeds" aria-labelledby="feeds-h" className="mb-6 scroll-mt-4">
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 id="feeds-h" className="text-lg font-semibold">
-          CVE-Feeds
-        </h2>
-        <Button onClick={() => void refresh()}>Jetzt abrufen</Button>
-        <span role="status" className="text-fg2">
-          {note}
-        </span>
-      </div>
-      {problem ? <ErrorNote message={problem} /> : null}
-      {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
-      {!feeds.data ? null : feeds.data.length === 0 ? (
-        <Empty title="Keine CVE-Quelle konfiguriert">
-          Setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> (ubuntu, debian, osv) in der Server-Konfiguration.
-        </Empty>
-      ) : (
-        <div className="max-xl:overflow-x-auto">
-          <table className="tbl stack">
-            <caption>Zustand der CVE-Feeds</caption>
-            <thead>
-              <tr>
-                <th scope="col"><span className="th-pad">Quelle</span></th>
-                <th scope="col"><span className="th-pad">Zustand</span></th>
-                <th scope="col"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
-                <th scope="col"><span className="th-pad">Letzter Versuch</span></th>
-                <th scope="col"><span className="th-pad">Fehler</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {feeds.data.map((f) => (
-                <tr key={f.source}>
-                  <td className="cell-primary">
-                    <Mono>{f.source}</Mono>
-                    {!f.configured ? <span className="ml-2 text-xs text-fg3">nicht aktiv</span> : null}
-                  </td>
-                  <td className="cell-status lead">
-                    <StatusBadge info={FEED_STATE[f.state]} label={f.state === "stale" && f.stale_since ? `Veraltet seit ${absTime(f.stale_since)}` : undefined} />
-                  </td>
-                  <td data-label="Letzter Erfolg">
-                    <RelTime iso={f.last_success_at} />
-                    {f.last_success_at ? <div className="text-xs text-fg3 max-md:hidden">{absTime(f.last_success_at)}</div> : null}
-                  </td>
-                  <td data-label="Letzter Versuch">
-                    <RelTime iso={f.last_attempt_at} />
-                  </td>
-                  <td className="max-w-[28rem] max-md:max-w-none">
-                    {f.last_error ? (
-                      <span className="text-warn">
-                        {f.last_error} <span className="text-fg3">({f.consecutive_failures}× in Folge)</span>
-                      </span>
-                    ) : (
-                      <span className="text-fg3">–</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
 }
 
 function CveView() {
@@ -249,7 +157,7 @@ function CveView() {
   return (
     <>
       <PageHeader title="CVEs" count={cves.data ? `${cves.data.length}${cves.data.length >= limit ? "+" : ""} angezeigt` : undefined} />
-      <FeedPanel />
+      <FeedSources />
 
       <section aria-labelledby="wl-h">
         <h2 id="wl-h" className="mb-2 text-lg font-semibold">
@@ -383,6 +291,7 @@ function CveView() {
                         <Link href={`/cves/${c.id}`} className="mono whitespace-nowrap font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.id}`)} onFocus={() => prefetchApi(`/cves/${c.id}`)}>
                           {c.id}
                         </Link>
+                        {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
                         {c.priority ? <div className="text-xs text-fg3 wide:hidden">Priorität {c.priority}</div> : null}
                       </td>
                       <td className="w-full min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">

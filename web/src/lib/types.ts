@@ -89,6 +89,8 @@ export interface Cve {
   updated_at: string;
   watched: boolean;
   note: string | null;
+  /** In der CISA-KEV-Liste (aktiv ausgenutzt). */
+  exploited: boolean;
   hosts_vulnerable: number;
   hosts_fix_pending: number;
   hosts_unknown: number;
@@ -174,9 +176,17 @@ export interface Settings {
 
 export interface Feed {
   source: string;
+  kind: "builtin" | "managed";
+  enabled: boolean;
+  /** Alt-Feld: eingeschaltet. */
   configured: boolean;
+  enrich_only: boolean;
+  takes_secret: boolean;
+  takes_base_url: boolean;
+  secret_set: boolean;
+  base_url: string | null;
   interval_minutes: number;
-  state: "ok" | "stale" | "never";
+  state: "ok" | "stale" | "never" | "disabled";
   healthy: boolean;
   last_attempt_at: string | null;
   last_success_at: string | null;

@@ -10,10 +10,11 @@ export const FEED_OK: StatusInfo = { label: "CVE-Feeds aktuell", tone: "ok", ico
  */
 export function feedSummary(feeds: Feed[] | undefined): { info: StatusInfo; label: string; ok: boolean } | null {
   if (!feeds) return null;
-  const active = feeds.filter((f) => f.configured);
+  const active = feeds.filter((f) => f.enabled);
   if (active.length === 0) {
-    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: "Keine CVE-Quelle konfiguriert", ok: false };
+    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: feeds.length ? "Alle CVE-Quellen abgeschaltet" : "Keine CVE-Quelle konfiguriert", ok: false };
   }
+  const disabled = feeds.filter((f) => !f.enabled);
   const stale = active.filter((f) => f.state === "stale");
   const never = active.filter((f) => f.state === "never");
   if (stale.length > 0) {
@@ -23,6 +24,10 @@ export function feedSummary(feeds: Feed[] | undefined): { info: StatusInfo; labe
   }
   if (never.length > 0) {
     return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: `CVE-Feed ${never[0]!.source} noch nie abgerufen`, ok: false };
+  }
+  // Eine abgeschaltete Quelle ist nie grün: die Daten dieser Quelle fehlen in der Bewertung.
+  if (disabled.length > 0) {
+    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: `CVE-Quelle ${disabled[0]!.source} abgeschaltet`, ok: false };
   }
   return { info: FEED_OK, label: FEED_OK.label, ok: true };
 }
