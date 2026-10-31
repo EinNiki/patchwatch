@@ -38,26 +38,27 @@ async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
     })
 }
 
-async fn context(state: &AppState, name: &str) -> Result<FetchCtx> {
+async fn context(state: &AppState, id: &str, kind: &str) -> Result<FetchCtx> {
     let watch_missing = sqlx::query_scalar(
         "SELECT w.cve_id FROM cve_watchlist w WHERE NOT EXISTS \
-         (SELECT 1 FROM cve_source_status s WHERE s.cve_id = w.cve_id AND s.source = $1) ORDER BY w.cve_id",
+         (SELECT 1 FROM cve_source_status s WHERE s.cve_id = w.cve_id AND s.source_id = $1) ORDER BY w.cve_id",
     )
-    .bind(name)
+    .bind(id)
     .fetch_all(&state.pool)
     .await?;
-    let hosts = if name == "osv" {
+    let hosts = if kind == "osv" {
         reeval::host_refs(&state.pool).await?
     } else {
         Vec::new()
     };
     // Anreicherung (NVD): nur bereits bekannte CVEs, die für Hosts relevant sind oder auf der Watchlist stehen.
-    let enrich = if name == "nvd" {
+    let enrich = if kind == "nvd" {
         sqlx::query_scalar(
-            "SELECT c.id FROM cves c WHERE NOT EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'nvd') \
+            "SELECT c.id FROM cves c WHERE NOT EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source_id = $1) \
              AND (EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) OR EXISTS (SELECT 1 FROM host_cve_status h WHERE h.cve_id = c.id)) \
              ORDER BY EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) DESC, c.id LIMIT 200",
         )
+        .bind(id)
         .fetch_all(&state.pool)
         .await?
     } else {
@@ -124,10 +125,12 @@ async fn restrict_to_known(state: &AppState, records: Vec<Record>) -> Result<Vec
 }
 
 /// Ruft eine Quelle ab und führt Buch über Erfolg und Misserfolg.
-pub async fn refresh_source(state: &AppState, src: &dyn CveSource) -> Result<Outcome> {
-    let name = src.name();
+pub async fn refresh_source(state: &AppState, id: &str, src: &dyn CveSource) -> Result<Outcome> {
+    // `kind` ist der Typ der Quelle (steht in cve_source_status.source), `name` die stabile ID für Feed-Zustand und Meldungen.
+    let kind = src.name();
+    let name = id;
     let feed_state = load_state(state, name).await?;
-    let ctx = context(state, name).await?;
+    let ctx = context(state, id, kind).await?;
 
     match src.fetch(&state.http, &feed_state, &ctx).await {
         Ok(FetchOutcome::NotModified) => {
@@ -142,14 +145,14 @@ pub async fn refresh_source(state: &AppState, src: &dyn CveSource) -> Result<Out
             state: new_state,
         }) => {
             // Daten und Feed-Zustand gemeinsam übernehmen: schlägt das Speichern fehl, bleibt der alte Stand.
-            let enrich = sources::enrich_only(name);
+            let enrich = sources::enrich_only(kind);
             let records = if enrich {
                 restrict_to_known(state, records).await?
             } else {
                 records
             };
             let mut tx = state.pool.begin().await?;
-            let stats = match ingest::ingest_with(&mut tx, name, &records, !enrich).await {
+            let stats = match ingest::ingest_with(&mut tx, kind, id, &records, !enrich).await {
                 Ok(s) => s,
                 Err(e) => {
                     drop(tx);
@@ -192,27 +195,23 @@ pub async fn refresh_source(state: &AppState, src: &dyn CveSource) -> Result<Out
     }
 }
 
-/// Alle eingeschalteten Quellen nacheinander abrufen. Abgeschaltete Quellen werden nicht abgerufen (und nie als "ok" gezeigt).
-pub async fn refresh_all(state: &AppState) -> Vec<(&'static str, Outcome)> {
+/// Alle eingeschalteten Quellen nacheinander abrufen (Ergebnis je stabiler Quellen-ID). Abgeschaltete oder gelöschte
+/// Quellen werden nicht abgerufen (und nie als "ok" gezeigt).
+pub async fn refresh_all(state: &AppState) -> Vec<(String, Outcome)> {
     let mut out = Vec::new();
-    for (name, built) in sources::build_enabled(state).await {
-        let name: &'static str = sources::KNOWN
-            .iter()
-            .copied()
-            .find(|k| *k == name)
-            .unwrap_or("cve_sources");
-        match built {
-            Ok(src) => match refresh_source(state, src.as_ref()).await {
-                Ok(o) => out.push((name, o)),
+    for b in sources::build_enabled(state).await {
+        match b.source {
+            Ok(src) => match refresh_source(state, &b.id, src.as_ref()).await {
+                Ok(o) => out.push((b.id, o)),
                 Err(e) => {
-                    tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
-                    out.push((name, Outcome::Failed(e.to_string())));
+                    tracing::error!(source = %b.id, error = %e, "Feed-Verarbeitung fehlgeschlagen");
+                    out.push((b.id, Outcome::Failed(e.to_string())));
                 }
             },
-            Err(e) => out.push((
-                name,
-                Outcome::Failed(fail_unbuildable(state, name, &e).await),
-            )),
+            Err(e) => {
+                let msg = fail_unbuildable(state, &b.id, &e).await;
+                out.push((b.id, Outcome::Failed(msg)));
+            }
         }
     }
     out
@@ -256,7 +255,9 @@ pub async fn run(state: AppState) {
     loop {
         // Läuft nie parallel zu einem manuell ausgelösten Abruf.
         if let Ok(_guard) = state.refresh_lock.try_lock() {
-            for (name, built) in sources::build_enabled(&state).await {
+            for b in sources::build_enabled(&state).await {
+                let name = b.id.clone();
+                let built = b.source;
                 let minutes = crate::schedule::feed_interval_minutes(
                     &state.pool,
                     &name,
@@ -276,7 +277,7 @@ pub async fn run(state: AppState) {
                 }
                 match built {
                     Ok(src) => {
-                        if let Err(e) = refresh_source(&state, src.as_ref()).await {
+                        if let Err(e) = refresh_source(&state, &name, src.as_ref()).await {
                             tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
                         }
                     }

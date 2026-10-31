@@ -26,6 +26,8 @@ pub struct Osv {
     /// An die geprüfte Adresse gebundener Client (nur bei Spiegel-Override), sonst der gemeinsame.
     client: Option<reqwest::Client>,
     lim: Limits,
+    /// Nur Hosts dieses Ökosystems abfragen (z. B. `Debian:13`); sonst alle.
+    eco: Option<String>,
 }
 
 impl Osv {
@@ -44,7 +46,13 @@ impl Osv {
                 attempts: c.retries,
                 base_delay: Duration::from_millis(c.retry_base_delay_ms),
             },
+            eco: None,
         }
+    }
+
+    pub fn with_ecosystem(mut self, eco: Option<String>) -> Self {
+        self.eco = eco.filter(|e| !e.is_empty());
+        self
     }
 }
 
@@ -184,6 +192,13 @@ impl CveSource for Osv {
         let mut queries: BTreeMap<(String, String, String), (String, &HostRef)> = BTreeMap::new();
         for h in &ctx.hosts {
             if let Some(eco) = ecosystem(&h.distro_id, &h.os_version) {
+                if self
+                    .eco
+                    .as_deref()
+                    .is_some_and(|want| !eco.eq_ignore_ascii_case(want))
+                {
+                    continue;
+                }
                 queries.insert(
                     (eco.clone(), h.package.clone(), h.version.clone()),
                     (eco, h),

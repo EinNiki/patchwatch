@@ -35,9 +35,12 @@ pub async fn recompute_host(
     now: DateTime<Utc>,
 ) -> sqlx::Result<HostStatus> {
     #[allow(clippy::type_complexity)]
-    let row: (Option<DateTime<Utc>>, Option<bool>, Option<bool>, Option<i32>, Option<i32>, bool) = sqlx::query_as(
+    let row: (Option<DateTime<Utc>>, Option<bool>, Option<bool>, Option<i32>, Option<i32>, bool, bool) = sqlx::query_as(
         "SELECT last_report_at, reboot_required_file, reboot_needed_kernel, updates_pending, updates_security, \
-         EXISTS (SELECT 1 FROM host_cve_status c WHERE c.host_id = hosts.id AND c.status = 'vulnerable') \
+         EXISTS (SELECT 1 FROM host_cve_status c WHERE c.host_id = hosts.id AND c.status = 'vulnerable'), \
+         EXISTS (SELECT 1 FROM settings WHERE key = 'cve_sources.seeded') AND NOT is_proxmox \
+           AND os_id IN ('debian', 'ubuntu') \
+           AND NOT EXISTS (SELECT 1 FROM cve_sources d WHERE d.kind = hosts.os_id AND d.enabled AND d.deleted_at IS NULL) \
          FROM hosts WHERE id = $1",
     )
     .bind(host_id)
@@ -50,6 +53,7 @@ pub async fn recompute_host(
         updates_pending: row.3.unwrap_or(0),
         updates_security: row.4.unwrap_or(0),
         cve_vulnerable: row.5,
+        cve_source_missing: row.6,
     };
     let status = status::derive(&snap, now, stale_after);
     set_status(conn, host_id, status.as_str()).await?;

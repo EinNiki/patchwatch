@@ -204,7 +204,12 @@ pub async fn cleanup(state: &AppState) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM events WHERE processed_at < now() - interval '30 days'")
         .execute(&state.pool)
         .await?;
-    tracing::info!(reports_deleted = reports, "Cleanup abgeschlossen");
+    let sources = crate::cve::sources::purge_deleted(&state.pool).await?;
+    tracing::info!(
+        reports_deleted = reports,
+        sources_purged = sources,
+        "Cleanup abgeschlossen"
+    );
     Ok(())
 }
 

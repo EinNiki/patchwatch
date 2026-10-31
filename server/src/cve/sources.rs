@@ -38,45 +38,138 @@ pub fn takes_base_url(name: &str) -> bool {
     matches!(name, "osv" | "nvd" | "cisa_kev")
 }
 
-/// AAD der Verschlüsselung: der Quellenname, damit ein Geheimnis nicht für eine andere Quelle taugt.
-fn aad(name: &str) -> String {
-    format!("cve_source:{name}")
+/// OSV kann auf ein Ökosystem eingeschränkt werden (z. B. `Debian:13`).
+pub fn takes_ecosystem(kind: &str) -> bool {
+    kind == "osv"
+}
+
+/// Anzeigename des Typs (Vorgabe für den Namen beim Hinzufügen).
+pub fn kind_title(kind: &str) -> &'static str {
+    match kind {
+        "debian" => "Debian",
+        "ubuntu" => "Ubuntu",
+        "osv" => "OSV",
+        "nvd" => "NVD",
+        "cisa_kev" => "CISA KEV",
+        _ => "Quelle",
+    }
+}
+
+/// AAD der Verschlüsselung: die stabile Quellen-ID, damit ein Geheimnis nicht für eine andere Quelle taugt.
+/// Bestehende Quellen behalten ihre ID (= alter Name), die AAD ist für sie unverändert.
+fn aad(id: &str) -> String {
+    format!("cve_source:{id}")
+}
+
+/// Neue stabile ID: Typ plus Zufall (nie vom Anzeigenamen abgeleitet, der sich ändern darf).
+pub fn new_id(kind: &str) -> String {
+    use argon2::password_hash::rand_core::{OsRng, RngCore};
+    let mut b = [0u8; 5];
+    OsRng.fill_bytes(&mut b);
+    format!(
+        "{kind}-{}",
+        b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+    )
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct SourceRow {
-    pub name: String,
+    pub id: String,
+    pub kind: String,
+    pub label: String,
     pub enabled: bool,
     pub base_url: Option<String>,
+    pub ecosystem: Option<String>,
     /// Nie das Geheimnis selbst, nur ob eines gespeichert ist.
     pub secret_set: bool,
 }
 
-/// Legt die in der Konfiguration genannten Quellen an, falls es sie noch nicht gibt (ein Abschalten bleibt bestehen).
+const SEEDED_KEY: &str = "cve_sources.seeded";
+
+/// Legt beim ersten Start Debian, Ubuntu und die in der Konfiguration genannten Quellen an. Danach nie wieder:
+/// eine gelöschte Quelle kommt nicht von selbst zurück.
 pub async fn ensure_seeded(state: &AppState) -> Result<()> {
-    for name in BUILTIN
+    let done: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM settings WHERE key = $1)")
+        .bind(SEEDED_KEY)
+        .fetch_one(&state.pool)
+        .await?;
+    if done {
+        return Ok(());
+    }
+    let mut tx = state.pool.begin().await?;
+    for kind in BUILTIN
         .iter()
         .map(|s| s.to_string())
         .chain(state.cfg.cve.sources.iter().cloned())
     {
-        if !is_known(&name) || (is_builtin(&name) && !state.cfg.cve.sources.contains(&name)) {
+        if !is_known(&kind) || (is_builtin(&kind) && !state.cfg.cve.sources.contains(&kind)) {
             continue;
         }
-        sqlx::query("INSERT INTO cve_sources (name) VALUES ($1) ON CONFLICT DO NOTHING")
-            .bind(&name)
-            .execute(&state.pool)
-            .await?;
+        // Legacy-Schreibweise: die erste Quelle eines Typs hat die ID = Typ.
+        sqlx::query(
+            "INSERT INTO cve_sources (id, kind, label) VALUES ($1, $1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(&kind)
+        .bind(kind_title(&kind))
+        .execute(&mut *tx)
+        .await?;
     }
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ($1, 'true'::jsonb) ON CONFLICT DO NOTHING",
+    )
+    .bind(SEEDED_KEY)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(())
 }
 
 pub async fn list(state: &AppState) -> Result<Vec<SourceRow>> {
     ensure_seeded(state).await?;
     Ok(sqlx::query_as(
-        "SELECT name, enabled, base_url, secret IS NOT NULL AS secret_set FROM cve_sources ORDER BY name",
+        "SELECT id, kind, label, enabled, base_url, ecosystem, secret IS NOT NULL AS secret_set \
+         FROM cve_sources WHERE deleted_at IS NULL ORDER BY created_at, id",
     )
     .fetch_all(&state.pool)
     .await?)
+}
+
+/// Gibt es für diesen Typ mindestens eine eingeschaltete, nicht gelöschte Quelle?
+pub async fn has_active(pool: &sqlx::PgPool, kind: &str) -> sqlx::Result<bool> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM cve_sources WHERE kind = $1 AND enabled AND deleted_at IS NULL)")
+        .bind(kind)
+        .fetch_one(pool)
+        .await
+}
+
+/// Endgültig entfernen, was seit mehr als 30 Tagen gelöscht ist: Quelle, ihre Zeilen, Feed-Zustand und Intervall.
+pub async fn purge_deleted(pool: &sqlx::PgPool) -> sqlx::Result<u64> {
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM cve_sources WHERE deleted_at IS NOT NULL AND deleted_at < now() - interval '30 days'",
+    )
+    .fetch_all(pool)
+    .await?;
+    for id in &ids {
+        let mut tx = pool.begin().await?;
+        sqlx::query("DELETE FROM cve_source_status WHERE source_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM feed_state WHERE source = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM settings WHERE key = $1")
+            .bind(format!("schedule.feeds.interval_minutes.{id}"))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM cve_sources WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
+    Ok(ids.len() as u64)
 }
 
 /// Geprüfte Spiegel-URL: nur http(s) ohne Zugangsdaten/Query, Ziel nach den SSRF-Regeln (Loopback/Link-Local immer gesperrt,
@@ -88,18 +181,47 @@ pub async fn check_base_url(state: &AppState, raw: &str) -> Result<ssrf::Target,
         .map_err(|e| e.message().to_string())
 }
 
-async fn decrypt_secret(state: &AppState, name: &str, blob: &[u8]) -> Result<String> {
+/// Bekannte Webseiten (keine Feeds): welcher Quellentyp gehört dazu? Für verständliche Fehlertexte und den Typ-Vorschlag.
+/// API-Adressen (api.osv.dev, services.nvd.nist.gov, cisa.gov/….json) sind echte Feed-Adressen und gehören nicht dazu.
+pub fn suggest_kind(raw: &str) -> Option<&'static str> {
+    let url = reqwest::Url::parse(raw.trim()).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    let path = url.path();
+    match host.as_str() {
+        "ubuntu.com" | "www.ubuntu.com" if path.starts_with("/security") => Some("ubuntu"),
+        "security-tracker.debian.org" => Some("debian"),
+        "nvd.nist.gov" => Some("nvd"),
+        "osv.dev" | "www.osv.dev" => Some("osv"),
+        "www.cisa.gov" | "cisa.gov" if !path.ends_with(".json") => Some("cisa_kev"),
+        _ => None,
+    }
+}
+
+/// Verständlicher Fehlertext, wenn die Adresse eine bekannte Webseite statt eines Feeds ist (sonst `None`).
+pub fn url_problem(kind: &str, raw: &str) -> Option<String> {
+    let page = suggest_kind(raw)?;
+    let (title, wanted) = (kind_title(kind), kind_title(page));
+    Some(if page == kind {
+        format!("Das ist die Webseite von {wanted}, kein Feed. Lass die Adresse leer, dann wird die Standardadresse genutzt.")
+    } else if is_builtin(page) {
+        format!("Das ist die Webseite von {wanted} und kein unterstützter Feed für den Typ {title}. {wanted} ist als eigener Typ vorhanden und braucht keine Adresse: wähle den Typ „{wanted}“.")
+    } else {
+        format!("Das ist die Webseite von {wanted} und kein unterstützter Feed für den Typ {title}. Wähle dafür den Typ „{wanted}“.")
+    })
+}
+
+async fn decrypt_secret(state: &AppState, id: &str, blob: &[u8]) -> Result<String> {
     let key = state
         .cfg
         .secret_key
         .as_ref()
         .ok_or_else(|| anyhow!("PATCHWATCH_SECRET_KEY fehlt"))?;
-    crypto::decrypt(key.bytes(), &aad(name), blob)
+    crypto::decrypt(key.bytes(), &aad(id), blob)
 }
 
 pub async fn encrypt_secret(
     state: &AppState,
-    name: &str,
+    id: &str,
     plaintext: &str,
 ) -> Result<Vec<u8>, String> {
     let key = state
@@ -107,37 +229,61 @@ pub async fn encrypt_secret(
         .secret_key
         .as_ref()
         .ok_or("Ohne PATCHWATCH_SECRET_KEY lassen sich keine Geheimnisse speichern")?;
-    crypto::encrypt(key.bytes(), &aad(name), plaintext)
+    crypto::encrypt(key.bytes(), &aad(id), plaintext)
         .map_err(|_| "Verschlüsselung fehlgeschlagen".to_string())
 }
 
-/// Baut die aktiven (eingeschalteten) Quellen. Eine Quelle, die sich nicht bauen lässt (z. B. Spiegel nicht mehr
-/// erlaubt), fehlt nicht stillschweigend: sie wird als Fehler im Feed-Zustand sichtbar (siehe `refresh_all`).
-pub async fn build_enabled(state: &AppState) -> Vec<(String, Result<Box<dyn CveSource>>)> {
+/// Eine zu bauende Quelle: stabile ID, Typ und das Ergebnis des Baus.
+pub struct Built {
+    pub id: String,
+    pub kind: String,
+    pub source: Result<Box<dyn CveSource>>,
+}
+
+/// Baut die aktiven (eingeschalteten, nicht gelöschten) Quellen. Eine Quelle, die sich nicht bauen lässt (z. B. Spiegel nicht
+/// mehr erlaubt), fehlt nicht stillschweigend: sie wird als Fehler im Feed-Zustand sichtbar (siehe `refresh_all`).
+pub async fn build_enabled(state: &AppState) -> Vec<Built> {
+    let fail = |e: anyhow::Error| {
+        vec![Built {
+            id: "cve_sources".into(),
+            kind: "cve_sources".into(),
+            source: Err(e),
+        }]
+    };
     if let Err(e) = ensure_seeded(state).await {
-        return vec![("cve_sources".into(), Err(e))];
+        return fail(e);
     }
-    let rows = match sqlx::query_as::<_, (String, Option<String>, Option<Vec<u8>>)>(
-        "SELECT name, base_url, secret FROM cve_sources WHERE enabled ORDER BY name",
+    let rows = match sqlx::query_as::<_, (String, String, Option<String>, Option<String>, Option<Vec<u8>>)>(
+        "SELECT id, kind, base_url, ecosystem, secret FROM cve_sources WHERE enabled AND deleted_at IS NULL ORDER BY created_at, id",
     )
     .fetch_all(&state.pool)
     .await
     {
         Ok(r) => r,
-        Err(e) => return vec![("cve_sources".into(), Err(e.into()))],
+        Err(e) => return fail(e.into()),
     };
     let mut out = Vec::new();
-    for (name, base_url, secret) in rows {
-        let built = build_one(state, &name, base_url.as_deref(), secret.as_deref()).await;
-        out.push((name, built));
+    for (id, kind, base_url, ecosystem, secret) in rows {
+        let source = build_one(
+            state,
+            &id,
+            &kind,
+            base_url.as_deref(),
+            ecosystem,
+            secret.as_deref(),
+        )
+        .await;
+        out.push(Built { id, kind, source });
     }
     out
 }
 
 async fn build_one(
     state: &AppState,
-    name: &str,
+    id: &str,
+    kind: &str,
     base_url: Option<&str>,
+    ecosystem: Option<String>,
     secret: Option<&[u8]>,
 ) -> Result<Box<dyn CveSource>> {
     let c = &state.cfg.cve;
@@ -151,13 +297,13 @@ async fn build_one(
         }
         None => (None, None),
     };
-    Ok(match name {
+    Ok(match kind {
         "ubuntu" => Box::new(Ubuntu::new(c)),
         "debian" => Box::new(Debian::new(c)),
-        "osv" => Box::new(Osv::with_base(c, base, client)),
+        "osv" => Box::new(Osv::with_base(c, base, client).with_ecosystem(ecosystem)),
         "nvd" => {
             let key = match secret {
-                Some(blob) => Some(decrypt_secret(state, name, blob).await?),
+                Some(blob) => Some(decrypt_secret(state, id, blob).await?),
                 None => None,
             };
             Box::new(Nvd::new(c, base, client, key))
@@ -180,5 +326,23 @@ mod tests {
         assert!(takes_secret("nvd") && !takes_secret("osv"));
         assert!(!takes_base_url("debian"));
         assert_eq!(aad("nvd"), "cve_source:nvd");
+        assert!(new_id("osv").starts_with("osv-") && new_id("osv") != new_id("osv"));
+        assert_eq!(
+            suggest_kind("https://ubuntu.com/security/cves"),
+            Some("ubuntu")
+        );
+        assert_eq!(
+            suggest_kind("https://security-tracker.debian.org/tracker/"),
+            Some("debian")
+        );
+        assert_eq!(suggest_kind("https://nvd.nist.gov/vuln"), Some("nvd"));
+        assert_eq!(suggest_kind("https://osv.dev/list"), Some("osv"));
+        assert_eq!(suggest_kind("https://api.osv.dev"), None);
+        assert_eq!(suggest_kind("https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"), None);
+        assert!(url_problem("osv", "https://ubuntu.com/security/cves")
+            .unwrap()
+            .contains("Typ „Ubuntu“"));
+        assert!(url_problem("osv", "https://mirror.example.org").is_none());
+        assert_eq!(suggest_kind("https://mirror.example.org/osv"), None);
     }
 }

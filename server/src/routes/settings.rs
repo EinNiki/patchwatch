@@ -32,10 +32,11 @@ pub async fn get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>>
     let now = Utc::now();
     let mut feeds = Vec::new();
     for src in crate::cve::sources::list(&st).await? {
-        let source = &src.name;
+        let source = &src.id;
         let default = st.cfg.cve.interval_minutes as i64;
         feeds.push(json!({
             "source": source,
+            "label": src.label,
             "interval_minutes": schedule::feed_interval_minutes(&st.pool, source, default).await,
             "default_minutes": default,
         }));
@@ -93,7 +94,13 @@ pub async fn put(
     if let Some(map) = &body.feed_intervals {
         for (source, minutes) in map {
             // Nur bekannte Quellen: der Schlüssel landet in einem Settings-Key.
-            if !crate::cve::sources::is_known(source) {
+            let known: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM cve_sources WHERE id = $1 AND deleted_at IS NULL)",
+            )
+            .bind(source)
+            .fetch_one(&st.pool)
+            .await?;
+            if !known {
                 return Err(ApiError::BadRequest("Unbekannte Feed-Quelle".into()));
             }
             schedule::validate_feed_interval(*minutes).map_err(ApiError::BadRequest)?;

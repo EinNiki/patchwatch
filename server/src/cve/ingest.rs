@@ -88,7 +88,7 @@ pub async fn ingest(
     source: &str,
     records: &[Record],
 ) -> Result<IngestStats> {
-    ingest_with(conn, source, records, true).await
+    ingest_with(conn, source, source, records, true).await
 }
 
 /// Wie [`ingest`]; `emit_events = false` für Anreicherungsquellen (NVD, CISA KEV): deren Einträge ändern keinen
@@ -96,6 +96,7 @@ pub async fn ingest(
 pub async fn ingest_with(
     conn: &mut PgConnection,
     source: &str,
+    source_id: &str,
     records: &[Record],
     emit_events: bool,
 ) -> Result<IngestStats> {
@@ -124,6 +125,17 @@ pub async fn ingest_with(
         .into_iter()
         .map(|(c, r, p, s, f)| ((c, r, p), (s, f)))
         .collect();
+
+    // Rows left behind by a deleted source of the same type (same status, so they would be skipped as
+    // "unchanged" below) are adopted by the current source; otherwise they would stay excluded from evaluation.
+    sqlx::query(
+        "UPDATE cve_source_status SET source_id = $2 WHERE source = $1 AND cve_id = ANY($3) AND source_id IS DISTINCT FROM $2",
+    )
+    .bind(source)
+    .bind(source_id)
+    .bind(&ids)
+    .execute(&mut *conn)
+    .await?;
 
     let mut stats = IngestStats::default();
     let mut upserts: Vec<(&Record, &Entry)> = Vec::new();
@@ -175,10 +187,10 @@ pub async fn ingest_with(
     }
     for chunk in upserts.chunks(BATCH) {
         sqlx::query(
-            "INSERT INTO cve_source_status (cve_id, source, release, package, status, fix_version, raw) \
-             SELECT c, $1, r, p, s, f, w::jsonb FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) AS t(c, r, p, s, f, w) \
+            "INSERT INTO cve_source_status (cve_id, source, release, package, status, fix_version, raw, source_id) \
+             SELECT c, $1, r, p, s, f, w::jsonb, $8 FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) AS t(c, r, p, s, f, w) \
              ON CONFLICT (cve_id, source, release, package) DO UPDATE SET status = EXCLUDED.status, \
-               fix_version = EXCLUDED.fix_version, raw = EXCLUDED.raw, updated_at = now()",
+               fix_version = EXCLUDED.fix_version, raw = EXCLUDED.raw, source_id = EXCLUDED.source_id, updated_at = now()",
         )
         .bind(source)
         .bind(chunk.iter().map(|(r, _)| r.cve_id.clone()).collect::<Vec<_>>())
@@ -187,6 +199,7 @@ pub async fn ingest_with(
         .bind(chunk.iter().map(|(_, e)| e.status.as_str().to_owned()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|(_, e)| e.fix_version.clone()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|(_, e)| e.raw.to_string()).collect::<Vec<_>>())
+        .bind(source_id)
         .execute(&mut *conn)
         .await?;
     }

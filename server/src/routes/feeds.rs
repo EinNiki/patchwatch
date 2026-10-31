@@ -21,7 +21,15 @@ struct FeedDb {
 
 #[derive(Serialize)]
 pub struct FeedRow {
+    /// Stabile ID der Quelle (nicht der Anzeigename).
     source: String,
+    /// Typ der Quelle: debian, ubuntu, osv, nvd, cisa_kev.
+    #[serde(rename = "type")]
+    kind_type: String,
+    /// Anzeigename (frei wählbar, eindeutig).
+    label: String,
+    ecosystem: Option<String>,
+    takes_ecosystem: bool,
     /// `builtin` (Debian, Ubuntu) oder `managed` (über die UI hinzugefügt).
     kind: &'static str,
     enabled: bool,
@@ -75,9 +83,9 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
     let default = st.cfg.cve.interval_minutes as i64;
     let mut out = Vec::new();
     for src in sources {
-        let f = rows.iter().find(|r| r.source == src.name);
+        let f = rows.iter().find(|r| r.source == src.id);
         let empty = FeedDb {
-            source: src.name.clone(),
+            source: src.id.clone(),
             last_attempt_at: None,
             last_success_at: None,
             last_error: None,
@@ -85,20 +93,24 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             consecutive_failures: 0,
         };
         let f = f.unwrap_or(&empty);
-        let interval = crate::schedule::feed_interval_minutes(&st.pool, &src.name, default).await;
+        let interval = crate::schedule::feed_interval_minutes(&st.pool, &src.id, default).await;
         // Ohne Erfolg seit 3 Intervallen gilt ein Feed auch dann als veraltet, wenn kein Fehler gespeichert wurde.
         let (state, stale_since) = classify(f, src.enabled, now, Duration::minutes(3 * interval));
         out.push(FeedRow {
-            kind: if sources::is_builtin(&src.name) {
+            kind_type: src.kind.clone(),
+            label: src.label.clone(),
+            ecosystem: src.ecosystem.clone(),
+            takes_ecosystem: sources::takes_ecosystem(&src.kind),
+            kind: if sources::is_builtin(&src.kind) {
                 "builtin"
             } else {
                 "managed"
             },
             enabled: src.enabled,
             configured: src.enabled,
-            enrich_only: sources::enrich_only(&src.name),
-            takes_secret: sources::takes_secret(&src.name),
-            takes_base_url: sources::takes_base_url(&src.name),
+            enrich_only: sources::enrich_only(&src.kind),
+            takes_secret: sources::takes_secret(&src.kind),
+            takes_base_url: sources::takes_base_url(&src.kind),
             secret_set: src.secret_set,
             base_url: src.base_url.clone(),
             interval_minutes: interval,
@@ -110,7 +122,7 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             last_error: f.last_error.clone(),
             last_error_at: f.last_error_at,
             consecutive_failures: f.consecutive_failures,
-            source: src.name,
+            source: src.id,
         });
     }
     Ok(Json(out))
@@ -119,8 +131,12 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateBody {
-    name: String,
+    #[serde(rename = "type")]
+    kind: String,
+    /// Anzeigename; ohne Angabe der Name des Typs.
+    label: Option<String>,
     base_url: Option<String>,
+    ecosystem: Option<String>,
     secret: Option<String>,
 }
 
@@ -128,16 +144,20 @@ pub struct CreateBody {
 #[serde(deny_unknown_fields)]
 pub struct UpdateBody {
     enabled: Option<bool>,
+    label: Option<String>,
     base_url: Option<String>,
     clear_base_url: Option<bool>,
+    ecosystem: Option<String>,
+    clear_ecosystem: Option<bool>,
     secret: Option<String>,
     clear_secret: Option<bool>,
 }
 
 const MAX_SECRET_LEN: usize = 512;
+const MAX_LABEL_CHARS: usize = 40;
 
-fn check_secret(name: &str, secret: &str) -> ApiResult<()> {
-    if !sources::takes_secret(name) {
+fn check_secret(kind: &str, secret: &str) -> ApiResult<()> {
+    if !sources::takes_secret(kind) {
         return Err(ApiError::BadRequest(
             "Diese Quelle nimmt keinen Schlüssel an".into(),
         ));
@@ -150,11 +170,50 @@ fn check_secret(name: &str, secret: &str) -> ApiResult<()> {
     Ok(())
 }
 
-async fn check_url(st: &AppState, name: &str, url: &str) -> ApiResult<()> {
-    if !sources::takes_base_url(name) {
+/// Anzeigename: 1 bis 40 Zeichen, keine Steuerzeichen. Die Anzeige im UI escaped den Text (React), der Server speichert ihn unverändert.
+fn check_label(raw: &str) -> ApiResult<String> {
+    let label = raw.trim();
+    let n = label.chars().count();
+    if n == 0 || n > MAX_LABEL_CHARS {
+        return Err(ApiError::BadRequest(format!(
+            "Name: 1 bis {MAX_LABEL_CHARS} Zeichen"
+        )));
+    }
+    if label.chars().any(char::is_control) {
         return Err(ApiError::BadRequest(
-            "Für diese Quelle ist keine eigene URL möglich".into(),
+            "Name: keine Steuerzeichen oder Zeilenumbrüche".into(),
         ));
+    }
+    Ok(label.to_owned())
+}
+
+fn check_ecosystem(kind: &str, eco: &str) -> ApiResult<String> {
+    if !sources::takes_ecosystem(kind) {
+        return Err(ApiError::BadRequest("Nur OSV kennt ein Ökosystem".into()));
+    }
+    let eco = eco.trim();
+    if eco.is_empty()
+        || eco.len() > 40
+        || !eco
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".:_-".contains(c))
+    {
+        return Err(ApiError::BadRequest(
+            "Ökosystem: z. B. Debian:13 oder Ubuntu:24.04".into(),
+        ));
+    }
+    Ok(eco.to_owned())
+}
+
+async fn check_url(st: &AppState, kind: &str, url: &str) -> ApiResult<()> {
+    if let Some(problem) = sources::url_problem(kind, url) {
+        return Err(ApiError::BadRequest(problem));
+    }
+    if !sources::takes_base_url(kind) {
+        return Err(ApiError::BadRequest(format!(
+            "Für den Typ {} ist keine eigene Adresse möglich",
+            sources::kind_title(kind)
+        )));
     }
     sources::check_base_url(st, url)
         .await
@@ -162,7 +221,22 @@ async fn check_url(st: &AppState, name: &str, url: &str) -> ApiResult<()> {
         .map_err(ApiError::BadRequest)
 }
 
-/// Nach Änderungen, die die Bewertung betreffen (Quelle an/aus/entfernt), alle Hosts im Hintergrund neu bewerten.
+/// Eindeutigkeitsverletzungen der Tabelle in verständliche Fehler übersetzen (auch bei gleichzeitigem Doppelklick).
+fn map_unique(e: sqlx::Error) -> ApiError {
+    let constraint = e
+        .as_database_error()
+        .and_then(|d| d.constraint())
+        .map(str::to_owned);
+    match constraint.as_deref() {
+        Some("cve_sources_label_uq") => ApiError::Conflict("Name bereits vergeben".into()),
+        Some("cve_sources_config_uq") => ApiError::Conflict(
+            "Eine Quelle dieses Typs mit gleicher Konfiguration gibt es schon".into(),
+        ),
+        _ => e.into(),
+    }
+}
+
+/// Nach Änderungen, die die Bewertung betreffen (Quelle an/aus/gelöscht/neu), alle Hosts im Hintergrund neu bewerten.
 fn reevaluate_in_background(st: &AppState) {
     let st = st.clone();
     tokio::spawn(async move {
@@ -172,60 +246,97 @@ fn reevaluate_in_background(st: &AppState) {
     });
 }
 
-/// Quelle hinzufügen (nur bekannte Typen, keine freien URLs).
+/// Quelle hinzufügen (nur bekannte Typen). Alles wird vor dem Speichern geprüft, gespeichert wird mit einem einzigen
+/// INSERT: bei einem Fehler entsteht nichts, ein gleichzeitiger Doppelversand scheitert am Unique-Index.
 pub async fn create(
     CsrfAdmin(_): CsrfAdmin,
     State(st): State<AppState>,
     Json(b): Json<CreateBody>,
-) -> ApiResult<StatusCode> {
-    if !sources::is_known(&b.name) {
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    if !sources::is_known(&b.kind) {
         return Err(ApiError::BadRequest(
-            "Unbekannter Quellentyp (erlaubt: osv, nvd, cisa_kev)".into(),
+            "Unbekannter Quellentyp (erlaubt: debian, ubuntu, osv, nvd, cisa_kev)".into(),
         ));
     }
-    if let Some(u) = &b.base_url {
-        check_url(&st, &b.name, u).await?;
+    sources::ensure_seeded(&st).await?;
+    let label = check_label(b.label.as_deref().unwrap_or(sources::kind_title(&b.kind)))?;
+    let base_url = b
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty());
+    if let Some(u) = base_url {
+        check_url(&st, &b.kind, u).await?;
     }
+    let ecosystem = match b
+        .ecosystem
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        Some(e) => Some(check_ecosystem(&b.kind, e)?),
+        None => None,
+    };
+    let id = sources::new_id(&b.kind);
     let secret = match &b.secret {
         Some(sec) => {
-            check_secret(&b.name, sec)?;
+            check_secret(&b.kind, sec)?;
             Some(
-                sources::encrypt_secret(&st, &b.name, sec)
+                sources::encrypt_secret(&st, &id, sec)
                     .await
                     .map_err(ApiError::BadRequest)?,
             )
         }
         None => None,
     };
-    let done = sqlx::query("INSERT INTO cve_sources (name, base_url, secret) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
-        .bind(&b.name)
-        .bind(&b.base_url)
+    sqlx::query("INSERT INTO cve_sources (id, kind, label, base_url, ecosystem, secret) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(&id)
+        .bind(&b.kind)
+        .bind(&label)
+        .bind(base_url)
+        .bind(&ecosystem)
         .bind(secret)
         .execute(&st.pool)
-        .await?;
-    if done.rows_affected() == 0 {
-        return Err(ApiError::Conflict("Die Quelle gibt es schon".into()));
-    }
-    Ok(StatusCode::CREATED)
+        .await
+        .map_err(map_unique)?;
+    // Ein Debian-/Ubuntu-Host ohne Quelle war "CVE-Lage unbekannt": mit der neuen Quelle neu bewerten.
+    reevaluate_in_background(&st);
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "id": id, "label": label })),
+    ))
 }
 
 pub async fn update(
     CsrfAdmin(_): CsrfAdmin,
     State(st): State<AppState>,
-    Path(name): Path<String>,
+    Path(id): Path<String>,
     Json(b): Json<UpdateBody>,
 ) -> ApiResult<StatusCode> {
-    if !sources::is_known(&name) {
+    let kind: Option<String> =
+        sqlx::query_scalar("SELECT kind FROM cve_sources WHERE id = $1 AND deleted_at IS NULL")
+            .bind(&id)
+            .fetch_optional(&st.pool)
+            .await?;
+    let Some(kind) = kind else {
         return Err(ApiError::NotFound);
-    }
+    };
+    let label = match &b.label {
+        Some(l) => Some(check_label(l)?),
+        None => None,
+    };
     if let Some(u) = &b.base_url {
-        check_url(&st, &name, u).await?;
+        check_url(&st, &kind, u.trim()).await?;
     }
+    let ecosystem = match &b.ecosystem {
+        Some(e) => Some(check_ecosystem(&kind, e)?),
+        None => None,
+    };
     let secret = match &b.secret {
         Some(sec) => {
-            check_secret(&name, sec)?;
+            check_secret(&kind, sec)?;
             Some(
-                sources::encrypt_secret(&st, &name, sec)
+                sources::encrypt_secret(&st, &id, sec)
                     .await
                     .map_err(ApiError::BadRequest)?,
             )
@@ -233,41 +344,66 @@ pub async fn update(
         None => None,
     };
     let mut tx = st.pool.begin().await?;
-    let exists: Option<bool> =
-        sqlx::query_scalar("SELECT enabled FROM cve_sources WHERE name = $1 FOR UPDATE")
-            .bind(&name)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let exists: Option<bool> = sqlx::query_scalar(
+        "SELECT enabled FROM cve_sources WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await?;
     let Some(was_enabled) = exists else {
         return Err(ApiError::NotFound);
     };
     if let Some(en) = b.enabled {
-        sqlx::query("UPDATE cve_sources SET enabled = $2, updated_at = now() WHERE name = $1")
-            .bind(&name)
+        sqlx::query("UPDATE cve_sources SET enabled = $2, updated_at = now() WHERE id = $1")
+            .bind(&id)
             .bind(en)
             .execute(&mut *tx)
             .await?;
     }
+    if let Some(l) = &label {
+        sqlx::query("UPDATE cve_sources SET label = $2, updated_at = now() WHERE id = $1")
+            .bind(&id)
+            .bind(l)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_unique)?;
+    }
     if b.clear_base_url == Some(true) {
-        sqlx::query("UPDATE cve_sources SET base_url = NULL, updated_at = now() WHERE name = $1")
-            .bind(&name)
+        sqlx::query("UPDATE cve_sources SET base_url = NULL, updated_at = now() WHERE id = $1")
+            .bind(&id)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(map_unique)?;
     } else if let Some(u) = &b.base_url {
-        sqlx::query("UPDATE cve_sources SET base_url = $2, updated_at = now() WHERE name = $1")
-            .bind(&name)
-            .bind(u)
+        sqlx::query("UPDATE cve_sources SET base_url = $2, updated_at = now() WHERE id = $1")
+            .bind(&id)
+            .bind(u.trim())
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(map_unique)?;
+    }
+    if b.clear_ecosystem == Some(true) {
+        sqlx::query("UPDATE cve_sources SET ecosystem = NULL, updated_at = now() WHERE id = $1")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_unique)?;
+    } else if let Some(e) = &ecosystem {
+        sqlx::query("UPDATE cve_sources SET ecosystem = $2, updated_at = now() WHERE id = $1")
+            .bind(&id)
+            .bind(e)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_unique)?;
     }
     if b.clear_secret == Some(true) {
-        sqlx::query("UPDATE cve_sources SET secret = NULL, updated_at = now() WHERE name = $1")
-            .bind(&name)
+        sqlx::query("UPDATE cve_sources SET secret = NULL, updated_at = now() WHERE id = $1")
+            .bind(&id)
             .execute(&mut *tx)
             .await?;
     } else if let Some(blob) = secret {
-        sqlx::query("UPDATE cve_sources SET secret = $2, updated_at = now() WHERE name = $1")
-            .bind(&name)
+        sqlx::query("UPDATE cve_sources SET secret = $2, updated_at = now() WHERE id = $1")
+            .bind(&id)
             .bind(blob)
             .execute(&mut *tx)
             .await?;
@@ -279,35 +415,24 @@ pub async fn update(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Entfernt eine hinzugefügte Quelle samt ihrer Daten (sie zählen sonst weiter in der Bewertung). Eingebaute lassen sich nur abschalten.
+/// Löscht eine Quelle (auch Debian/Ubuntu). Ihre Daten bleiben 30 Tage liegen, zählen aber nicht mehr als aktuell
+/// (Hosts ohne aktive Quelle für ihre Distribution werden "CVE-Lage unbekannt"); danach räumt der Cleanup-Job auf.
+/// Das Geheimnis wird sofort verworfen. Wieder hinzufügen geht jederzeit.
 pub async fn delete(
     CsrfAdmin(_): CsrfAdmin,
     State(st): State<AppState>,
-    Path(name): Path<String>,
+    Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    if sources::is_builtin(&name) {
-        return Err(ApiError::BadRequest(
-            "Eingebaute Quellen lassen sich nur abschalten".into(),
-        ));
-    }
-    let mut tx = st.pool.begin().await?;
-    let gone = sqlx::query("DELETE FROM cve_sources WHERE name = $1")
-        .bind(&name)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
+    let gone = sqlx::query(
+        "UPDATE cve_sources SET deleted_at = now(), secret = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(&id)
+    .execute(&st.pool)
+    .await?
+    .rows_affected();
     if gone == 0 {
         return Err(ApiError::NotFound);
     }
-    sqlx::query("DELETE FROM cve_source_status WHERE source = $1")
-        .bind(&name)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM feed_state WHERE source = $1")
-        .bind(&name)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
     reevaluate_in_background(&st);
     Ok(StatusCode::NO_CONTENT)
 }

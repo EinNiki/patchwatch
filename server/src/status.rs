@@ -9,6 +9,8 @@ pub enum HostStatus {
     SecurityUpdates,
     RebootRequired,
     UpdatesPending,
+    /// Keine aktive CVE-Quelle für die Distribution des Hosts: die CVE-Lage ist unbekannt, nie "grün".
+    CveUnknown,
     Ok,
 }
 
@@ -21,6 +23,7 @@ impl HostStatus {
             Self::SecurityUpdates => "security_updates",
             Self::RebootRequired => "reboot_required",
             Self::UpdatesPending => "updates_pending",
+            Self::CveUnknown => "cve_unknown",
             Self::Ok => "ok",
         }
     }
@@ -33,6 +36,7 @@ impl HostStatus {
             "security_updates" => "Sicherheitsupdates offen",
             "reboot_required" => "Neustart nötig",
             "updates_pending" => "Updates offen",
+            "cve_unknown" => "CVE-Lage unbekannt",
             "ok" => "aktuell",
             _ => "unbekannt",
         }
@@ -47,6 +51,8 @@ pub struct Snapshot {
     pub updates_security: i32,
     /// Mindestens eine CVE mit Status "vulnerable" für den laufenden Kernel.
     pub cve_vulnerable: bool,
+    /// Es gibt keine aktive CVE-Quelle für die Distribution dieses Hosts.
+    pub cve_source_missing: bool,
 }
 
 pub fn derive(s: &Snapshot, now: DateTime<Utc>, stale_after: Duration) -> HostStatus {
@@ -59,6 +65,7 @@ pub fn derive(s: &Snapshot, now: DateTime<Utc>, stale_after: Duration) -> HostSt
             HostStatus::RebootRequired
         }
         Some(_) if s.updates_pending > 0 => HostStatus::UpdatesPending,
+        Some(_) if s.cve_source_missing => HostStatus::CveUnknown,
         Some(_) => HostStatus::Ok,
     }
 }
@@ -77,6 +84,7 @@ mod tests {
                 updates_pending: 0,
                 updates_security: 0,
                 cve_vulnerable: false,
+                cve_source_missing: false,
             },
             now,
         )
@@ -109,6 +117,18 @@ mod tests {
         assert_eq!(st(&s, now), HostStatus::RebootRequired);
         s.updates_security = 1;
         assert_eq!(st(&s, now), HostStatus::SecurityUpdates);
+        s.cve_vulnerable = true;
+        assert_eq!(st(&s, now), HostStatus::CveVulnerable);
+    }
+
+    #[test]
+    fn missing_cve_source_is_never_green() {
+        let (mut s, now) = snap(Some(1));
+        s.cve_source_missing = true;
+        assert_eq!(st(&s, now), HostStatus::CveUnknown);
+        // Dringlichere Zustände gehen vor.
+        s.updates_pending = 2;
+        assert_eq!(st(&s, now), HostStatus::UpdatesPending);
         s.cve_vulnerable = true;
         assert_eq!(st(&s, now), HostStatus::CveVulnerable);
     }
