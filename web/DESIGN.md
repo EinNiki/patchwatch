@@ -1,15 +1,43 @@
-# patchwatch – Design
+# patchwatch – Design v2
 
-Verbindlich für das ganze UI. Abweichungen nur hier ändern, dann im Code nachziehen.
+Verbindlich für das ganze UI (Stand: Branch `feat/ui-v2`). v1 liegt unverändert unter `docs/design/v1/`
+(Tag `design-v1`). Abweichungen nur hier ändern, dann im Code nachziehen. Referenzen: lokale Skills `hig`
+(Prüfliste, siehe `docs/design/v2/skills-review.md`), `design`, `ui-ux-pro-max`, `ui-styling`; bei Konflikten gilt dieses Dokument.
 
 ## Charakter
 
-Ruhige, dichte Ops-Konsole für Admins. **Informationsdichte vor Dekoration.** Eine Tabelle ist das
-Hauptwerkzeug; alles andere ordnet sich ihr unter. Keine Marketing-Sprache, keine Begrüßungsfloskeln,
-keine Animationen außer funktionalen (Fokus, Aufklappen), und die respektieren `prefers-reduced-motion`.
+Moderner, aber weiterhin **dichter Ops-Betrieb**. Klar gegliederte, ruhige Flächen, deutliche Hierarchie,
+eine feste **Seitenleiste** statt Top-Navigation. Die Tabelle bleibt das Hauptwerkzeug; Chips tragen den Status.
+Keine Marketing-Sprache, keine Begrüßungsfloskeln, Bewegung nur funktional (Fokus, Aufklappen, Seitenleiste auf Mobil)
+und mit `prefers-reduced-motion` abgeschaltet.
 
-Verboten (aus dem Briefing): lila-blaue Verläufe, Glassmorphism, Hero-Banner, Karten-Raster mit
-Emoji-Icons, überall gleiche Rundungen/Schatten, Platzhaltertexte im Marketing-Stil, „Willkommen zurück“.
+Verboten: lila/blaue Verläufe, Glassmorphism/Blur, Hero-Banner, Karten-Raster mit Emoji-Icons, Emoji überhaupt,
+überall gleiche Rundungen/Schatten, Platzhaltertexte im Marketing-Stil, „Willkommen zurück“, Apple-Muster (Tab-Bars,
+SF Symbols, Systemfarben, Kapsel-Buttons).
+
+## Layout
+
+```
+┌──────────────┬──────────────────────────────────────────────┐
+│ Seitenleiste │ Seitenkopf: Titel · Zählung · Aktionen        │
+│  232 px      ├──────────────────────────────────────────────┤
+│  Navigation  │ Inhalt (max. 1440 px, Ränder 24 px)           │
+│  Status unten│                                              │
+└──────────────┴──────────────────────────────────────────────┘
+```
+
+- **Seitenleiste** (`nav`, `aria-label="Hauptnavigation"`): Marke `patchwatch` (mono), dann **Hosts · CVEs · Agents ·
+  Benachrichtigungen · Einstellungen**. „Benachrichtigungen“ hat eine zweite Ebene (ntfy, Matrix, Gotify, Discord,
+  Live im Browser), mehr als zwei Ebenen gibt es nicht. Aktive Seite: `aria-current="page"`, linke 3-px-Leiste in
+  `accent` + `accent-soft`-Fläche + fetter Text. Unten (nicht kritisch): CVE-Feed-Zustand, Live-Status, Konto
+  (Name, Abmelden). Kein Matrix-Eintrag; die Matrix kommt später als Umschalter „Liste | Matrix“ auf der CVE-Seite.
+- **Mobil (< 900 px):** Seitenleiste ist eingeklappt. Kopfzeile (48 px) mit Menü-Button (Beschriftung „Menü“, 44 px),
+  Seitenname. Auf: Off-Canvas von links, Hintergrund `bg` mit 40 %-Abdunklung (kein Blur), Fokus wandert hinein und
+  bleibt gefangen, `Esc`/Klick daneben/Navigieren schließt, Fokus kehrt zum Menü-Button zurück.
+- **Seitenkopf:** `h1` 20 px/600, daneben Zählung in `text-3`, rechts die Hauptaktion der Seite (genau eine primäre).
+- **Flächenebenen:** (1) `bg` Seitenhintergrund, (2) `surface` Panels/Tabellen mit 1-px-`line`-Rand, (3) `sunk`
+  eingelassen (Tabellenkopf, Eingabefelder, Code). Gruppierung zuerst über Abstand, Linien nur zur Trennung von Zeilen.
+- Abschnitte innerhalb einer Seite: `h2` 16 px/600 mit 24 px Abstand davor; Zusammengehöriges mit 8 px.
 
 ## Schrift
 
@@ -58,35 +86,75 @@ Zusätzliche Marker mit eigenem Icon: Neustart (Kreispfeil), veraltet/stale (Uhr
 
 ## Abstände, Form, Tiefe
 
-- Raster 4 px (`1 = 4px`). Zellen: 8 px vertikal, 12 px horizontal. Seitenrand 16 px (Mobil) / 24 px.
-- **Rundungen nach Rolle, nicht einheitlich:** Tabellen 0 (nur Haarlinien), Badges 2 px, Eingaben/Buttons 3 px,
-  Dialog 6 px. Keine Pillen.
-- **Schatten nur dort, wo etwas schwebt** (Dialog). Sonst Trennung durch Haarlinien und Flächentöne.
-- Max. Inhaltsbreite 1440 px. Keine Karten; Bereiche sind Abschnitte mit Überschrift und Haarlinie.
+- Raster 4 px (`1 = 4px`). Zellen: 8 px vertikal, 12 px horizontal. Panel-Innenabstand 16 px. Seitenrand 16 px (Mobil) / 24 px.
+- **Rundungen nach Rolle:** Tabellen/Panels 0–2 px, Chips 2 px, Eingaben/Buttons 3 px, Dialog/Toast 6 px. Keine Pillen.
+- **Schatten nur für Schwebendes** (Dialog, Toast, Off-Canvas). Sonst Flächentöne und Haarlinien.
+- Icons: eigene Inline-SVGs (16 px, 1,5-px-Strich, `currentColor`), `aria-hidden`; Status-Icons unterscheiden sich in der
+  **Form**, nicht nur in der Farbe. Keine Emoji.
+
+## Chips (Status und Distro)
+
+Chip = 2-px-Rundung, 12 px/500, Höhe 22 px, Padding 0 6 px, Icon links (14 px), Text immer sichtbar.
+
+| Chip | Aufbau | Beispiel |
+|---|---|---|
+| **Status** (`StatusBadge`) | Fläche = Statusfläche, Text/Icon = Statusfarbe | `[◆× Verwundbar]` |
+| **Distro** (`DistroChip`) | Status-Icon + `Distro Release` (Text) + Status-Wort + Fix-Version in Mono | `[✓ Debian trixie · gefixt 6.12.113-1]` · `[⏳ Ubuntu noble · Fix in Arbeit]` · `[◆× Ubuntu jammy · verwundbar]` · `[– nicht betroffen]` · `[? unbekannt]` |
+| **Marker** | gedämpft, Rahmen statt Fläche | Neustart nötig, veraltet, Watchlist, Proxmox |
+
+Die Zeichen in der Tabelle sind nur Platzhalter für die SVG-Formen (Haken, Uhr/Sanduhr-Form für „Fix in Arbeit“,
+Raute-×, Strich, Fragezeichen). Zuordnung zu Klassen: gefixt, nicht betroffen → `ok` (nicht betroffen: gedämpft,
+Text `text-3`) · Fix in Arbeit → `warn` · verwundbar → `crit` · unbekannt → `unknown`.
+Standardmäßig nur Releases anzeigen, die auf mindestens einem Host laufen; weitere per „Alle Releases“ (`<details>`).
+
+## Buttons
+
+- **Varianten:** *Primär* (Fläche `accent`, Text `bg`-Ton, genau **eine** je Bereich), *Sekundär* (Rand `control`, Fläche `surface`),
+  *Tertiär* (nur Text in `accent`, für Tabellenzeilen), *Destruktiv* (Rand/Text `crit`; wird erst im Bestätigungsdialog gefüllt).
+  Stil unterscheidet die bevorzugte Aktion, nicht die Größe.
+- **Beschriftung:** Verb + Objekt („Token erneuern“, „Agent hinzufügen“), „…“ nur wenn ein weiterer Schritt folgt.
+  Nie „OK“; Dialogbuttons benennen die Aktion („Agent löschen“), daneben „Abbrechen“ (Standardfokus bei destruktiven Dialogen).
+- **Größe:** Höhe 32 px (Desktop), 44 px bei Touch (`pointer: coarse`); Abstand zwischen Buttons ≥ 8 px.
+- **Zustände** (alle Pflicht): hover (Fläche +4 % Kontrast), active (leicht abgedunkelt), `:focus-visible` (Ring 2 px `accent`,
+  Abstand 2 px), disabled (`aria-disabled`, 60 % Deckkraft, Grund per Text/`title`), busy (Spinner-Icon + Text bleibt,
+  `aria-busy`, Klick gesperrt).
+- Aktionen, die > 1 s dauern, zeigen Fortschritt (Zustand am Button oder Zeile, z. B. „wartet auf Agent …“).
+
+## Formulare
+
+- Label immer sichtbar über dem Feld (kein Platzhalter als Label), Hilfetext 12 px `text-3` darunter, Fehler darunter mit Icon + Text
+  in `crit`, `aria-invalid` + `aria-describedby`. Validierung beim Verlassen des Felds und beim Absenden.
+- Feldbreite passend zur Eingabe (Name 24 ch, URL 48 ch, Zeit 8 ch). Eingabefläche `sunk`, Rand `control`.
+- **Geheimnisse (write-only):** nach dem Speichern zeigt das Feld „Gespeichert · ersetzen“ mit Schaltfläche „Ersetzen“ und
+  „Entfernen“; der Wert wird nie angezeigt oder vom Server zurückgegeben.
+- Ein/Aus: Checkbox mit Label; „Kanal aktiv“ als Schalter-Checkbox mit Text „An/Aus“; ≥ 3 exklusive Optionen = Radiogruppe.
+  Zustand nie nur über die Farbe (Haken/Position + Text).
+- Segmentierte Steuerung (später „Liste | Matrix“): 2–3 gleich breite Segmente, Substantive, `role="radiogroup"`.
 
 ## Komponenten
 
-- **Tabelle** (Hauptelement): Kopf in `sunk`, Haarlinien zwischen Zeilen, Zeilen-Hover `sunk` 50 %, sortierbare Köpfe
-  sind `<button>` in `<th aria-sort>`. Zahlen/Versionen rechtsbündig bzw. mono. Mobil (< 768 px): Zeilen werden
-  gestapelt, jede Zelle trägt ihr Label (`data-label`).
-- **Statusanzeige** (`StatusBadge`): 2-px-Rundung, Fläche = Statusfläche, Text = Statusfarbe, Icon links, Text immer sichtbar.
-- **Leerzustände:** sagen, was fehlt und was als Nächstes zu tun ist (konkret, ohne Floskeln).
-- **Kopfzeile:** Navigation (Hosts · CVEs · Matrix [„bald“, nicht anklickbar] · Einstellungen), rechts Feed-Zustand,
-  Theme (System/Hell/Dunkel), Abmelden. Feed-Zustand ist immer sichtbar; veraltete Feeds sind `warn`.
-- **Details-Block:** Begründungen einer CVE-Bewertung per `<details>`: Text + Quellen-Tabelle.
-- **Kleine Details:** relative Zeit mit absolutem `title` und `<time datetime>`; Kernel-Version zeigt laufend ≠ neueste
-  als `6.8.0-31 → 6.8.0-35`; Token nur einmal sichtbar mit „Kopieren“; Zählerzellen mit `0` gedämpft statt farbig.
+- **Tabelle:** Kopf `sunk`, Haarlinien, Zeilen-Hover `sunk` 50 %, sortierbare Köpfe als `<button>` in `<th aria-sort>`, Zahlen/Versionen
+  rechtsbündig bzw. mono, Aktionsspalte rechts. Mobil (< 768 px): Zeilen gestapelt, jede Zelle mit `data-label`.
+- **Dialog** (`<dialog>`, modal): Titel, kurzer Text, Objektname fett, Buttons rechts; Esc schließt; nicht für reine Information.
+- **Toast** (Live-Benachrichtigung): rechts unten, `role="status"` (kritisch: `role="alert"`), Icon + Text, sichtbar 8 s, per Tastatur
+  schließbar, nie die einzige Quelle (Eintrag steht auch in der Liste). Nicht gestapelt über 3.
+- **Leerzustände:** sagen, was fehlt und was als Nächstes zu tun ist, mit einer Aktion („Agent hinzufügen“). **Fehlerzustände:**
+  Ursache in einem Satz, „Erneut versuchen“, Stand der Daten (z. B. „Daten von vor 5 Min.“) bleibt sichtbar.
+- **Details-Block:** Begründungen einer CVE-Bewertung per `<details>`. **Kleine Details:** relative Zeit mit absolutem `title` und
+  `<time datetime>`; Kernel `6.8.0-31 → 6.8.0-35` bei laufend ≠ neueste; Token nur einmal sichtbar mit „Kopieren“;
+  Nullwerte gedämpft statt farbig.
+- **Live-Anzeige:** Punkt-Icon + Text „Live“ (verbunden) / „Getrennt, verbinde neu …“; Änderungen aktualisieren die Zeile ohne Sprung
+  (`aria-live="polite"` nur für Zusammenfassungen, nicht für jede Zeile).
 
 ## Barrierefreiheit
 
-- Text ≥ 4,5:1 (gemessen oben), Bedienelement-Ränder ≥ 3:1, Fokusring 2 px `accent` mit 2 px Abstand auf allen Fokussierbaren.
-- Vollständig per Tastatur bedienbar; „Zum Inhalt springen“-Link; Tabellen mit `<caption>` (visuell versteckt);
-  `aria-sort`, `aria-live` für Rückmeldungen, `aria-current="page"` in der Navigation, `<dialog>` für Bestätigungen.
-- Statusinformation nie nur über Farbe; Mindestgröße Zielfläche 32 px (Touch: 44 px).
-- Hell/Dunkel folgt dem System, manuell umschaltbar (wird gemerkt); `prefers-reduced-motion` wird beachtet.
+- Text ≥ 4,5:1 (Tabellen oben), UI-Ränder/Icons ≥ 3:1, Fokusring auf allem Fokussierbaren.
+- Vollständig per Tastatur bedienbar: „Zum Inhalt springen“, Seitenleiste mit Pfeil-/Tab-Navigation, Dialoge mit Fokusfalle,
+  `aria-current`, `aria-sort`, `aria-live` für Rückmeldungen, Tabellen mit `<caption>` (visuell versteckt).
+- Statusinformation nie nur über Farbe. Zielgröße 32 px (Touch 44 px) plus Abstand.
+- Hell/Dunkel folgt dem System, umschaltbar (Einstellungen, wird gemerkt); `prefers-reduced-motion` beachtet.
 
 ## Texte
 
-Deutsch, präzise, im Imperativ oder Aussagesatz. Beispiele: „Noch kein Report“, „Neustart nötig“,
-„Fix angekündigt (voraussichtlich in 7.0.0-43.43)“, „Quelle veraltet seit 29.10., 21:34“.
-Keine Ausrufezeichen, keine Emoji, keine Anrede.
+Deutsch, präzise, Aussagesatz oder Imperativ. Beispiele: „Noch kein Report“, „Neustart nötig“, „wartet auf Agent …“,
+„Token wird nicht erneut angezeigt“, „Fix angekündigt (voraussichtlich in 7.0.0-43.43)“. Keine Ausrufezeichen, kein Emoji, keine Anrede.
