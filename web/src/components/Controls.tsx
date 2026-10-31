@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes } from "react";
 
 const base =
   "inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border px-3 py-1 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11";
@@ -24,6 +24,10 @@ export function TextInput({ className = "", ...props }: InputHTMLAttributes<HTML
       {...props}
     />
   );
+}
+
+export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={`min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-sm text-fg max-md:min-h-11 ${className}`} {...props} />;
 }
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {

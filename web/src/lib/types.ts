@@ -149,16 +149,33 @@ export interface NotificationsResponse {
   channels: ChannelView[];
 }
 
+export type ReportSchedule =
+  | { mode: "off" }
+  | { mode: "interval"; every_hours: number }
+  | { mode: "daily"; at: string; tz: string };
+
 export interface Settings {
   report_retention_days: number;
   report_retention_default_days: number;
   report_retention_min_days: number;
   report_retention_max_days: number;
+  stale_after_hours: number;
+  stale_after_default_hours: number;
+  stale_after_min_hours: number;
+  stale_after_max_hours: number;
+  feeds: { source: string; interval_minutes: number; default_minutes: number }[];
+  feed_interval_min_minutes: number;
+  feed_interval_max_minutes: number;
+  report_schedule: ReportSchedule & { last_run: string | null; due_now: boolean };
+  report_every_hours_min: number;
+  report_every_hours_max: number;
+  checkin_interval_hint: string;
 }
 
 export interface Feed {
   source: string;
   configured: boolean;
+  interval_minutes: number;
   state: "ok" | "stale" | "never";
   healthy: boolean;
   last_attempt_at: string | null;
