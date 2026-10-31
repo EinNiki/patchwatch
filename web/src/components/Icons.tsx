@@ -72,7 +72,7 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   }
 }
 
-export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "logout" | "sort" | "asc" | "desc" | "filter";
+export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill";
 
 /** Navigations- und Aktions-Icons: eigene Linienformen, immer mit Text daneben (nie allein). */
 export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number }) {
@@ -176,6 +176,18 @@ export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number 
           <path d="M2.5 3.5h11L9.5 8.5v4l-3 1v-5z" />
         </svg>
       );
+    case "star":
+      return (
+        <svg {...common}>
+          <path d="M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.4l-3.7 2.1.8-4.2L2 6.4l4.2-.5z" />
+        </svg>
+      );
+    case "star-fill":
+      return (
+        <svg {...common} fill="currentColor">
+          <path d="M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.4l-3.7 2.1.8-4.2L2 6.4l4.2-.5z" />
+        </svg>
+      );
     case "chevron":
       return (
         <svg {...common}>
@@ -195,4 +207,14 @@ export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number 
         </svg>
       );
   }
+}
+
+/** Marke: Quadrat mit Haken (patchwatch prüft Patch-Stände). Flach, `currentColor` für den Rahmen, Akzent für den Haken. */
+export function Logo({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable={false} className="shrink-0">
+      <rect x="2.75" y="2.75" width="14.5" height="14.5" rx="3.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6.6 10.2l2.4 2.4 4.4-5" stroke="var(--accent)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }

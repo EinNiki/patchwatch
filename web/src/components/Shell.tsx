@@ -10,7 +10,7 @@ import { useStoredFlag } from "@/lib/useStoredFlag";
 import type { Feed } from "@/lib/types";
 import { useAuth } from "./AuthProvider";
 import { feedSummary } from "./FeedStatus";
-import { Icon, NavIcon, type NavIconName } from "./Icons";
+import { Icon, Logo, NavIcon, type NavIconName } from "./Icons";
 import { Button } from "./Controls";
 
 interface Item {
@@ -82,7 +82,7 @@ function RailTip({ children }: { children: React.ReactNode }) {
 }
 
 const rowBase =
-  "relative flex min-h-8 items-center gap-2.5 border-l-2 px-3 no-underline max-md:min-h-11 md:max-lg:justify-center md:max-lg:px-0";
+  "relative flex min-h-9 items-center gap-2.5 rounded-sm border-l-2 px-3 no-underline max-md:min-h-11 md:max-lg:justify-center md:max-lg:px-0";
 const rowState = (active: boolean) => (active ? "border-accent bg-sunk font-semibold text-fg" : "border-transparent text-fg2 hover:bg-sunk hover:text-fg");
 
 function NavLinks({ pathname }: { pathname: string }) {
@@ -93,13 +93,14 @@ function NavLinks({ pathname }: { pathname: string }) {
   const expanded = onSub || stored === true;
 
   return (
-    <nav aria-label="Hauptnavigation" className="flex flex-col gap-px">
+    <nav aria-label="Hauptnavigation" className="flex flex-col gap-0.5 px-2">
       {NAV.map((n) => {
         const active = n.match(pathname);
         const exactNotifications = n.href === "/notifications" && pathname === "/notifications";
         const isGroup = n.href === "/notifications";
         return (
-          <div key={n.href} className="group/item relative">
+          <div key={n.href}>
+            <div className="group/item relative">
             <Link
               href={n.href}
               aria-current={exactNotifications || (active && !isGroup) ? "page" : undefined}
@@ -110,7 +111,6 @@ function NavLinks({ pathname }: { pathname: string }) {
             </Link>
             <RailTip>{n.label}</RailTip>
             {isGroup ? (
-              <>
                 <button
                   type="button"
                   aria-expanded={expanded}
@@ -118,12 +118,16 @@ function NavLinks({ pathname }: { pathname: string }) {
                   aria-label={`${n.label}: Kanäle ${expanded ? "ausblenden" : "einblenden"}`}
                   disabled={onSub}
                   onClick={() => setStored(!(stored === true))}
-                  className="absolute right-0 top-0 inline-flex h-full min-w-9 items-center justify-center text-fg3 hover:text-fg disabled:cursor-default disabled:opacity-60 max-md:min-w-11 md:max-lg:hidden"
+                  className="absolute inset-y-0 right-0 inline-flex min-w-9 items-center justify-center rounded-r-sm text-fg3 hover:text-fg disabled:cursor-default disabled:opacity-60 max-md:min-w-11 md:max-lg:hidden"
                 >
                   <span className={`transition-transform duration-(--dur-2) ease-(--ease-out) ${expanded ? "rotate-180" : ""}`}>
                     <NavIcon name="chevron" />
                   </span>
                 </button>
+            ) : null}
+            </div>
+            {isGroup ? (
+              <>
                 {/* grid-template-rows 0fr -> 1fr: Höhe animiert ohne feste Maße; die Seitenleiste ist fixiert, der Inhalt springt nicht. */}
                 <div
                   id={subId}
@@ -140,7 +144,7 @@ function NavLinks({ pathname }: { pathname: string }) {
                           <Link
                             href={href}
                             aria-current={here ? "page" : undefined}
-                            className={`flex min-h-8 items-center border-l-2 py-1 pl-10 pr-3 no-underline max-md:min-h-11 ${rowState(here)}`}
+                            className={`flex min-h-9 items-center rounded-sm border-l-2 py-1 pl-10 pr-3 no-underline max-md:min-h-11 ${rowState(here)}`}
                           >
                             {c.label}
                           </Link>
@@ -161,17 +165,18 @@ function NavLinks({ pathname }: { pathname: string }) {
 function SidebarBody({ pathname }: { pathname: string }) {
   const { me, logout } = useAuth();
   return (
-    <div className="flex h-full flex-col gap-3 py-3">
-      <Link href="/" className="flex min-h-8 items-center px-3 font-mono text-base font-medium text-fg no-underline max-md:min-h-11 max-md:pr-14 md:max-lg:justify-center md:max-lg:px-0">
+    <div className="flex h-full flex-col">
+      <Link
+        href="/"
+        className="flex h-(--topbar-h) shrink-0 items-center gap-2.5 border-b border-line px-4 font-mono text-base font-medium text-fg no-underline max-md:pr-14 md:max-lg:justify-center md:max-lg:px-0"
+      >
+        <Logo />
         <span className={RAIL_SR}>patchwatch</span>
-        <span aria-hidden="true" className="hidden md:max-lg:inline">
-          pw
-        </span>
       </Link>
-      <div className="flex-1 overflow-y-auto md:max-lg:overflow-visible">
+      <div className="flex-1 overflow-y-auto py-3 md:max-lg:overflow-visible">
         <NavLinks pathname={pathname} />
       </div>
-      <div className="flex flex-col gap-2 border-t border-line px-3 pt-3 md:max-lg:items-center md:max-lg:px-0">
+      <div className="flex flex-col gap-2 border-t border-line px-4 py-3 md:max-lg:items-center md:max-lg:px-0">
         <FeedStrip />
         <LiveIndicator />
         <p className={`text-xs text-fg2 ${RAIL_SR}`}>

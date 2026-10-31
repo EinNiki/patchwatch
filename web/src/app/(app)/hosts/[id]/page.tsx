@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { useApi } from "@/lib/useApi";
+import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime, kernelBase, uptime } from "@/lib/format";
 import { CVE_STATUS, HOST_STATUS } from "@/lib/status";
 import type { Feed, HistoryRow, Host, HostCve } from "@/lib/types";
@@ -281,7 +281,7 @@ function CveSection({
                 {list.map((c) => (
                   <tr key={c.cve_id}>
                     <td className="cell-primary">
-                      <Link href={`/cves?q=${c.cve_id}`} className="mono font-medium">
+                      <Link href={`/cves/${c.cve_id}`} className="mono font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.cve_id}`)} onFocus={() => prefetchApi(`/cves/${c.cve_id}`)}>
                         {c.cve_id}
                       </Link>
                       {c.watched ? <span className="ml-2 inline-flex align-middle"><Marker>Watchlist</Marker></span> : null}

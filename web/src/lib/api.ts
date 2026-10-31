@@ -1,3 +1,5 @@
+import { clearApiCache } from "./apiCache";
+
 // Dünner Client für die Rust-API. Ein Backend im Sinne von Next.js gibt es nicht.
 
 export class ApiError extends Error {
@@ -36,6 +38,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
     // Abgelaufene Sitzung: App leitet zur Anmeldung. Der Login selbst ist ausgenommen.
     if (res.status === 401 && path !== "/auth/login" && typeof window !== "undefined") {
+      clearApiCache();
       window.dispatchEvent(new Event("pw:unauthorized"));
     }
     const ra = Number(res.headers.get("retry-after"));

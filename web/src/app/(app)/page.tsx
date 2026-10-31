@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useApi } from "@/lib/useApi";
+import { prefetchApi, useApi } from "@/lib/useApi";
 import type { Feed, Host, HostStatus } from "@/lib/types";
 import { HOST_STATUS, HOST_STATUS_ORDER } from "@/lib/status";
 import { kernelBase, uptime } from "@/lib/format";
@@ -284,7 +284,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
   return (
     <tr data-flash={flash ? "" : undefined}>
       <td className="cell-primary">
-        <Link href={`/hosts/${h.id}`} className="font-semibold">
+        <Link href={`/hosts/${h.id}`} className="font-semibold" onPointerEnter={() => prefetchHost(h.id)} onFocus={() => prefetchHost(h.id)}>
           {h.name}
         </Link>
         {h.is_proxmox ? <span className="ml-2 inline-flex align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
@@ -383,3 +383,6 @@ export default function HostsPage() {
     </Suspense>
   );
 }
+
+/** Host-Detail lädt drei Abrufe; Hover/Fokus wärmt sie vor, damit die Seite ohne Skeleton erscheint. */
+const prefetchHost = (id: number) => prefetchApi(`/hosts/${id}`, `/hosts/${id}/cves?limit=200`, `/hosts/${id}/history?limit=30`);

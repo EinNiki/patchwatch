@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
-import { useApi } from "@/lib/useApi";
+import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import type { CveDetail, CveListItem, Feed } from "@/lib/types";
 import type { StatusInfo } from "@/lib/status";
@@ -16,7 +16,7 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { NavIcon } from "@/components/Icons";
 import { useFlash } from "@/lib/useFlash";
 import { Button, Field, TextInput } from "@/components/Controls";
-import { DistroChip, Marker } from "@/components/DistroChip";
+import { DistroChip } from "@/components/DistroChip";
 import { PageHeader } from "@/components/PageHeader";
 
 const PAGE = 100;
@@ -27,6 +27,13 @@ const FEED_STATE: Record<Feed["state"], StatusInfo> = {
   stale: { label: "Veraltet", tone: "warn", icon: "clock", rank: 1 },
   never: { label: "Noch nie abgerufen", tone: "unknown", icon: "unknown", rank: 2 },
 };
+
+const FIX_LABEL: Record<string, string> = { fixed: "gefixt", open: "offen" };
+const LEGACY_SPLIT: Record<string, { debian: string; ubuntu: string }> = {
+  debian_fixed_ubuntu_open: { debian: "fixed", ubuntu: "open" },
+  ubuntu_fixed_debian_open: { debian: "open", ubuntu: "fixed" },
+};
+const fixParam = (v: string | null) => (v === "fixed" || v === "open" ? v : "");
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -128,14 +135,18 @@ function CveView() {
   const onlyWatch = params.get("watchlist") === "1";
   const allReleases = params.get("releases") === "all";
   const distro = ["debian", "ubuntu"].includes(params.get("distro") ?? "") ? (params.get("distro") as string) : "";
+  // Alt-URLs mit `split=` werden auf die beiden Distro-Filter abgebildet.
   const splitRaw = params.get("split") ?? "";
-  const split = ["debian_fixed_ubuntu_open", "ubuntu_fixed_debian_open"].includes(splitRaw) ? splitRaw : "";
+  const legacy = LEGACY_SPLIT[splitRaw];
+  const debianFix = fixParam(params.get("debian")) || legacy?.debian || "";
+  const ubuntuFix = fixParam(params.get("ubuntu")) || legacy?.ubuntu || "";
   const [qInput, setQInput] = useState(urlQ);
   const q = useDebounced(qInput, 300);
   const [limit, setLimit] = useState(PAGE);
   const [newId, setNewId] = useState("");
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
   const [newNote, setNewNote] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -144,10 +155,11 @@ function CveView() {
   if (q.trim()) qs.set("q", q.trim());
   if (allReleases) qs.set("releases", "all");
   if (distro) qs.set("distro", distro);
-  if (split) qs.set("split", split);
+  if (debianFix) qs.set("debian", debianFix);
+  if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
   const cves = useApi<CveListItem[]>(`/cves?${qs}`, 60_000, ["host_cve_status", "report_received"]);
-  const filtered = onlyWatch || q.trim() !== "" || allReleases || distro !== "" || split !== "";
-  const activeFilters = [q.trim(), onlyWatch, allReleases, distro, split].filter(Boolean).length;
+  const filtered = onlyWatch || q.trim() !== "" || allReleases || distro !== "" || debianFix !== "" || ubuntuFix !== "";
+  const activeFilters = [q.trim(), onlyWatch, allReleases, distro, debianFix, ubuntuFix].filter(Boolean).length;
   const flashed = useFlash(
     cves.data,
     (c) => c.id,
@@ -157,20 +169,47 @@ function CveView() {
   /** Filter stehen in der URL (teilbar, Zurück-Taste funktioniert). */
   function setParam(key: string, value: string | null) {
     const p = new URLSearchParams(params.toString());
+    if (legacy) {
+      p.delete("split");
+      if (debianFix) p.set("debian", debianFix);
+      if (ubuntuFix) p.set("ubuntu", ubuntuFix);
+    }
     if (value) p.set(key, value);
     else p.delete(key);
     router.replace(p.toString() ? `${pathname}?${p}` : pathname, { scroll: false });
   }
   const setWatchFilter = (on: boolean) => setParam("watchlist", on ? "1" : null);
 
+  /** Ersetzt nur die betroffene Zeile durch ihren frischen Stand (kein Neuladen der Liste). */
+  async function refreshRow(id: string) {
+    const rowQs = new URLSearchParams({ q: id, limit: "20" });
+    if (allReleases) rowQs.set("releases", "all");
+    const rows = await api.get<CveListItem[]>(`/cves?${rowQs}`);
+    const fresh = rows.find((r) => r.id === id);
+    if (fresh) cves.mutate((list) => list.map((x) => (x.id === id ? fresh : x)));
+  }
+
+  /** Optimistisch: der Stern springt sofort, die Anfrage läuft im Hintergrund, bei Fehler Rollback mit Hinweis. */
   async function toggle(c: CveListItem) {
-    setFormError(null);
+    const want = !c.watched;
+    if (pendingIds.has(c.id)) return;
+    setNotice(null);
+    setPendingIds((s) => new Set(s).add(c.id));
+    cves.mutate((list) => list.map((x) => (x.id === c.id ? { ...x, watched: want } : x)));
     try {
-      if (c.watched) await api.del(`/watchlist/${c.id}`);
-      else await api.put(`/watchlist/${c.id}`);
-      await cves.reload();
+      if (want) await api.put(`/watchlist/${c.id}`);
+      else await api.del(`/watchlist/${c.id}`);
+      if (onlyWatch && !want) cves.mutate((list) => list.filter((x) => x.id !== c.id));
+      else await refreshRow(c.id).catch(() => undefined);
     } catch {
-      setFormError("Watchlist konnte nicht geändert werden.");
+      cves.mutate((list) => list.map((x) => (x.id === c.id ? { ...x, watched: c.watched } : x)));
+      setNotice(`${c.id}: Die Watchlist konnte nicht geändert werden. Der Stand wurde zurückgesetzt.`);
+    } finally {
+      setPendingIds((s) => {
+        const n = new Set(s);
+        n.delete(c.id);
+        return n;
+      });
     }
   }
 
@@ -178,22 +217,34 @@ function CveView() {
     e.preventDefault();
     const id = newId.trim().toUpperCase();
     if (!CVE_RE.test(id)) {
-      setFormError("Ungültige CVE-ID. Erwartet wird das Format CVE-2024-1086.");
+      setNotice("Ungültige CVE-ID. Erwartet wird das Format CVE-2024-1086.");
       return;
     }
     setBusy(true);
-    setFormError(null);
+    setNotice(null);
     try {
       await api.put(`/watchlist/${id}`, newNote.trim() ? { note: newNote.trim() } : {});
       setNewId("");
       setNewNote("");
       await cves.reload();
     } catch {
-      setFormError("CVE konnte nicht zur Watchlist hinzugefügt werden.");
+      setNotice("CVE konnte nicht zur Watchlist hinzugefügt werden.");
     } finally {
       setBusy(false);
     }
   }
+
+  const chips: { key: string; label: string; remove: () => void }[] = [];
+  if (q.trim()) chips.push({ key: "q", label: `Suche: ${q.trim()}`, remove: () => { setQInput(""); setParam("q", null); } });
+  if (distro) chips.push({ key: "distro", label: `Distribution: ${distro === "debian" ? "Debian" : "Ubuntu"}`, remove: () => setParam("distro", null) });
+  if (debianFix) chips.push({ key: "debian", label: `Debian: ${FIX_LABEL[debianFix]}`, remove: () => setParam("debian", null) });
+  if (ubuntuFix) chips.push({ key: "ubuntu", label: `Ubuntu: ${FIX_LABEL[ubuntuFix]}`, remove: () => setParam("ubuntu", null) });
+  if (onlyWatch) chips.push({ key: "watchlist", label: "Nur Watchlist", remove: () => setWatchFilter(false) });
+  if (allReleases) chips.push({ key: "releases", label: "Alle Releases", remove: () => setParam("releases", null) });
+  const resetAll = () => {
+    setQInput("");
+    router.replace(pathname, { scroll: false });
+  };
 
   return (
     <>
@@ -202,20 +253,23 @@ function CveView() {
 
       <section aria-labelledby="wl-h">
         <h2 id="wl-h" className="mb-2 text-lg font-semibold">
-          Watchlist und CVE-Liste
+          CVE-Liste
         </h2>
-        <form onSubmit={(e) => void add(e)} className="mb-4 flex flex-wrap items-end gap-3">
-          <Field label="CVE-ID beobachten">
-            <TextInput value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="CVE-2024-1086" className="w-48 font-mono" maxLength={20} />
-          </Field>
-          <Field label="Notiz (optional)">
-            <TextInput value={newNote} onChange={(e) => setNewNote(e.target.value)} className="w-64 max-w-full" maxLength={500} />
-          </Field>
-          <Button type="submit" variant="primary" disabled={busy || !newId.trim()}>
-            Zur Watchlist
-          </Button>
-        </form>
-        {formError ? <ErrorNote message={formError} /> : null}
+        <details className="mb-3 border-y border-line">
+          <summary className="flex min-h-9 cursor-pointer items-center gap-2 font-semibold text-fg2 max-md:min-h-11">Watchlist: CVE hinzufügen</summary>
+          <form onSubmit={(e) => void add(e)} className="flex flex-wrap items-end gap-3 pb-3 pt-1">
+            <Field label="CVE-ID beobachten">
+              <TextInput value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="CVE-2024-1086" className="w-48 font-mono" maxLength={20} />
+            </Field>
+            <Field label="Notiz (optional)">
+              <TextInput value={newNote} onChange={(e) => setNewNote(e.target.value)} className="w-64 max-w-full" maxLength={500} />
+            </Field>
+            <Button type="submit" variant="primary" disabled={busy || !newId.trim()}>
+              Zur Watchlist
+            </Button>
+          </form>
+        </details>
+        <div role="status">{notice ? <ErrorNote message={notice} /> : null}</div>
 
         <div className="mb-3 md:hidden">
           <Button aria-expanded={filtersOpen} aria-controls="cve-filters" onClick={() => setFiltersOpen((o) => !o)}>
@@ -236,14 +290,20 @@ function CveView() {
               <option value="ubuntu">Ubuntu</option>
             </select>
           </label>
-          <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
-            Stand der Fixes
-            <select value={split} onChange={(e) => setParam("split", e.target.value || null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
-              <option value="">Alle</option>
-              <option value="debian_fixed_ubuntu_open">Debian gefixt, Ubuntu offen</option>
-              <option value="ubuntu_fixed_debian_open">Ubuntu gefixt, Debian offen</option>
-            </select>
-          </label>
+          {(["debian", "ubuntu"] as const).map((d) => (
+            <label key={d} className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
+              {d === "debian" ? "Debian" : "Ubuntu"}
+              <select
+                value={d === "debian" ? debianFix : ubuntuFix}
+                onChange={(e) => setParam(d, e.target.value || null)}
+                className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11"
+              >
+                <option value="">Egal</option>
+                <option value="fixed">gefixt</option>
+                <option value="open">offen</option>
+              </select>
+            </label>
+          ))}
           <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
             <input type="checkbox" checked={onlyWatch} onChange={(e) => setWatchFilter(e.target.checked)} className="size-4 accent-(--accent)" />
             nur Watchlist
@@ -252,17 +312,27 @@ function CveView() {
             <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-(--accent)" />
             Alle Releases
           </label>
-          {filtered ? (
-            <Button
-              onClick={() => {
-                setQInput("");
-                router.replace(pathname, { scroll: false });
-              }}
-            >
-              Filter zurücksetzen
-            </Button>
-          ) : null}
         </div>
+
+        {chips.length > 0 ? (
+          <ul aria-label="Aktive Filter" className="mb-3 flex flex-wrap items-center gap-2">
+            {chips.map((c) => (
+              <li key={c.key}>
+                <button type="button" onClick={c.remove} aria-label={`Filter ${c.label} entfernen`} className="inline-flex min-h-7 items-center gap-1.5 rounded-sm border border-line bg-sunk px-2 text-xs text-fg hover:border-control max-md:min-h-11">
+                  {c.label}
+                  <NavIcon name="close" size={12} />
+                </button>
+              </li>
+            ))}
+            {chips.length > 1 ? (
+              <li>
+                <button type="button" onClick={resetAll} className="inline-flex min-h-7 items-center px-1 text-xs text-accent underline max-md:min-h-11">
+                  Alle zurücksetzen
+                </button>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
 
         {cves.error && !cves.data ? <ErrorNote message={cves.error} /> : null}
         {!cves.data ? (
@@ -285,27 +355,34 @@ function CveView() {
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
                   <tr>
+                    <th scope="col" className="w-10"><span className="th-pad"><span className="sr-only">Beobachten</span></span></th>
                     <th scope="col"><span className="th-pad">CVE</span></th>
                     <th scope="col"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col"><span className="th-pad">Distributionen</span></th>
                     <th scope="col"><span className="th-pad">Hosts</span></th>
                     <th scope="col" className="max-wide:hidden"><span className="th-pad">Prio</span></th>
                     <th scope="col" className="md:max-xl:hidden"><span className="th-pad">Aktualisiert</span></th>
-                    <th scope="col"><span className="th-pad">Watchlist</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   {cves.data.map((c) => (
-                    <tr key={c.id} data-flash={flashed.has(c.id) ? "" : undefined}>
+                    <tr key={c.id} data-flash={flashed.has(c.id) ? "" : undefined} data-watched={c.watched ? "" : undefined}>
+                      <td className="cell-star">
+                        <button
+                          type="button"
+                          className="star-btn"
+                          data-on={c.watched ? "" : undefined}
+                          onClick={() => void toggle(c)}
+                          aria-label={c.watched ? "Nicht mehr beobachten" : "Beobachten"}
+                          title={c.watched ? "Nicht mehr beobachten" : "Beobachten"}
+                        >
+                          <NavIcon name={c.watched ? "star-fill" : "star"} />
+                        </button>
+                      </td>
                       <td className="cell-primary">
-                        <Link href={`/cves/${c.id}`} className="mono whitespace-nowrap font-medium">
+                        <Link href={`/cves/${c.id}`} className="mono whitespace-nowrap font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.id}`)} onFocus={() => prefetchApi(`/cves/${c.id}`)}>
                           {c.id}
                         </Link>
-                        {c.watched ? (
-                          <span className="ml-2 inline-flex align-middle">
-                            <Marker>Watchlist</Marker>
-                          </span>
-                        ) : null}
                         {c.priority ? <div className="text-xs text-fg3 wide:hidden">Priorität {c.priority}</div> : null}
                       </td>
                       <td className="w-full min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
@@ -321,11 +398,6 @@ function CveView() {
                       <td className="mono max-wide:hidden">{c.priority ?? "–"}</td>
                       <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
                         <RelTime iso={c.updated_at} />
-                      </td>
-                      <td>
-                        <Button aria-pressed={c.watched} onClick={() => void toggle(c)} aria-label={`${c.id} ${c.watched ? "von der Watchlist entfernen" : "beobachten"}`}>
-                          {c.watched ? "Entfernen" : "Beobachten"}
-                        </Button>
                       </td>
                     </tr>
                   ))}

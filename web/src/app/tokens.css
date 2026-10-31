@@ -10,6 +10,9 @@
   --text-3: #5f6670;
   --accent: #2a5bb8;
   --accent-soft: #e3ebf8;
+  --watch-bg-from: rgb(42 91 184 / 0.1);
+  --watch-bg-to: rgb(42 91 184 / 0);
+  --watch-border: rgb(42 91 184 / 0.32);
   --ok: #1b6b3c;
   --ok-soft: #e3f1e8;
   --warn: #7d4e00;
@@ -35,6 +38,9 @@
     --text-3: #8a919a;
     --accent: #7ea6e8;
     --accent-soft: #1e2a3f;
+    --watch-bg-from: rgb(126 166 232 / 0.11);
+    --watch-bg-to: rgb(126 166 232 / 0);
+    --watch-border: rgb(126 166 232 / 0.34);
     --ok: #7fcf9b;
     --ok-soft: #18291f;
     --warn: #e6b458;
@@ -60,6 +66,9 @@
   --text-3: #8a919a;
   --accent: #7ea6e8;
   --accent-soft: #1e2a3f;
+  --watch-bg-from: rgb(126 166 232 / 0.11);
+  --watch-bg-to: rgb(126 166 232 / 0);
+  --watch-border: rgb(126 166 232 / 0.34);
   --ok: #7fcf9b;
   --ok-soft: #18291f;
   --warn: #e6b458;

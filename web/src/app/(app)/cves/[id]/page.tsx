@@ -2,7 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { useApi } from "@/lib/useApi";
+import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { CVE_STATUS } from "@/lib/status";
 import type { CveDetail } from "@/lib/types";
@@ -96,7 +96,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
                 {hosts.map((h) => (
                   <tr key={h.id}>
                     <td className="cell-primary">
-                      <Link href={`/hosts/${h.id}`} className="font-semibold">
+                      <Link href={`/hosts/${h.id}`} className="font-semibold" onPointerEnter={() => prefetchApi(`/hosts/${h.id}`)} onFocus={() => prefetchApi(`/hosts/${h.id}`)}>
                         {h.name}
                       </Link>
                     </td>

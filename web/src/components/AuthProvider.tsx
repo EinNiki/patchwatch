@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setCsrf } from "@/lib/api";
+import { clearApiCache } from "@/lib/apiCache";
 import type { Me } from "@/lib/types";
 
 interface AuthValue {
@@ -61,6 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await api.post("/auth/logout");
     } finally {
       setCsrf(null);
+      clearApiCache();
       router.replace("/login");
     }
   };

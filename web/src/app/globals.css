@@ -117,6 +117,55 @@ code,
   justify-content: flex-end;
 }
 
+/* Watchlist-Zeile: leichter Akzentverlauf (links stärker, nach rechts ausblendend) mit 1-px-Rand. Der einzige Verlauf der Oberfläche.
+   Der Verlauf liegt auf der Zeile, der Rand als inset-Schatten auf den Zellen; Hover/Fokus legen die Zeilenfarbe darüber. */
+.tbl tbody tr[data-watched] {
+  background-image: linear-gradient(90deg, var(--watch-bg-from), var(--watch-bg-to));
+}
+.tbl tbody tr[data-watched] td {
+  border-bottom-color: transparent;
+  box-shadow: inset 0 1px 0 var(--watch-border), inset 0 -1px 0 var(--watch-border);
+}
+.tbl tbody tr[data-watched] td:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+  box-shadow: inset 0 1px 0 var(--watch-border), inset 0 -1px 0 var(--watch-border), inset 1px 0 0 var(--watch-border);
+}
+.tbl tbody tr[data-watched] td:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  box-shadow: inset 0 1px 0 var(--watch-border), inset 0 -1px 0 var(--watch-border), inset -1px 0 0 var(--watch-border);
+}
+.tbl tbody tr:focus-within td {
+  background: color-mix(in srgb, var(--sunk) 60%, transparent);
+}
+
+/* Stern-Spalte: schmale Zelle, der Stern ist zugleich der Schalter. */
+.tbl .cell-star {
+  width: 2.5rem;
+  padding-right: 0;
+}
+.star-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  margin: -6px 0;
+  border-radius: 4px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
+}
+.star-btn:hover {
+  background: var(--sunk);
+  color: var(--text);
+}
+.star-btn[data-on] {
+  color: var(--accent);
+}
+
 /* Live-Update: geänderte Zeile blitzt kurz auf (nur Opacity einer Überlagerung). */
 .tbl td::after {
   content: "";
@@ -228,6 +277,37 @@ code,
     display: inline-flex;
     align-items: center;
     min-height: var(--touch);
+  }
+  .tbl.stack tbody tr[data-watched] {
+    margin: 4px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--watch-border);
+    border-radius: 4px;
+  }
+  .tbl.stack tbody tr[data-watched] td {
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .tbl.stack tr:has(.cell-star) {
+    position: relative;
+  }
+  .tbl.stack td.cell-star {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: auto;
+  }
+  .tbl.stack tr[data-watched] td.cell-star {
+    top: 0;
+    right: 0;
+  }
+  .tbl.stack td.cell-star + td.cell-primary {
+    padding-right: var(--touch);
+  }
+  .star-btn {
+    width: var(--touch);
+    height: var(--touch);
+    margin: 0;
   }
   .tbl.stack td.cell-hide {
     display: none;

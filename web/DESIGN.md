@@ -168,3 +168,30 @@ per `grid-template-rows`, begrenzt per `contain`). Keine Bibliothek, CSS genügt
 
 Deutsch, präzise, Aussagesatz oder Imperativ. Beispiele: „Noch kein Report“, „Neustart nötig“, „wartet auf Agent …“,
 „Token wird nicht erneut angezeigt“, „Fix angekündigt (voraussichtlich in 7.0.0-43.43)“. Keine Ausrufezeichen, kein Emoji, keine Anrede.
+
+## Watchlist-Markierung (v2.2)
+
+Die ganze Zeile einer beobachteten CVE trägt einen leichten Akzentverlauf mit 1-px-Rand (4 px Radius). Es ist der einzige Verlauf der Oberfläche; alle anderen Flächen bleiben flach, es gibt kein Gittermuster.
+
+| Token | Hell | Dunkel |
+| --- | --- | --- |
+| `--watch-bg-from` (links) | Akzent `#2a5bb8` 10 % | Akzent `#7ea6e8` 11 % |
+| `--watch-bg-to` (rechts) | Akzent 0 % | Akzent 0 % |
+| `--watch-border` | Akzent 32 % | Akzent 34 % |
+
+Der Stern in der schmalen ersten Spalte ist zugleich der Schalter (`aria-label` und Tooltip „Beobachten“ / „Nicht mehr beobachten“, sichtbarer Fokus, 32 px Desktop, 44 px unter 768 px). Gefüllter Stern plus Rand tragen die Information, die Farbe allein nicht.
+Hover und Fokus der Zeile legen `sunk` 60 % über den Verlauf. Der Verlauf ist statisch; es gibt keine Animation, `prefers-reduced-motion` ändert nichts.
+
+Gemessener Kontrast auf dem dunkelsten Verlaufspunkt (links, Zeilenhintergrund = Seitenfläche + Verlauf), Hover in Klammern:
+
+| Text | Hell | Dunkel |
+| --- | --- | --- |
+| `text` | 13.5 (14.1) | 12.0 (12.3) |
+| `text-2` | 6.6 (6.9) | 6.7 (6.9) |
+| `text-3` | 4.68 (4.90) | 4.72 (4.84) |
+| Akzent/Links | 5.2 (5.4) | 6.1 (6.2) |
+| `crit` | 5.9 (6.2) | 6.3 (6.5) |
+| `warn` | 5.7 (6.0) | 7.9 (8.1) |
+| `unknown` | 6.1 (6.4) | 7.4 (7.6) |
+
+Alle Werte liegen über 4.5:1 (schwächster: `text-3` hell, 4.68).
