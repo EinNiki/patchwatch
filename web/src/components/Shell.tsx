@@ -41,7 +41,7 @@ function FeedStrip() {
   const s = feedSummary(data);
   if (!s) return null;
   return (
-    <Link href="/cves#feeds" className="flex items-start gap-1.5 text-[12px] text-fg2 no-underline hover:text-fg" title="Zustand der CVE-Feeds anzeigen">
+    <Link href="/cves#feeds" className="flex items-start gap-1.5 text-xs text-fg2 no-underline hover:text-fg" title="Zustand der CVE-Feeds anzeigen">
       <span className={s.ok ? "text-ok" : s.info.tone === "warn" ? "text-warn" : "text-unknown"}>
         <Icon name={s.info.icon} />
       </span>
@@ -54,7 +54,7 @@ function LiveIndicator() {
   const state = useLiveState();
   const text = state === "live" ? "Live" : state === "connecting" ? "Verbinde …" : "Getrennt, verbinde neu …";
   return (
-    <p className="flex items-center gap-1.5 text-[12px] text-fg2" role="status">
+    <p className="flex items-center gap-1.5 text-xs text-fg2" role="status">
       <span aria-hidden="true" className={`inline-block size-2 rounded-full ${state === "live" ? "bg-ok" : "border border-fg3"}`} />
       {text}
     </p>
@@ -120,7 +120,7 @@ function SidebarBody({ pathname }: { pathname: string }) {
       <div className="flex flex-col gap-2 border-t border-line px-4 pt-3">
         <FeedStrip />
         <LiveIndicator />
-        <p className="text-[12px] text-fg2">
+        <p className="text-xs text-fg2">
           <span className="sr-only">Angemeldet als </span>
           {me.username}
         </p>

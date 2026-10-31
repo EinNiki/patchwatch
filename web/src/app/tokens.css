@@ -1,0 +1,139 @@
+/* Design-Tokens v2.1, siehe web/DESIGN.md. Dunkel folgt dem System oder data-theme, Hell ist der Fallback. */
+:root {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --sunk: #eef0f2;
+  --line: #e1e4e8;
+  --control: #7c8590;
+  --text: #1b1e22;
+  --text-2: #4a5059;
+  --text-3: #5f6670;
+  --accent: #2a5bb8;
+  --accent-soft: #e3ebf8;
+  --ok: #1b6b3c;
+  --ok-soft: #e3f1e8;
+  --warn: #7d4e00;
+  --warn-soft: #f8ecd2;
+  --crit: #a3261f;
+  --crit-soft: #fbe4e1;
+  --unknown: #4b5565;
+  --unknown-soft: #e8ebef;
+  --shadow-float: 0 8px 24px rgb(15 20 30 / 0.16);
+  --scrim: rgb(15 20 30 / 0.4);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a;
+    --surface: #1a1d21;
+    --sunk: #202328;
+    --line: #2b2f35;
+    --control: #6b7480;
+    --text: #e4e6e9;
+    --text-2: #a8aeb6;
+    --text-3: #8a919a;
+    --accent: #7ea6e8;
+    --accent-soft: #1e2a3f;
+    --ok: #7fcf9b;
+    --ok-soft: #18291f;
+    --warn: #e6b458;
+    --warn-soft: #2e2410;
+    --crit: #f28b82;
+    --crit-soft: #38191a;
+    --unknown: #aeb7c5;
+    --unknown-soft: #252a31;
+    --shadow-float: 0 8px 24px rgb(0 0 0 / 0.5);
+    --scrim: rgb(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15171a;
+  --surface: #1a1d21;
+  --sunk: #202328;
+  --line: #2b2f35;
+  --control: #6b7480;
+  --text: #e4e6e9;
+  --text-2: #a8aeb6;
+  --text-3: #8a919a;
+  --accent: #7ea6e8;
+  --accent-soft: #1e2a3f;
+  --ok: #7fcf9b;
+  --ok-soft: #18291f;
+  --warn: #e6b458;
+  --warn-soft: #2e2410;
+  --crit: #f28b82;
+  --crit-soft: #38191a;
+  --unknown: #aeb7c5;
+  --unknown-soft: #252a31;
+  --shadow-float: 0 8px 24px rgb(0 0 0 / 0.5);
+  --scrim: rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+
+/* Nicht-Farb-Tokens: Bewegung, Layout-Maße, Ebenen. */
+:root {
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  --sidebar-w: 220px;
+  --rail-w: 56px;
+  --topbar-h: 48px;
+  --row-h: 36px;
+  --head-h: 32px;
+  --chip-h: 22px;
+  --touch: 44px;
+
+  --z-sticky: 10;
+  --z-sidebar: 30;
+  --z-overlay: 40;
+  --z-toast: 50;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunk: var(--sunk);
+  --color-line: var(--line);
+  --color-control: var(--control);
+  --color-fg: var(--text);
+  --color-fg2: var(--text-2);
+  --color-fg3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-crit: var(--crit);
+  --color-crit-soft: var(--crit-soft);
+  --color-unknown: var(--unknown);
+  --color-unknown-soft: var(--unknown-soft);
+  --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+/* Typografie in rem (1rem = 16px, bleibt beim Vergrößern der Schrift intakt): 12 · 13 · 14 · 16 · 18. */
+@theme {
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.125rem;
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+
+  /* Breakpoints (min-width): md 768 Tablet, lg 1024 Desktop, xl 1440, wide 1600 (Zusatzspalten), 2xl 1920. */
+  --breakpoint-xs: 30rem;
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 90rem;
+  --breakpoint-wide: 100rem;
+  --breakpoint-2xl: 120rem;
+}

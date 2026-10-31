@@ -31,7 +31,7 @@ export function ConfirmDialog({
   }, [open]);
   return (
     <dialog ref={ref} onCancel={onCancel} aria-labelledby={titleId}>
-      <h2 id={titleId} className="mb-2 text-base font-semibold">
+      <h2 id={titleId} className="mb-2 text-lg font-semibold">
         {title}
       </h2>
       <div className="mb-4 text-fg2">{children}</div>

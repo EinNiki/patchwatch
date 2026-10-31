@@ -43,7 +43,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
       <PageHeader title={cve.id}>{cve.watched ? <Marker>Watchlist</Marker> : null}</PageHeader>
       <p className="mb-2 max-w-prose text-fg2">{cve.description ?? "Noch nicht in den Feeds. Sobald ein Feed die CVE kennt, erscheinen Beschreibung und Status."}</p>
       {cve.note ? <p className="mb-2 text-accent">Notiz: {cve.note}</p> : null}
-      <dl className="mb-6 flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
+      <dl className="mb-6 flex flex-wrap gap-x-8 gap-y-1 text-sm">
         {cve.priority ? (
           <div>
             <dt className="inline text-fg3">Priorität </dt>
@@ -65,14 +65,14 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
       </dl>
 
       <section aria-labelledby="dist-h" className="mb-8">
-        <h2 id="dist-h" className="mb-2 text-base font-semibold">
+        <h2 id="dist-h" className="mb-2 text-lg font-semibold">
           Distributionen
         </h2>
         {distros.length === 0 ? (
           <Empty title="Keine Quellendaten">Die aktiven Feeds kennen diese CVE (noch) nicht.</Empty>
         ) : (
           <>
-            <p className="mb-1 text-[12px] font-semibold text-fg2">Releases auf deinen Hosts</p>
+            <p className="mb-1 text-xs font-semibold text-fg2">Releases auf deinen Hosts</p>
             <div className="mb-3 flex flex-wrap gap-2">
               {mine.length === 0 ? <span className="text-fg3">Keines der Releases läuft auf einem Host.</span> : mine.map((x) => <DistroChip key={`${x.source}/${x.release}`} d={x} />)}
             </div>
@@ -104,7 +104,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
       </section>
 
       <section aria-labelledby="hosts-h" className="mb-8">
-        <h2 id="hosts-h" className="mb-2 text-base font-semibold">
+        <h2 id="hosts-h" className="mb-2 text-lg font-semibold">
           Betroffene Hosts
         </h2>
         {hosts.length === 0 ? (
@@ -145,7 +145,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
       </section>
 
       <section aria-labelledby="src-h">
-        <h2 id="src-h" className="mb-2 text-base font-semibold">
+        <h2 id="src-h" className="mb-2 text-lg font-semibold">
           Quellenzeilen
         </h2>
         {sources.length === 0 ? (

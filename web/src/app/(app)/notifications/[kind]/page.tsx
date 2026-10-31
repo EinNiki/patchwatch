@@ -197,7 +197,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
 
         {spec.config.length > 0 || spec.secret ? (
           <fieldset className="mb-6 flex flex-col gap-4">
-            <legend className="mb-2 text-base font-semibold">Zugang</legend>
+            <legend className="mb-2 text-lg font-semibold">Zugang</legend>
             {spec.config.map((f) => (
               <div key={f.key}>
                 <Field label={f.label}>
@@ -211,14 +211,14 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                     className="font-mono"
                   />
                 </Field>
-                {f.hint ? <p className="mt-1 text-[12px] text-fg3">{f.hint}</p> : null}
+                {f.hint ? <p className="mt-1 text-xs text-fg3">{f.hint}</p> : null}
               </div>
             ))}
             {spec.secret ? (
               <div>
                 {ch.secret_set && !replacing ? (
                   <>
-                    <p className="mb-1 text-[12px] font-semibold text-fg2">{spec.secret.label}</p>
+                    <p className="mb-1 text-xs font-semibold text-fg2">{spec.secret.label}</p>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex min-h-8 items-center gap-1.5 border border-line bg-sunk px-2 text-fg2">
                         <Icon name="ok" /> Gespeichert
@@ -232,7 +232,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                         </Button>
                       ) : null}
                     </div>
-                    {clearSecret ? <p className="mt-1 text-[12px] text-warn">Wird beim Speichern entfernt.</p> : null}
+                    {clearSecret ? <p className="mt-1 text-xs text-warn">Wird beim Speichern entfernt.</p> : null}
                   </>
                 ) : (
                   <>
@@ -261,14 +261,14 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                     ) : null}
                   </>
                 )}
-                <p className="mt-1 text-[12px] text-fg3">{spec.secret.hint} Wird verschlüsselt gespeichert und nie wieder angezeigt.</p>
+                <p className="mt-1 text-xs text-fg3">{spec.secret.hint} Wird verschlüsselt gespeichert und nie wieder angezeigt.</p>
               </div>
             ) : null}
           </fieldset>
         ) : null}
 
         <fieldset className="mb-6">
-          <legend className="mb-2 text-base font-semibold">Ereignisse</legend>
+          <legend className="mb-2 text-lg font-semibold">Ereignisse</legend>
           <ul className="flex flex-col gap-3">
             {EVENTS.map((ev) => (
               <li key={ev.id}>
@@ -281,7 +281,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                   />
                   <span>
                     <span className="font-semibold">{ev.label}</span>
-                    <span className="block text-[12px] text-fg3">{ev.hint}</span>
+                    <span className="block text-xs text-fg3">{ev.hint}</span>
                   </span>
                 </label>
               </li>
@@ -302,7 +302,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
               </datalist>
             </div>
           ) : null}
-          <p className="mt-3 text-[12px] text-fg3">Proxmox-Hosts mit unbekannter CVE-Lage lösen bewusst keinen Alarm aus.</p>
+          <p className="mt-3 text-xs text-fg3">Proxmox-Hosts mit unbekannter CVE-Lage lösen bewusst keinen Alarm aus.</p>
         </fieldset>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -311,11 +311,11 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
           </Button>
           <Link href="/notifications">Zur Übersicht</Link>
         </div>
-        {dirty ? <p className="mt-2 text-[12px] text-fg3">Ungespeicherte Änderungen. Die Testnachricht nutzt die gespeicherte Konfiguration.</p> : null}
+        {dirty ? <p className="mt-2 text-xs text-fg3">Ungespeicherte Änderungen. Die Testnachricht nutzt die gespeicherte Konfiguration.</p> : null}
       </form>
 
       <section aria-labelledby="res-h" className="mt-8 max-w-xl">
-        <h2 id="res-h" className="mb-1 text-base font-semibold">
+        <h2 id="res-h" className="mb-1 text-lg font-semibold">
           Letztes Ergebnis
         </h2>
         {ch.last_error ? (

@@ -101,7 +101,7 @@ function Retention() {
       <Field label="Report-Historie aufbewahren (Tage)">
         <TextInput type="number" inputMode="numeric" min={min} max={max} value={shown} onChange={(e) => setValue(e.target.value)} className="w-32" required />
       </Field>
-      <p className="text-[12px] text-fg3">
+      <p className="text-xs text-fg3">
         Ältere Reports löscht der tägliche Aufräum-Job. Erlaubt: {min} bis {max} Tage. Standard der Server-Konfiguration: {def} Tage (<Mono>PATCHWATCH_REPORT_RETENTION_DAYS</Mono>).
       </p>
       {error ? <ErrorNote message={error} /> : null}
@@ -124,7 +124,7 @@ export default function SettingsPage() {
       <PageHeader title="Einstellungen" />
 
       <section aria-labelledby="acct-h" className="mb-8">
-        <h2 id="acct-h" className="mb-1 text-base font-semibold">
+        <h2 id="acct-h" className="mb-1 text-lg font-semibold">
           Konto
         </h2>
         <p className="mb-3 text-fg2">
@@ -134,15 +134,15 @@ export default function SettingsPage() {
       </section>
 
       <section aria-labelledby="look-h" className="mb-8">
-        <h2 id="look-h" className="mb-2 text-base font-semibold">
+        <h2 id="look-h" className="mb-2 text-lg font-semibold">
           Darstellung
         </h2>
         <ThemeSelect />
-        <p className="mt-1 max-w-prose text-[12px] text-fg3">„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.</p>
+        <p className="mt-1 max-w-prose text-xs text-fg3">„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.</p>
       </section>
 
       <section aria-labelledby="data-h">
-        <h2 id="data-h" className="mb-2 text-base font-semibold">
+        <h2 id="data-h" className="mb-2 text-lg font-semibold">
           Daten
         </h2>
         <Retention />

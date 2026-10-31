@@ -23,7 +23,7 @@ export function DistroChip({ d }: { d: Distro }) {
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[2px] px-1.5 py-0.5 text-[12px] font-medium leading-tight ${
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[2px] px-1.5 py-0.5 text-xs font-medium leading-tight ${
         s.muted ? "bg-unknown-soft text-fg2" : TONE_CLASS[s.tone]
       } ${d.mine ? "" : "border border-dashed border-current"}`}
     >
@@ -43,5 +43,5 @@ export function DistroChip({ d }: { d: Distro }) {
 
 /** Gedämpfter Marker (Rahmen statt Fläche), z. B. „Watchlist“. */
 export function Marker({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex items-center whitespace-nowrap rounded-[2px] border border-line px-1.5 py-0.5 text-[12px] leading-tight text-fg2">{children}</span>;
+  return <span className="inline-flex items-center whitespace-nowrap rounded-[2px] border border-line px-1.5 py-0.5 text-xs leading-tight text-fg2">{children}</span>;
 }

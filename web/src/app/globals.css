@@ -1,96 +1,6 @@
 @import "tailwindcss";
 
-/* Design-Tokens: siehe DESIGN.md. Hell ist Standard, Dunkel folgt dem System oder data-theme. */
-:root {
-  --bg: #f6f4ef;
-  --surface: #fdfcfa;
-  --sunk: #edeae2;
-  --line: #d6d1c5;
-  --control: #8a8578;
-  --text: #1d1c18;
-  --text-2: #524f47;
-  --text-3: #686459;
-  --accent: #1b5586;
-  --accent-soft: #e1eaf2;
-  --ok: #1c6637;
-  --ok-soft: #e2efe6;
-  --warn: #835000;
-  --warn-soft: #f9ecd0;
-  --crit: #a0211a;
-  --crit-soft: #fae2df;
-  --unknown: #4a5361;
-  --unknown-soft: #e6e9ee;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #141412;
-    --surface: #1b1a17;
-    --sunk: #232220;
-    --line: #3a3832;
-    --control: #7a766b;
-    --text: #ece9e1;
-    --text-2: #b7b3a7;
-    --text-3: #9a968b;
-    --accent: #86b9ea;
-    --accent-soft: #1d2b3a;
-    --ok: #7fcf9b;
-    --ok-soft: #1b2e22;
-    --warn: #ebb75a;
-    --warn-soft: #33280f;
-    --crit: #f5897f;
-    --crit-soft: #3c1c19;
-    --unknown: #b3bbc9;
-    --unknown-soft: #272b32;
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme="dark"] {
-  --bg: #141412;
-  --surface: #1b1a17;
-  --sunk: #232220;
-  --line: #3a3832;
-  --control: #7a766b;
-  --text: #ece9e1;
-  --text-2: #b7b3a7;
-  --text-3: #9a968b;
-  --accent: #86b9ea;
-  --accent-soft: #1d2b3a;
-  --ok: #7fcf9b;
-  --ok-soft: #1b2e22;
-  --warn: #ebb75a;
-  --warn-soft: #33280f;
-  --crit: #f5897f;
-  --crit-soft: #3c1c19;
-  --unknown: #b3bbc9;
-  --unknown-soft: #272b32;
-  color-scheme: dark;
-}
-
-@theme inline {
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-sunk: var(--sunk);
-  --color-line: var(--line);
-  --color-control: var(--control);
-  --color-fg: var(--text);
-  --color-fg2: var(--text-2);
-  --color-fg3: var(--text-3);
-  --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
-  --color-ok: var(--ok);
-  --color-ok-soft: var(--ok-soft);
-  --color-warn: var(--warn);
-  --color-warn-soft: var(--warn-soft);
-  --color-crit: var(--crit);
-  --color-crit-soft: var(--crit-soft);
-  --color-unknown: var(--unknown);
-  --color-unknown-soft: var(--unknown-soft);
-  --font-sans: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
-}
+@import "./tokens.css";
 
 /* Basisstile und Komponenten liegen in Layern, damit Tailwind-Utilities (z. B. text-fg, no-underline) sie überschreiben können. */
 @layer base {
@@ -98,13 +8,14 @@ html {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 100%;
   line-height: 1.45;
   -webkit-text-size-adjust: 100%;
 }
 
 body {
   background: var(--bg);
+  font-size: var(--text-base);
   margin: 0;
   min-height: 100dvh;
 }
@@ -144,7 +55,7 @@ code,
 .tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--text-sm);
   background: var(--surface);
 }
 .tbl caption {
@@ -225,7 +136,7 @@ code,
     left: 12px;
     width: 8rem;
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .tbl.stack td.num {
     text-align: left;

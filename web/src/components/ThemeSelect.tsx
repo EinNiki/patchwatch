@@ -17,7 +17,7 @@ function readTheme(): Theme {
 export function ThemeSelect() {
   const [theme, setTheme] = useState<Theme>(() => (typeof window === "undefined" ? "system" : readTheme()));
   return (
-    <label className="flex items-center gap-1.5 text-[12px] text-fg2">
+    <label className="flex items-center gap-1.5 text-xs text-fg2">
       Farbschema
       <select
         value={theme}
@@ -34,7 +34,7 @@ export function ThemeSelect() {
             /* Speicher gesperrt: Auswahl gilt nur für diese Sitzung */
           }
         }}
-        className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-[12px] text-fg max-md:min-h-11"
+        className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-xs text-fg max-md:min-h-11"
       >
         <option value="system">System</option>
         <option value="light">Hell</option>

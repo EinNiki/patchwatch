@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes } from "react";
 
 const base =
-  "inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border px-3 py-1 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11";
+  "inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border px-3 py-1 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11";
 
 export function Button({
   variant = "default",
@@ -20,7 +20,7 @@ export function Button({
 export function TextInput({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`min-h-8 rounded-[3px] border border-control bg-sunk px-2 py-1 text-[13px] text-fg placeholder:text-fg3 max-md:min-h-11 ${className}`}
+      className={`min-h-8 rounded-[3px] border border-control bg-sunk px-2 py-1 text-sm text-fg placeholder:text-fg3 max-md:min-h-11 ${className}`}
       {...props}
     />
   );
@@ -28,7 +28,7 @@ export function TextInput({ className = "", ...props }: InputHTMLAttributes<HTML
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-[12px] font-semibold text-fg2">
+    <label className="flex flex-col gap-1 text-xs font-semibold text-fg2">
       {label}
       {children}
     </label>

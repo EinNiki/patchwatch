@@ -30,7 +30,7 @@ const ACTIONS = {
     // Ein früherer Durchlauf kann die Anforderung schon gesetzt haben (Button dann gesperrt).
     const btn = page.getByRole("button", { name: "web-01 jetzt aktualisieren" });
     if (await btn.isEnabled()) await btn.click();
-    await page.getByText("wartet auf Agent").first().waitFor();
+    await page.getByText(/wartet auf Agent|Keine Antwort seit/).first().waitFor();
   },
   "agents-add": async (page) => {
     await page.getByRole("button", { name: "Agent hinzufügen" }).first().click();
@@ -50,13 +50,16 @@ const ACTIONS = {
     };
   },
   menu: async (page, vp) => {
-    if (vp !== "mobile") return "skip";
+    if (Number(vp) >= 768) return "skip";
     await page.getByRole("button", { name: "Menü" }).click();
     await page.getByRole("dialog", { name: "Navigation" }).waitFor();
   },
 };
 
-const viewports = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
+// PW_WIDTHS: Kommaliste der Viewport-Breiten; Dateinamen <seite>-<breite>-<schema>.png.
+const viewports = Object.fromEntries(
+  (process.env.PW_WIDTHS ?? "1440,390").split(",").map((w) => [w.trim(), { width: Number(w), height: Number(w) < 768 ? 844 : 900 }]),
+);
 
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });

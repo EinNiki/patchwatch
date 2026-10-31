@@ -35,17 +35,17 @@ function TokenStep({ name, token, onDone }: { name: string; token: string; onDon
       <p className="mb-3 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
         Der Token für <strong>{name}</strong> wird nur jetzt angezeigt. Der Server speichert nur einen Hash und kann ihn nicht erneut anzeigen.
       </p>
-      <p className="mb-1 text-[12px] font-semibold text-fg2">1. Token kopieren</p>
+      <p className="mb-1 text-xs font-semibold text-fg2">1. Token kopieren</p>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{token}</code>
         <CopyButton text={token} label="Token kopieren" />
       </div>
-      <p className="mb-1 text-[12px] font-semibold text-fg2">2. Auf dem Host ausführen</p>
+      <p className="mb-1 text-xs font-semibold text-fg2">2. Auf dem Host ausführen</p>
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{cmd}</code>
         <CopyButton text={cmd} label="Befehl kopieren" />
       </div>
-      <p className="mb-4 text-[12px] text-fg2">
+      <p className="mb-4 text-xs text-fg2">
         Der Installer prüft die SHA256-Summe des Binarys und fragt den Token ab (Eingabe wird nicht angezeigt). Alternativ liest{" "}
         <Mono>--token-file /pfad</Mono> ihn aus einer Datei. Der Token steht danach nur in <Mono>/etc/patchwatch/token</Mono> (root, 0600).
       </p>
@@ -99,7 +99,7 @@ function AddDialog({ open, onClose, onCreated }: { open: boolean; onClose: () =>
           <Field label="Name des Hosts">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="web1" maxLength={63} autoComplete="off" autoFocus />
           </Field>
-          <p className="mb-3 mt-1 text-[12px] text-fg3">Erlaubt sind Buchstaben, Ziffern, Punkt, Unterstrich und Bindestrich. Der Name lässt sich später nicht ändern.</p>
+          <p className="mb-3 mt-1 text-xs text-fg3">Erlaubt sind Buchstaben, Ziffern, Punkt, Unterstrich und Bindestrich. Der Name lässt sich später nicht ändern.</p>
           {error ? <div className="mb-3"><ErrorNote message={error} /></div> : null}
           <div className="flex justify-end gap-2">
             <Button onClick={close}>Abbrechen</Button>
@@ -290,7 +290,7 @@ export default function AgentsPage() {
           </table>
         </div>
       )}
-      <p className="mt-4 max-w-prose text-[12px] text-fg3">
+      <p className="mt-4 max-w-prose text-xs text-fg3">
         „Jetzt aktualisieren“ bittet den Agent, beim nächsten Check-in (standardmäßig alle 5 Minuten) einen Report zu senden. Der Server startet nichts
         auf dem Host: Der Agent fragt nur an und bekommt „Report senden: ja/nein“ zurück.
       </p>

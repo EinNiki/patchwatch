@@ -125,7 +125,7 @@ function HostsView() {
           </section>
 
           <form role="search" aria-label="Hosts filtern" onSubmit={(e) => e.preventDefault()} className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
               Suche
               <TextInput
                 type="search"
@@ -135,12 +135,12 @@ function HostsView() {
                 className="w-64 max-w-full font-normal"
               />
             </label>
-            <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
               Status
               <select
                 value={status}
                 onChange={(e) => setParam({ status: e.target.value })}
-                className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-[13px] font-normal text-fg max-md:min-h-11"
+                className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11"
               >
                 <option value="">alle</option>
                 {HOST_STATUS_ORDER.map((s) => (
@@ -150,7 +150,7 @@ function HostsView() {
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-[13px]">
+            <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={rebootOnly} onChange={(e) => setParam({ reboot: e.target.checked ? "1" : null })} className="size-4 accent-[var(--accent)]" />
               nur Neustart nötig
             </label>
@@ -206,11 +206,11 @@ function HostRow({ h, feedOk }: { h: Host; feedOk: boolean }) {
           {h.name}
         </Link>
         {h.is_proxmox ? <span className="ml-2 rounded-[2px] border border-line px-1 text-[11px] text-fg2">Proxmox {h.proxmox_version}</span> : null}
-        {h.hostname && h.hostname !== h.name ? <div className="text-[12px] text-fg3">{h.hostname}</div> : null}
+        {h.hostname && h.hostname !== h.name ? <div className="text-xs text-fg3">{h.hostname}</div> : null}
       </td>
       <td data-label="Distribution / Kernel">
         <div>{h.pretty_name ?? (h.os_id ? `${h.os_id} ${h.os_version ?? ""}` : "–")}</div>
-        <div className="text-[12px]">
+        <div className="text-xs">
           <Mono>{h.running_kernel ? kernelBase(h.running_kernel) : "–"}</Mono>
           {newer ? (
             <span className="ml-1.5 inline-flex items-center gap-1 text-warn" title="Ein neuerer Kernel ist installiert, aber noch nicht gebootet">
@@ -244,7 +244,7 @@ function HostRow({ h, feedOk }: { h: Host; feedOk: boolean }) {
       <td data-label="Status">
         <StatusBadge info={HOST_STATUS[h.status]} />
         {h.reboot_needed && h.status !== "reboot_required" ? (
-          <div className="mt-1 inline-flex items-center gap-1 text-[12px] text-warn">
+          <div className="mt-1 inline-flex items-center gap-1 text-xs text-warn">
             <Icon name="reboot" size={12} /> Neustart nötig
           </div>
         ) : null}

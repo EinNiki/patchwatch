@@ -64,14 +64,14 @@ export default function HostDetailPage() {
         <h1 className="text-xl font-semibold">{h.name}</h1>
         <StatusBadge info={info} />
         {h.status_changed_at ? (
-          <span className="text-[12px] text-fg3">
+          <span className="text-xs text-fg3">
             Status geändert <RelTime iso={h.status_changed_at} />
           </span>
         ) : null}
       </div>
 
       <section aria-labelledby="facts" className="mb-6">
-        <h2 id="facts" className="mb-2 text-base font-semibold">
+        <h2 id="facts" className="mb-2 text-lg font-semibold">
           Stand
         </h2>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 border border-line bg-surface p-4 md:grid-cols-[max-content_1fr_max-content_1fr]">
@@ -138,7 +138,7 @@ export default function HostDetailPage() {
       <CveSection host={h} cves={cves} limit={cveLimit} onMore={() => setCveLimit(cveLimit + CVE_PAGE * 5)} feedWarning={feed && !feed.ok ? feed.label : null} />
 
       <section aria-labelledby="hist" className="mt-8">
-        <h2 id="hist" className="mb-2 text-base font-semibold">
+        <h2 id="hist" className="mb-2 text-lg font-semibold">
           Verlauf
         </h2>
         {history.error && !history.data ? <ErrorNote message={history.error} /> : null}
@@ -223,7 +223,7 @@ function CveSection({
 
   return (
     <section aria-labelledby="cve">
-      <h2 id="cve" className="mb-2 text-base font-semibold">
+      <h2 id="cve" className="mb-2 text-lg font-semibold">
         CVE-Bewertung für den laufenden Kernel
       </h2>
       {host.is_proxmox ? (
@@ -279,7 +279,7 @@ function CveSection({
                         {c.cve_id}
                       </Link>
                       {c.watched ? <span className="ml-2 rounded-[2px] border border-accent px-1 text-[11px] text-accent">Watchlist</span> : null}
-                      {c.priority ? <div className="text-[12px] text-fg3">Priorität {c.priority}</div> : null}
+                      {c.priority ? <div className="text-xs text-fg3">Priorität {c.priority}</div> : null}
                     </td>
                     <td data-label="Status">
                       <StatusBadge info={CVE_STATUS[c.status]} label={host.is_proxmox && c.status === "unknown" ? "Unbekannt: manuell prüfen" : undefined} />
@@ -293,7 +293,7 @@ function CveSection({
                           </p>
                           {c.description ? <p className="text-fg3">{c.description}</p> : null}
                           {c.sources.length > 0 ? (
-                            <table className="w-full text-[12px]">
+                            <table className="w-full text-xs">
                               <thead>
                                 <tr className="text-left text-fg3">
                                   <th className="pr-3 font-semibold">Quelle</th>
@@ -316,7 +316,7 @@ function CveSection({
                               </tbody>
                             </table>
                           ) : null}
-                          <p className="text-[12px] text-fg3">Berechnet {absTime(c.computed_at)}</p>
+                          <p className="text-xs text-fg3">Berechnet {absTime(c.computed_at)}</p>
                         </div>
                       </details>
                     </td>

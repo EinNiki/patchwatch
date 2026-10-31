@@ -159,7 +159,7 @@ function ToastRegion({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: numbe
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-semibold">{t.title}</p>
-            {t.body ? <p className="line-clamp-3 text-[13px] text-fg2">{t.body}</p> : null}
+            {t.body ? <p className="line-clamp-3 text-sm text-fg2">{t.body}</p> : null}
           </div>
           <button
             type="button"

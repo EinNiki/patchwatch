@@ -54,7 +54,7 @@ function FeedPanel() {
   return (
     <section id="feeds" aria-labelledby="feeds-h" className="mb-8 scroll-mt-4">
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 id="feeds-h" className="text-base font-semibold">
+        <h2 id="feeds-h" className="text-lg font-semibold">
           CVE-Feeds
         </h2>
         <Button onClick={() => void refresh()}>Jetzt abrufen</Button>
@@ -86,14 +86,14 @@ function FeedPanel() {
                 <tr key={f.source}>
                   <td data-label="Quelle">
                     <Mono>{f.source}</Mono>
-                    {!f.configured ? <span className="ml-2 text-[12px] text-fg3">nicht aktiv</span> : null}
+                    {!f.configured ? <span className="ml-2 text-xs text-fg3">nicht aktiv</span> : null}
                   </td>
                   <td data-label="Zustand">
                     <StatusBadge info={FEED_STATE[f.state]} label={f.state === "stale" && f.stale_since ? `Veraltet seit ${absTime(f.stale_since)}` : undefined} />
                   </td>
                   <td data-label="Letzter Erfolg">
                     <RelTime iso={f.last_success_at} />
-                    {f.last_success_at ? <div className="text-[12px] text-fg3">{absTime(f.last_success_at)}</div> : null}
+                    {f.last_success_at ? <div className="text-xs text-fg3">{absTime(f.last_success_at)}</div> : null}
                   </td>
                   <td data-label="Letzter Versuch">
                     <RelTime iso={f.last_attempt_at} />
@@ -191,7 +191,7 @@ function CveView() {
       <FeedPanel />
 
       <section aria-labelledby="wl-h">
-        <h2 id="wl-h" className="mb-2 text-base font-semibold">
+        <h2 id="wl-h" className="mb-2 text-lg font-semibold">
           Watchlist und CVE-Liste
         </h2>
         <form onSubmit={(e) => void add(e)} className="mb-4 flex flex-wrap items-end gap-3">
@@ -208,31 +208,31 @@ function CveView() {
         {formError ? <ErrorNote message={formError} /> : null}
 
         <div className="mb-3 mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
             Suche
             <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-64 max-w-full font-normal" />
           </label>
-          <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
             Distribution
-            <select value={distro} onChange={(e) => setParam("distro", e.target.value || null)} className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-[13px] font-normal text-fg max-md:min-h-11">
+            <select value={distro} onChange={(e) => setParam("distro", e.target.value || null)} className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
               <option value="">Alle</option>
               <option value="debian">Debian</option>
               <option value="ubuntu">Ubuntu</option>
             </select>
           </label>
-          <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
             Stand der Fixes
-            <select value={split} onChange={(e) => setParam("split", e.target.value || null)} className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-[13px] font-normal text-fg max-md:min-h-11">
+            <select value={split} onChange={(e) => setParam("split", e.target.value || null)} className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
               <option value="">Alle</option>
               <option value="debian_fixed_ubuntu_open">Debian gefixt, Ubuntu offen</option>
               <option value="ubuntu_fixed_debian_open">Ubuntu gefixt, Debian offen</option>
             </select>
           </label>
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={onlyWatch} onChange={(e) => setWatchFilter(e.target.checked)} className="size-4 accent-[var(--accent)]" />
             nur Watchlist
           </label>
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-[var(--accent)]" />
             Alle Releases
           </label>
@@ -284,11 +284,11 @@ function CveView() {
                         <Link href={`/cves/${c.id}`} className="whitespace-nowrap font-mono font-medium">
                           {c.id}
                         </Link>
-                        {c.priority ? <div className="text-[12px] text-fg3">Priorität {c.priority}</div> : null}
+                        {c.priority ? <div className="text-xs text-fg3">Priorität {c.priority}</div> : null}
                       </td>
                       <td data-label="Beschreibung" className="max-w-[40rem]">
                         {c.description ? <span className="line-clamp-2">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
-                        {c.note ? <div className="text-[12px] text-accent">Notiz: {c.note}</div> : null}
+                        {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
                       </td>
                       <td data-label="Distributionen" className="min-w-[14rem]">
                         <Distros c={c} allReleases={allReleases} />
@@ -316,7 +316,7 @@ function CveView() {
             ) : null}
           </>
         )}
-        <p className="mt-4 text-[12px] text-fg3">
+        <p className="mt-4 text-xs text-fg3">
           Details zur Bewertung je Host stehen in der Host-Ansicht (<Link href="/">Hosts</Link>). Gestrichelte Chips zeigen Releases, die auf keinem deiner Hosts laufen.
         </p>
       </section>
@@ -338,7 +338,7 @@ function Distros({ c, allReleases }: { c: CveListItem; allReleases: boolean }) {
       ))}
       {more ? others.map((d) => <DistroChip key={`${d.source}/${d.release}`} d={d} />) : null}
       {!allReleases && c.hidden_releases > 0 ? (
-        <Button aria-expanded={more} onClick={() => setMore(!more)} className="!min-h-7 !px-2 !text-[12px] font-normal">
+        <Button aria-expanded={more} onClick={() => setMore(!more)} className="!min-h-7 !px-2 !text-xs font-normal">
           {more ? "Weniger anzeigen" : `+ ${c.hidden_releases} weitere Releases`}
           <span className="sr-only"> für {c.id}</span>
         </Button>

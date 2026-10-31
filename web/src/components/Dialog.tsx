@@ -37,7 +37,7 @@ export function Dialog({
         if (dismissible) onClose();
       }}
     >
-      <h2 id={titleId} className="mb-3 text-base font-semibold">
+      <h2 id={titleId} className="mb-3 text-lg font-semibold">
         {title}
       </h2>
       {children}

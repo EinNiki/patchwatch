@@ -48,7 +48,7 @@ export default function NotificationsPage() {
                       <Link href={`/notifications/${c.kind}`} className="font-semibold">
                         {c.label}
                       </Link>
-                      {ch?.from_env ? <div className="text-[12px] text-fg3">aus Umgebungsvariablen</div> : null}
+                      {ch?.from_env ? <div className="text-xs text-fg3">aus Umgebungsvariablen</div> : null}
                     </td>
                     <td data-label="Zustand">
                       {ch?.enabled ? (
