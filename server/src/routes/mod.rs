@@ -4,6 +4,7 @@ pub mod cves;
 mod feeds;
 mod health;
 mod hosts;
+mod live;
 mod matrix;
 mod notifications;
 mod report;
@@ -68,6 +69,7 @@ pub fn router(state: AppState) -> Router {
             get(notifications::get_one).put(notifications::put),
         )
         .route("/notifications/{kind}/test", post(notifications::test))
+        .route("/live", get(live::live))
         .route("/feeds", get(feeds::list))
         .route("/feeds/refresh", post(feeds::refresh))
         .layer(middleware::from_fn_with_state(

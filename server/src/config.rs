@@ -142,6 +142,9 @@ pub struct Config {
     /// Hosts/IPs, die Kanäle trotz privater Adresse erreichen dürfen (exakte Übereinstimmung).
     /// Loopback und Link-Local (inkl. 169.254.169.254) bleiben immer gesperrt.
     pub notify_allowed_hosts: Vec<String>,
+    /// Zusätzliche Origins (exakt, z. B. `https://ui.example.org`), die den Live-WebSocket öffnen dürfen.
+    /// Standard: nur die Origin, die zum `Host`-Header passt.
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for Config {
@@ -160,6 +163,7 @@ impl Default for Config {
             cve: CveConfig::default(),
             secret_key: None,
             notify_allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -243,6 +247,13 @@ impl Config {
             c.notify_allowed_hosts = v
                 .split(',')
                 .map(|x| x.trim().to_ascii_lowercase())
+                .filter(|x| !x.is_empty())
+                .collect();
+        }
+        if let Some(v) = s("ALLOWED_ORIGINS") {
+            c.allowed_origins = v
+                .split(',')
+                .map(|x| x.trim().trim_end_matches('/').to_ascii_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect();
         }

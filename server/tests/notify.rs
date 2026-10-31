@@ -893,12 +893,18 @@ async fn browser_channel_publishes_live_event_instead_of_a_job(pool: PgPool) {
         jobs_for(&pool).await.is_empty(),
         "Browser-Kanal braucht keinen Job"
     );
-    let n = tokio::time::timeout(std::time::Duration::from_secs(5), listener.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let p: Value = serde_json::from_str(n.payload()).unwrap();
-    assert_eq!(p["type"], "notification");
+    // The worker also emits a plain `host_status` live event for the UI; wait for the notification.
+    let p = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let n = listener.recv().await.unwrap();
+            let p: Value = serde_json::from_str(n.payload()).unwrap();
+            if p["type"] == "notification" {
+                return p;
+            }
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(p["level"], "crit");
     assert!(p["title"].as_str().unwrap().starts_with("web1:"));
 }

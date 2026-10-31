@@ -88,6 +88,7 @@ async fn main() -> Result<()> {
             MIGRATOR.run(&pool).await?;
             let listen = cfg.listen.clone();
             let state = AppState::new(pool, cfg)?;
+            tokio::spawn(patchwatch_server::live::run(state.clone()));
             tokio::spawn(worker::scheduler(state.clone()));
             tokio::spawn(patchwatch_server::cve::refresh::run(state.clone()));
             let w = state.clone();

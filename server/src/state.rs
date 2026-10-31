@@ -11,6 +11,10 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// Verhindert parallele Feed-Läufe (Scheduler und manueller Abruf).
     pub refresh_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Live-Ereignisse (JSON-Text) aus Postgres NOTIFY an alle WebSocket-Verbindungen.
+    pub live: tokio::sync::broadcast::Sender<Arc<str>>,
+    /// Begrenzt gleichzeitige WebSocket-Verbindungen.
+    pub live_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -25,6 +29,8 @@ impl AppState {
             limiter: Arc::new(RateLimiter::default()),
             http,
             refresh_lock: Arc::default(),
+            live: tokio::sync::broadcast::channel(256).0,
+            live_slots: Arc::new(tokio::sync::Semaphore::new(64)),
         })
     }
 }

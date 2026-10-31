@@ -50,6 +50,21 @@ pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
     .fetch_all(&mut *tx)
     .await?;
     for (id, kind, payload) in &events {
+        // UI-Aktualisierung unabhängig von Benachrichtigungskanälen.
+        let live_type = match kind.as_str() {
+            "host_status_changed" => Some("host_status"),
+            "host_cve_status_changed" => Some("host_cve_status"),
+            _ => None,
+        };
+        if let Some(t) = live_type {
+            live::notify(
+                &mut tx,
+                t,
+                payload.get("host_id").and_then(Value::as_i64),
+                payload.get("cve_id").and_then(Value::as_str),
+            )
+            .await;
+        }
         if !channels.is_empty() {
             let cve_id = payload.get("cve_id").and_then(Value::as_str).unwrap_or("");
             // Nur Watchlist-CVEs sind eine Meldung wert.

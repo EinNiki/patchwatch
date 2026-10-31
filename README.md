@@ -91,6 +91,14 @@ bleiben als Voreinstellung; Werte aus der UI haben Vorrang.
 - **`PATCHWATCH_NOTIFY_ALLOWED_HOSTS`** erlaubt interne Ziele (z. B. `gotify.lan,10.0.0.5`) – nur exakte Hosts/IPs,
   keine Wildcards. Loopback und `169.254.0.0/16` (inkl. Metadaten-IP) bleiben immer gesperrt.
 
+### Live-Updates (WebSocket)
+
+`GET /api/v1/live` schiebt kleine Ereignisse (`report_received`, `host_status`, `host_cve_status`, `report_requested`,
+`checkin`, `notification`, `resync`) an die UI; die UI lädt Daten danach über die REST-API nach. Der Endpunkt ist
+nur mit gültiger Session erreichbar (sonst 401), die `Origin` muss zum `Host`-Header passen oder in
+`PATCHWATCH_ALLOWED_ORIGINS` stehen (sonst 403), eingehende Nachrichten werden ignoriert, die Session wird
+minütlich neu geprüft, maximal 64 gleichzeitige Verbindungen. Ein Reverse Proxy muss WebSocket-Upgrades für `/api/*` durchreichen (Caddy tut das).
+
 ## CVE-Abgleich
 
 Ein Hintergrund-Scheduler im Server ruft alle 60 Minuten (konfigurierbar, mit bis zu 10 % Jitter) die Feeds ab.

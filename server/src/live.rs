@@ -35,3 +35,29 @@ pub async fn notify(
     }
     publish(conn, &payload).await;
 }
+
+/// Hört auf `patchwatch_live` und verteilt jede gültige JSON-Nachricht an die WebSocket-Verbindungen.
+/// Bei Verbindungsverlust wird neu verbunden; Clients laden nach einem `resync` ohnehin per REST nach.
+pub async fn run(state: crate::state::AppState) {
+    loop {
+        match listen(&state).await {
+            Ok(()) => return,
+            Err(e) => tracing::warn!(error = %e, "Live-Listener getrennt, neuer Versuch in 3 s"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+}
+
+async fn listen(state: &crate::state::AppState) -> sqlx::Result<()> {
+    let mut l = sqlx::postgres::PgListener::connect_with(&state.pool).await?;
+    l.listen(CHANNEL).await?;
+    // Nach (Wieder-)Verbindung können Ereignisse fehlen: Clients synchronisieren neu.
+    let _ = state.live.send(r#"{"type":"resync"}"#.into());
+    loop {
+        let n = l.recv().await?;
+        // Nur JSON-Objekte weiterreichen; `send` schlägt ohne Empfänger fehl, was hier normal ist.
+        if serde_json::from_str::<Value>(n.payload()).is_ok_and(|v| v.is_object()) {
+            let _ = state.live.send(n.payload().into());
+        }
+    }
+}
