@@ -213,11 +213,11 @@ function CveView() {
             </label>
           ))}
           <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
-            <input type="checkbox" checked={onlyWatch} onChange={(e) => setWatchFilter(e.target.checked)} className="size-4 accent-(--accent)" />
+            <input type="checkbox" checked={onlyWatch} onChange={(e) => setWatchFilter(e.target.checked)} className="size-4 accent-(--accent) max-md:size-5" />
             nur Watchlist
           </label>
           <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
-            <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-(--accent)" />
+            <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-(--accent) max-md:size-5" />
             Alle Releases
           </label>
         </div>

@@ -326,6 +326,7 @@ code,
   }
 }
 
+/* Dialog: Ein- und Ausblenden rein in CSS (@starting-style + allow-discrete). Unter 768 px als Bottom-Sheet. */
 dialog {
   margin: auto;
   background: var(--surface);
@@ -335,9 +336,66 @@ dialog {
   padding: 20px;
   max-width: min(32rem, calc(100vw - 32px));
   box-shadow: 0 8px 32px rgb(0 0 0 / 0.25);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out),
+    overlay var(--dur-2) allow-discrete,
+    display var(--dur-2) allow-discrete;
+}
+dialog[open] {
+  opacity: 1;
+  transform: none;
+}
+@starting-style {
+  dialog[open] {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 dialog::backdrop {
+  background: rgb(0 0 0 / 0);
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    overlay var(--dur-2) allow-discrete,
+    display var(--dur-2) allow-discrete;
+}
+dialog[open]::backdrop {
   background: rgb(0 0 0 / 0.45);
+}
+@starting-style {
+  dialog[open]::backdrop {
+    background: rgb(0 0 0 / 0);
+  }
+}
+@media (max-width: 767px) {
+  dialog {
+    margin: auto 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 90dvh;
+    border-radius: 12px 12px 0 0;
+    border-width: 1px 0 0;
+    padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+    transform: translateY(100%);
+  }
+  @starting-style {
+    dialog[open] {
+      transform: translateY(100%);
+    }
+  }
+}
+
+/* Aufklappbare Bereiche: Trefferfläche wie Buttons (32 px, Touch 44 px). */
+summary {
+  cursor: pointer;
+  padding-block: 4px;
+}
+@media (max-width: 767px) {
+  summary {
+    padding-block: 14px;
+  }
 }
 }
 
@@ -354,5 +412,24 @@ dialog::backdrop {
     ::view-transition-new(*) {
       animation: none !important;
     }
+  }
+}
+
+/* Toasts: Einblenden per @starting-style, Ausblenden über data-leaving (160 ms, danach entfernt React sie). */
+@layer components {
+  .toast {
+    transition:
+      opacity 160ms var(--ease-out),
+      transform 160ms var(--ease-out);
+  }
+  @starting-style {
+    .toast {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  .toast[data-leaving] {
+    opacity: 0;
+    transform: translateY(4px);
   }
 }

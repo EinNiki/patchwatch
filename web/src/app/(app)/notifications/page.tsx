@@ -28,7 +28,9 @@ export default function NotificationsPage() {
       {!n.data ? (
         n.error ? null : <Loading what="Kanäle" />
       ) : (
-        <div className="max-xl:overflow-x-auto">
+        <>
+        <p className="hidden text-fg3 lg:block">Wähle links einen Kanal, um Zugang und Ereignisse einzustellen.</p>
+        <div className="lg:hidden">
           <table className="tbl stack">
             <caption>Benachrichtigungskanäle mit Zustand</caption>
             <thead>
@@ -77,6 +79,7 @@ export default function NotificationsPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
   );

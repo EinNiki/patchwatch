@@ -304,8 +304,8 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
           <Button className={BTN} onClick={onClose}>
             Abbrechen
           </Button>
-          <Button className={BTN} type="submit" variant="primary" disabled={busy}>
-            {busy ? "Speichere …" : "Speichern"}
+          <Button className={BTN} type="submit" variant="primary" busy={busy}>
+            Speichern
           </Button>
         </div>
       </form>

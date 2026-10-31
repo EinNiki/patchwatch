@@ -149,7 +149,7 @@ export default function HostDetailPage() {
         {!history.data ? null : history.data.length === 0 ? (
           <Empty title="Noch keine Reports">Der Verlauf füllt sich mit dem ersten Report des Agents (täglich um 12:00).</Empty>
         ) : (
-          <div className="max-xl:overflow-x-auto">
+          <div className="max-lg:overflow-x-auto">
             <table className="tbl stack">
               <caption>Verlauf der letzten Reports</caption>
               <thead>
@@ -266,7 +266,7 @@ function CveSection({
         </Empty>
       ) : (
         <>
-          <div className="max-xl:overflow-x-auto">
+          <div className="max-lg:overflow-x-auto">
             <table className="tbl stack">
               <caption>CVE-Bewertungen dieses Hosts mit Status, Begründung und manueller Prüfung</caption>
               <thead>
@@ -328,10 +328,10 @@ function CveSection({
                     </td>
                     <td data-label="Prüfung">
                       {c.status === "unknown" ? (
-                        <label className="flex items-start gap-2">
+                        <label className="flex min-h-8 items-start gap-2 py-1 max-md:min-h-11 max-md:items-center">
                           <input
                             type="checkbox"
-                            className="mt-0.5 size-4 accent-[var(--accent)]"
+                            className="mt-0.5 size-4 accent-[var(--accent)] max-md:mt-0 max-md:size-5"
                             checked={Boolean(c.reviewed_at)}
                             disabled={busy === c.cve_id}
                             onChange={(e) => void toggleReview(c, e.target.checked)}

@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { channelLabel, EVENTS, isChannelKind, type ChannelKind } from "@/lib/channels";
 import type { ChannelView, NotificationsResponse } from "@/lib/types";
-import { Button, Field, Select, TextInput } from "@/components/Controls";
+import { Button, Checkbox, Field, Select, TextInput } from "@/components/Controls";
 import { Icon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -112,6 +112,9 @@ const SPEC: Record<ChannelKind, Spec> = {
 
 const COMMON_ZONES = ["Europe/Berlin", "Europe/Vienna", "Europe/Zurich", "Europe/London", "UTC"];
 
+/** Vorbelegung: gespeicherter Wert, sonst bei Auswahlfeldern die erste Option (z. B. Port 587 mit STARTTLS). */
+const initialValue = (f: FieldDef, saved: string | undefined): string => saved ?? f.options?.[0]?.value ?? "";
+
 function zones(): string[] {
   try {
     const f = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
@@ -138,7 +141,7 @@ function Channel({ kind }: { kind: ChannelKind }) {
 function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: ChannelView; secretStorage: boolean; reload: () => Promise<void> }) {
   const spec = SPEC[kind];
   const [enabled, setEnabled] = useState(ch.enabled);
-  const [config, setConfig] = useState<Record<string, string>>(() => Object.fromEntries(spec.config.map((f) => [f.key, ch.config[f.key] ?? ""])));
+  const [config, setConfig] = useState<Record<string, string>>(() => Object.fromEntries(spec.config.map((f) => [f.key, initialValue(f, ch.config[f.key])])));
   const [events, setEvents] = useState<string[]>(ch.events);
   const [time, setTime] = useState(ch.summary_time ?? "08:00");
   const [tz, setTz] = useState(ch.timezone ?? "Europe/Berlin");
@@ -159,7 +162,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
     enabled !== ch.enabled ||
     secret !== "" ||
     clearSecret ||
-    spec.config.some((f) => (config[f.key] ?? "") !== (ch.config[f.key] ?? "")) ||
+    spec.config.some((f) => (config[f.key] ?? "") !== initialValue(f, ch.config[f.key])) ||
     events.slice().sort().join() !== ch.events.slice().sort().join() ||
     (events.includes("daily_summary") && (time !== (ch.summary_time ?? "08:00") || tz !== (ch.timezone ?? "Europe/Berlin")));
 
@@ -212,8 +215,8 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
   return (
     <>
       <PageHeader title={label}>
-        <Button onClick={() => void sendTest()} disabled={testing || dirty || !ch.enabled}>
-          {testing ? "Sende …" : "Testnachricht senden"}
+        <Button onClick={() => void sendTest()} busy={testing} disabled={dirty || !ch.enabled}>
+          Testnachricht senden
         </Button>
       </PageHeader>
       <p className="mb-4 max-w-prose text-fg2">{spec.intro}</p>
@@ -239,10 +242,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
       {saved ? <p role="status" className="mb-4 text-ok">Gespeichert.</p> : null}
 
       <form onSubmit={(e) => void save(e)} className="max-w-xl">
-        <label className="mb-5 flex items-center gap-2 font-semibold">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="size-4 accent-[var(--accent)]" />
-          Kanal aktiv
-        </label>
+        <Checkbox className="mb-4" label="Kanal aktiv" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
 
         {spec.config.length > 0 || spec.secret ? (
           <fieldset className="mb-6 flex flex-col gap-4">
@@ -252,7 +252,6 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                 <Field label={f.label}>
                   {f.options ? (
                     <Select value={config[f.key] ?? ""} onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}>
-                      {(config[f.key] ?? "") === "" ? <option value="">Bitte wählen</option> : null}
                       {f.options.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
@@ -329,21 +328,15 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
 
         <fieldset className="mb-6">
           <legend className="mb-2 text-lg font-semibold">Ereignisse</legend>
-          <ul className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-1">
             {EVENTS.map((ev) => (
               <li key={ev.id}>
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={events.includes(ev.id)}
-                    onChange={(e) => setEvents(e.target.checked ? [...events, ev.id] : events.filter((x) => x !== ev.id))}
-                    className="mt-0.5 size-4 accent-[var(--accent)]"
-                  />
-                  <span>
-                    <span className="font-semibold">{ev.label}</span>
-                    <span className="block text-xs text-fg3">{ev.hint}</span>
-                  </span>
-                </label>
+                <Checkbox
+                  label={ev.label}
+                  hint={ev.hint}
+                  checked={events.includes(ev.id)}
+                  onChange={(e) => setEvents(e.target.checked ? [...events, ev.id] : events.filter((x) => x !== ev.id))}
+                />
               </li>
             ))}
           </ul>
@@ -366,10 +359,10 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
         </fieldset>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" variant="primary" disabled={saving || !dirty}>
-            {saving ? "Speichere …" : "Speichern"}
+          <Button type="submit" variant="primary" busy={saving} disabled={!dirty}>
+            Speichern
           </Button>
-          <Link href="/notifications">Zur Übersicht</Link>
+          <Link href="/notifications" className="inline-flex items-center max-md:min-h-11">Zur Übersicht</Link>
         </div>
         {dirty ? <p className="mt-2 text-xs text-fg3">Ungespeicherte Änderungen. Die Testnachricht nutzt die gespeicherte Konfiguration.</p> : null}
       </form>

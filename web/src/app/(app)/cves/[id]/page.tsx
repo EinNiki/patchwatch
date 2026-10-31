@@ -210,7 +210,7 @@ function CveMeta({ cve, lastChange, links }: { cve: CveDetail["cve"]; lastChange
 function Back() {
   return (
     <p className="mb-3">
-      <Link href="/cves" className="inline-flex items-center gap-1">
+      <Link href="/cves" className="inline-flex items-center gap-1 max-md:min-h-11">
         <span aria-hidden="true">←</span>
         Zurück zu den CVEs
       </Link>

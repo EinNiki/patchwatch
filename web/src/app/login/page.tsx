@@ -53,8 +53,8 @@ export default function LoginPage() {
             {error}
           </p>
         ) : null}
-        <Button type="submit" variant="primary" disabled={busy || !hydrated}>
-          {busy ? "Anmelden …" : "Anmelden"}
+        <Button type="submit" variant="primary" busy={busy} disabled={!hydrated}>
+          Anmelden
         </Button>
       </form>
     </main>

@@ -6,6 +6,7 @@ import { useApi } from "@/lib/useApi";
 import type { Settings } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
 import { Button, Field, Select, TextInput } from "@/components/Controls";
+import { SettingsSection } from "@/components/SettingsSection";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorNote, Loading } from "@/components/States";
 import { ThemeSelect } from "@/components/ThemeSelect";
@@ -59,8 +60,8 @@ function PasswordForm() {
           Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.
         </p>
       ) : null}
-      <Button type="submit" variant="primary" disabled={busy || !current || !next || !again} className="self-start">
-        {busy ? "Ändere …" : "Passwort ändern"}
+      <Button type="submit" variant="primary" busy={busy} disabled={!current || !next || !again} className="self-start">
+        Passwort ändern
       </Button>
     </form>
   );
@@ -193,8 +194,8 @@ function Schedules() {
           Gespeichert.
         </p>
       ) : null}
-      <Button type="submit" variant="primary" disabled={busy || !dirty} className="self-start">
-        {busy ? "Speichere …" : "Speichern"}
+      <Button type="submit" variant="primary" busy={busy} disabled={!dirty} className="self-start">
+        Speichern
       </Button>
     </form>
   );
@@ -206,30 +207,17 @@ export default function SettingsPage() {
     <>
       <PageHeader title="Einstellungen" />
 
-      <section aria-labelledby="acct-h" className="mb-8">
-        <h2 id="acct-h" className="mb-1 text-lg font-semibold">
-          Konto
-        </h2>
-        <p className="mb-3 text-fg2">
-          Angemeldet als <Mono>{me.username}</Mono>.
-        </p>
+      <SettingsSection id="acct-h" title="Konto" description={<>Angemeldet als <Mono>{me.username}</Mono>.</>}>
         <PasswordForm />
-      </section>
+      </SettingsSection>
 
-      <section aria-labelledby="look-h" className="mb-8">
-        <h2 id="look-h" className="mb-2 text-lg font-semibold">
-          Darstellung
-        </h2>
+      <SettingsSection id="look-h" title="Darstellung" description="„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.">
         <ThemeSelect />
-        <p className="mt-1 max-w-prose text-xs text-fg3">„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.</p>
-      </section>
+      </SettingsSection>
 
-      <section aria-labelledby="sched-h">
-        <h2 id="sched-h" className="mb-2 text-lg font-semibold">
-          Zeitpläne
-        </h2>
+      <SettingsSection id="sched-h" title="Zeitpläne" description="Abruf der CVE-Feeds, Report-Anforderung und Schwellen. Änderungen gelten ohne Neustart.">
         <Schedules />
-      </section>
+      </SettingsSection>
     </>
   );
 }

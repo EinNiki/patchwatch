@@ -210,7 +210,7 @@ function HostsView() {
               </select>
             </label>
             <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
-              <input type="checkbox" checked={rebootOnly} onChange={(e) => setParam({ reboot: e.target.checked ? "1" : null })} className="size-4 accent-(--accent)" />
+              <input type="checkbox" checked={rebootOnly} onChange={(e) => setParam({ reboot: e.target.checked ? "1" : null })} className="size-4 accent-(--accent) max-md:size-5" />
               nur Neustart nötig
             </label>
             {/* Mobil sind die Spaltenköpfe ausgeblendet: Sortierung steht hier. */}

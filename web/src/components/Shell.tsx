@@ -183,7 +183,7 @@ function SidebarBody({ pathname }: { pathname: string }) {
           <span className="sr-only">Angemeldet als </span>
           {me.username}
         </p>
-        <Button onClick={() => void logout()} className="self-start md:max-lg:self-center md:max-lg:px-2" title="Abmelden">
+        <Button onClick={() => void logout()} className="self-start md:max-lg:self-center md:max-lg:min-w-0 md:max-lg:px-2" title="Abmelden">
           <span className="hidden md:max-lg:inline">
             <NavIcon name="logout" />
           </span>
