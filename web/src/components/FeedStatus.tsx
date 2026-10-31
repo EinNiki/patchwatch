@@ -20,14 +20,14 @@ export function feedSummary(feeds: Feed[] | undefined): { info: StatusInfo; labe
   if (stale.length > 0) {
     const f = stale[0]!;
     const since = f.stale_since ? ` seit ${absTime(f.stale_since)}` : "";
-    return { info: { label: "", tone: "warn", icon: "clock", rank: 0 }, label: `CVE-Feed ${f.source} veraltet${since}`, ok: false };
+    return { info: { label: "", tone: "warn", icon: "clock", rank: 0 }, label: `CVE-Feed ${f.label} veraltet${since}`, ok: false };
   }
   if (never.length > 0) {
-    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: `CVE-Feed ${never[0]!.source} noch nie abgerufen`, ok: false };
+    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: `CVE-Feed ${never[0]!.label} noch nie abgerufen`, ok: false };
   }
   // Eine abgeschaltete Quelle ist nie grün: die Daten dieser Quelle fehlen in der Bewertung.
   if (disabled.length > 0) {
-    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: `CVE-Quelle ${disabled[0]!.source} abgeschaltet`, ok: false };
+    return { info: { label: "", tone: "unknown", icon: "unknown", rank: 0 }, label: `CVE-Quelle ${disabled[0]!.label} abgeschaltet`, ok: false };
   }
   return { info: FEED_OK, label: FEED_OK.label, ok: true };
 }

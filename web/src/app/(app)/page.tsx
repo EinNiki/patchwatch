@@ -87,7 +87,7 @@ function HostsView() {
         (!needle || haystack(h).includes(needle)) &&
         (!status || h.status === status) &&
         (!rebootOnly || h.reboot_needed) &&
-        (!unknownOnly || h.is_proxmox || h.cve_unknown > 0),
+        (!unknownOnly || h.is_proxmox || h.status === "cve_unknown" || h.cve_unknown > 0),
     );
     const cmp = SORTERS[sort] ?? SORTERS.status;
     const sorted = [...filtered].sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name, "de", { numeric: true }));
@@ -106,7 +106,7 @@ function HostsView() {
       { id: "vuln", label: "Verwundbar (CVE)", icon: "crit", tone: "text-crit", count: n((h) => h.status === "cve_vulnerable"), param: { status: "cve_vulnerable" } },
       { id: "sec", label: "Sicherheitsupdates", icon: "crit", tone: "text-crit", count: n((h) => h.status === "security_updates"), param: { status: "security_updates" } },
       { id: "reboot", label: "Neustart nötig", icon: "reboot", tone: "text-warn", count: n((h) => h.reboot_needed), param: { reboot: "1" } },
-      { id: "unknown", label: "CVE-Lage unbekannt", icon: "unknown", tone: "text-unknown", count: n((h) => h.is_proxmox || h.cve_unknown > 0), param: { cve: "unknown" } },
+      { id: "unknown", label: "CVE-Lage unbekannt", icon: "unknown", tone: "text-unknown", count: n((h) => h.is_proxmox || h.status === "cve_unknown" || h.cve_unknown > 0), param: { cve: "unknown" } },
       { id: "stale", label: "Meldet sich nicht", icon: "clock", tone: "text-unknown", count: n((h) => h.status === "stale"), param: { status: "stale" } },
     ];
     return list;

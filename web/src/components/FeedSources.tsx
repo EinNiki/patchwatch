@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
@@ -23,13 +23,33 @@ const FEED_STATE: Record<Feed["state"], StatusInfo> = {
 };
 
 /** Typen, die sich hinzufügen lassen (keine freien URLs: Endpunkte sind je Typ fest). */
-const ADDABLE: { name: string; title: string; text: string }[] = [
+const ADDABLE: { name: Feed["type"]; title: string; text: string }[] = [
+  { name: "debian", title: "Debian", text: "Security-Tracker von Debian (Standardquelle). Bestimmt den Fix-Stand der Debian-Hosts." },
+  { name: "ubuntu", title: "Ubuntu", text: "Ubuntu CVE Tracker (Standardquelle). Bestimmt den Fix-Stand der Ubuntu-Hosts." },
   { name: "osv", title: "OSV", text: "Abfrage je Host-Kernelversion bei osv.dev. Reichert nur bereits bekannte CVEs an." },
   { name: "nvd", title: "NVD", text: "Beschreibung und CVSS-Schwere vom NIST für bekannte CVEs. Ohne Schlüssel 5 Anfragen je 30 s, mit Schlüssel 50." },
   { name: "cisa_kev", title: "CISA KEV", text: "Markiert bekannte CVEs, die aktiv ausgenutzt werden. Der Fix-Stand bleibt davon unberührt." },
 ];
 
 const BTN = "min-w-28";
+
+const TYPE_TITLE: Record<Feed["type"], string> = { debian: "Debian", ubuntu: "Ubuntu", osv: "OSV", nvd: "NVD", cisa_kev: "CISA KEV" };
+
+/** Bekannte Webseiten: die Eingabe gehört zu diesem Typ (nur ein Vorschlag, der Server prüft erneut). */
+function suggestType(url: string): Feed["type"] | null {
+  let host = "";
+  try {
+    host = new URL(url.trim()).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (host === "ubuntu.com" || host.endsWith(".ubuntu.com") || host === "people.canonical.com") return "ubuntu";
+  if (host === "security-tracker.debian.org") return "debian";
+  if (host === "nvd.nist.gov" || host === "services.nvd.nist.gov") return "nvd";
+  if (host === "osv.dev" || host === "api.osv.dev") return "osv";
+  if (host === "www.cisa.gov" || host === "cisa.gov") return "cisa_kev";
+  return null;
+}
 
 function message(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -42,6 +62,7 @@ export function FeedSources() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Feed | null>(null);
   const [removing, setRemoving] = useState<Feed | null>(null);
+  const deleting = useRef(false);
 
   async function refresh() {
     setProblem(null);
@@ -66,20 +87,21 @@ export function FeedSources() {
   }
 
   async function remove() {
-    if (!removing) return;
+    if (!removing || deleting.current) return;
+    deleting.current = true;
     try {
       await api.del(`/feeds/${removing.source}`);
       setRemoving(null);
       await feeds.reload();
     } catch (e) {
       setRemoving(null);
-      setProblem(message(e, "Quelle konnte nicht entfernt werden."));
+      setProblem(message(e, "Quelle konnte nicht gelöscht werden."));
+    } finally {
+      deleting.current = false;
     }
   }
 
-  const present = new Set((feeds.data ?? []).map((f) => f.source));
-  const addable = ADDABLE.filter((a) => !present.has(a.name));
-
+  
   return (
     <section id="feeds" aria-labelledby="feeds-h" className="mb-6 scroll-mt-4">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -89,7 +111,7 @@ export function FeedSources() {
         <Button className={BTN} onClick={() => void refresh()}>
           Jetzt abrufen
         </Button>
-        <Button className={BTN} variant="primary" onClick={() => setAdding(true)} disabled={addable.length === 0} title={addable.length === 0 ? "Alle bekannten Quellen sind schon eingerichtet" : undefined}>
+        <Button className={BTN} variant="primary" onClick={() => setAdding(true)} >
           <NavIcon name="plus" />
           Quelle hinzufügen
         </Button>
@@ -119,9 +141,11 @@ export function FeedSources() {
               {feeds.data.map((f) => (
                 <tr key={f.source}>
                   <td className="cell-primary">
-                    <Mono>{f.source}</Mono>
+                    <span className="font-semibold">{f.label}</span>
                     <div className="text-xs text-fg3">
-                      {f.kind === "builtin" ? "eingebaut" : f.enrich_only ? "reichert bekannte CVEs an" : "hinzugefügt"}
+                      {TYPE_TITLE[f.type]}
+                      {f.ecosystem ? ` ${f.ecosystem}` : ""}
+                      {f.kind === "builtin" ? " · Standardquelle" : f.enrich_only ? " · reichert bekannte CVEs an" : ""}
                       {f.base_url ? " · eigene URL" : ""}
                       {f.secret_set ? " · Schlüssel gesetzt" : ""}
                     </div>
@@ -147,19 +171,15 @@ export function FeedSources() {
                   </td>
                   <td>
                     <div className="flex flex-wrap gap-2">
-                      <Button className={BTN} onClick={() => void toggle(f)} aria-label={`${f.source} ${f.enabled ? "abschalten" : "einschalten"}`}>
+                      <Button className={BTN} onClick={() => void toggle(f)} aria-label={`${f.label} ${f.enabled ? "abschalten" : "einschalten"}`}>
                         {f.enabled ? "Abschalten" : "Einschalten"}
                       </Button>
-                      {f.takes_secret || f.takes_base_url ? (
-                        <Button className={BTN} onClick={() => setEditing(f)} aria-label={`${f.source} bearbeiten`}>
-                          Bearbeiten
-                        </Button>
-                      ) : null}
-                      {f.kind === "managed" ? (
-                        <Button className={BTN} variant="danger" onClick={() => setRemoving(f)} aria-label={`${f.source} entfernen`}>
-                          Entfernen
-                        </Button>
-                      ) : null}
+                      <Button className={BTN} onClick={() => setEditing(f)} aria-label={`${f.label} bearbeiten`}>
+                        Bearbeiten
+                      </Button>
+                      <Button className={BTN} variant="danger" onClick={() => setRemoving(f)} aria-label={`${f.label} löschen`}>
+                        Löschen
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -172,37 +192,52 @@ export function FeedSources() {
         Das Abruf-Intervall stellst du unter Einstellungen → Zeitpläne ein. Eine abgeschaltete oder ausgefallene Quelle gilt nie als aktuell.
       </p>
 
-      <AddDialog open={adding} addable={addable} onClose={() => setAdding(false)} onDone={() => { setAdding(false); void feeds.reload(); }} />
+      <AddDialog open={adding} onClose={() => setAdding(false)} onDone={() => { setAdding(false); void feeds.reload(); }} />
       <EditDialog feed={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); void feeds.reload(); }} />
-      <ConfirmDialog open={removing !== null} danger title={`Quelle ${removing?.source ?? ""} entfernen?`} confirmLabel="Entfernen" onConfirm={() => void remove()} onCancel={() => setRemoving(null)}>
-        Die Quelle und ihre gespeicherten Daten werden entfernt, die Hosts werden neu bewertet. Du kannst sie später wieder hinzufügen.
+      <ConfirmDialog open={removing !== null} danger title={`Quelle „${removing?.label ?? ""}“ löschen?`} confirmLabel="Löschen" onConfirm={() => void remove()} onCancel={() => setRemoving(null)}>
+        Hosts, die auf diese Quelle angewiesen sind, werden auf „unbekannt“ gesetzt. Die gespeicherten Daten der Quelle zählen nicht mehr und werden nach 30 Tagen gelöscht. Du kannst die Quelle jederzeit wieder hinzufügen.
       </ConfirmDialog>
     </section>
   );
 }
 
-function AddDialog({ open, addable, onClose, onDone }: { open: boolean; addable: typeof ADDABLE; onClose: () => void; onDone: () => void }) {
-  const [name, setName] = useState("");
+function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+  const [type, setType] = useState<Feed["type"]>("osv");
+  const [label, setLabel] = useState("");
+  const [ecosystem, setEcosystem] = useState("");
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const chosen = addable.find((a) => a.name === name) ?? addable[0];
+  // Synchroner Schutz gegen Doppelklick: setBusy wirkt erst nach dem Rendern.
+  const inflight = useRef(false);
+  const chosen = ADDABLE.find((a) => a.name === type) ?? ADDABLE[0]!;
+  const suggested = url.trim() ? suggestType(url) : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!chosen) return;
+    if (inflight.current) return;
+    inflight.current = true;
     setBusy(true);
     setError(null);
     try {
-      await api.post("/feeds", { name: chosen.name, ...(url.trim() ? { base_url: url.trim() } : {}), ...(secret ? { secret } : {}) });
-      setName("");
+      await api.post("/feeds", {
+        type,
+        label: label.trim() || TYPE_TITLE[type],
+        ...(url.trim() ? { base_url: url.trim() } : {}),
+        ...(type === "osv" && ecosystem.trim() ? { ecosystem: ecosystem.trim() } : {}),
+        ...(type === "nvd" && secret ? { secret } : {}),
+      });
+      // Erst nach der Serverantwort: Erfolg zeigt die neue Quelle, Fehler legt nichts an.
+      setLabel("");
+      setEcosystem("");
       setUrl("");
       setSecret("");
       onDone();
     } catch (err) {
       setError(message(err, "Quelle konnte nicht hinzugefügt werden."));
     } finally {
+      inflight.current = false;
       setBusy(false);
     }
   }
@@ -210,17 +245,25 @@ function AddDialog({ open, addable, onClose, onDone }: { open: boolean; addable:
   return (
     <Dialog open={open} title="Quelle hinzufügen" onClose={onClose}>
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-3">
+        <Field label="Name (1–40 Zeichen, eindeutig)">
+          <TextInput value={label} onChange={(e) => setLabel(e.target.value)} placeholder={TYPE_TITLE[type]} maxLength={40} />
+        </Field>
         <Field label="Typ">
-          <Select value={chosen?.name ?? ""} onChange={(e) => setName(e.target.value)}>
-            {addable.map((a) => (
+          <Select value={type} onChange={(e) => setType(e.target.value as Feed["type"])}>
+            {ADDABLE.map((a) => (
               <option key={a.name} value={a.name}>
                 {a.title}
               </option>
             ))}
           </Select>
         </Field>
-        {chosen ? <p className="text-fg2">{chosen.text}</p> : null}
-        {chosen?.name === "nvd" ? (
+        <p className="text-fg2">{chosen.text}</p>
+        {type === "osv" ? (
+          <Field label="Ökosystem (optional, z. B. Debian:13 oder Ubuntu:24.04)">
+            <TextInput value={ecosystem} onChange={(e) => setEcosystem(e.target.value)} maxLength={40} />
+          </Field>
+        ) : null}
+        {type === "nvd" ? (
           <Field label="API-Schlüssel (optional, wird nur geschrieben und verschlüsselt gespeichert)">
             <TextInput type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} maxLength={512} />
           </Field>
@@ -228,14 +271,22 @@ function AddDialog({ open, addable, onClose, onDone }: { open: boolean; addable:
         <Field label="Eigene Basis-URL, z. B. ein Spiegel (optional)">
           <TextInput type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" maxLength={300} />
         </Field>
+        {suggested && suggested !== type ? (
+          <p role="status" className="text-warn">
+            Diese Adresse gehört zum Typ „{TYPE_TITLE[suggested]}“.{" "}
+            <button type="button" className="underline" onClick={() => setType(suggested)}>
+              Typ „{TYPE_TITLE[suggested]}“ wählen
+            </button>
+          </p>
+        ) : null}
         <p className="text-xs text-fg3">Interne Ziele sind nur erlaubt, wenn der Host exakt in der Server-Konfiguration freigegeben ist. Loopback und Link-Local bleiben immer gesperrt.</p>
         {error ? <ErrorNote message={error} /> : null}
         <div className="flex justify-end gap-2">
           <Button className={BTN} onClick={onClose}>
             Abbrechen
           </Button>
-          <Button className={BTN} type="submit" variant="primary" disabled={busy || !chosen}>
-            {busy ? "Füge hinzu …" : "Hinzufügen"}
+          <Button className={BTN} type="submit" variant="primary" busy={busy} disabled={busy}>
+            Hinzufügen
           </Button>
         </div>
       </form>
@@ -245,6 +296,8 @@ function AddDialog({ open, addable, onClose, onDone }: { open: boolean; addable:
 
 function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () => void; onDone: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [label, setLabel] = useState<string | null>(null);
+  const [eco, setEco] = useState<string | null>(null);
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,6 +309,8 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
     try {
       await api.put(`/feeds/${feed.source}`, body);
       setUrl(null);
+      setLabel(null);
+      setEco(null);
       setSecret("");
       onDone();
     } catch (err) {
@@ -268,6 +323,11 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const body: Record<string, unknown> = {};
+    if (label !== null && label.trim() !== feed?.label) body.label = label.trim();
+    if (eco !== null && eco.trim() !== (feed?.ecosystem ?? "")) {
+      if (eco.trim()) body.ecosystem = eco.trim();
+      else body.clear_ecosystem = true;
+    }
     if (url !== null && url.trim() !== (feed?.base_url ?? "")) {
       if (url.trim()) body.base_url = url.trim();
       else body.clear_base_url = true;
@@ -278,8 +338,16 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
   }
 
   return (
-    <Dialog open={feed !== null} title={`Quelle ${feed?.source ?? ""} bearbeiten`} onClose={onClose}>
+    <Dialog open={feed !== null} title={`Quelle „${feed?.label ?? ""}“ bearbeiten`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-3">
+        <Field label="Name (1–40 Zeichen, eindeutig)">
+          <TextInput value={label ?? feed?.label ?? ""} onChange={(e) => setLabel(e.target.value)} maxLength={40} />
+        </Field>
+        {feed?.takes_ecosystem ? (
+          <Field label="Ökosystem (leer = Standard)">
+            <TextInput value={eco ?? feed.ecosystem ?? ""} onChange={(e) => setEco(e.target.value)} maxLength={40} />
+          </Field>
+        ) : null}
         {feed?.takes_base_url ? (
           <Field label="Eigene Basis-URL (leer = Standard)">
             <TextInput type="url" value={url ?? feed.base_url ?? ""} onChange={(e) => setUrl(e.target.value)} placeholder="https://" maxLength={300} />

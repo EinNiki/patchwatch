@@ -15,6 +15,7 @@ export interface StatusInfo {
 export const HOST_STATUS: Record<HostStatus, StatusInfo> = {
   cve_vulnerable: { label: "Verwundbar (CVE)", tone: "crit", icon: "crit", rank: 0 },
   security_updates: { label: "Sicherheitsupdates offen", tone: "crit", icon: "crit", rank: 1 },
+  cve_unknown: { label: "CVE-Lage unbekannt", tone: "unknown", icon: "unknown", rank: 1.5 },
   stale: { label: "Meldet sich nicht", tone: "unknown", icon: "clock", rank: 2 },
   reboot_required: { label: "Neustart nötig", tone: "warn", icon: "reboot", rank: 3 },
   updates_pending: { label: "Updates offen", tone: "warn", icon: "warn", rank: 4 },

@@ -3,6 +3,7 @@
 export type HostStatus =
   | "pending"
   | "stale"
+  | "cve_unknown"
   | "cve_vulnerable"
   | "security_updates"
   | "reboot_required"
@@ -165,7 +166,7 @@ export interface Settings {
   stale_after_default_hours: number;
   stale_after_min_hours: number;
   stale_after_max_hours: number;
-  feeds: { source: string; interval_minutes: number; default_minutes: number }[];
+  feeds: { source: string; label: string; interval_minutes: number; default_minutes: number }[];
   feed_interval_min_minutes: number;
   feed_interval_max_minutes: number;
   report_schedule: ReportSchedule & { last_run: string | null; due_now: boolean };
@@ -175,7 +176,13 @@ export interface Settings {
 }
 
 export interface Feed {
+  /** Stabile ID (nicht der Anzeigename). */
   source: string;
+  type: "debian" | "ubuntu" | "osv" | "nvd" | "cisa_kev";
+  /** Anzeigename, frei wählbar; immer als Text ausgeben. */
+  label: string;
+  ecosystem: string | null;
+  takes_ecosystem: boolean;
   kind: "builtin" | "managed";
   enabled: boolean;
   /** Alt-Feld: eingeschaltet. */

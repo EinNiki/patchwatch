@@ -100,7 +100,7 @@ function Schedules() {
       const body: Record<string, unknown> = {};
       const feed_intervals: Record<string, number> = {};
       for (const f of d.feeds) {
-        if (edit[`feed.${f.source}`] !== undefined) feed_intervals[f.source] = int(`Feed ${f.source}`, edit[`feed.${f.source}`]!, d.feed_interval_min_minutes, d.feed_interval_max_minutes);
+        if (edit[`feed.${f.source}`] !== undefined) feed_intervals[f.source] = int(`Feed ${f.label}`, edit[`feed.${f.source}`]!, d.feed_interval_min_minutes, d.feed_interval_max_minutes);
       }
       if (Object.keys(feed_intervals).length) body.feed_intervals = feed_intervals;
       if (edit.stale !== undefined) body.stale_after_hours = int("Meldet sich nicht", edit.stale, d.stale_after_min_hours, d.stale_after_max_hours);
@@ -130,7 +130,7 @@ function Schedules() {
         <legend className="mb-1 font-semibold">CVE-Feeds abrufen</legend>
         <div className="flex flex-wrap gap-3">
           {d.feeds.map((f) => (
-            <Field key={f.source} label={`${f.source} (Minuten)`}>
+            <Field key={f.source} label={`${f.label} (Minuten)`}>
               <TextInput type="number" inputMode="numeric" min={d.feed_interval_min_minutes} max={d.feed_interval_max_minutes} value={val(`feed.${f.source}`, f.interval_minutes)} onChange={set(`feed.${f.source}`)} className={num} />
             </Field>
           ))}

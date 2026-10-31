@@ -45,7 +45,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(res.status, message, Number.isFinite(ra) && ra > 0 ? ra : undefined);
   }
   if (res.status === 204 || res.status === 202) return undefined as T;
-  return (await res.json()) as T;
+  // Leere 2xx-Antworten (z. B. 201 ohne Body) sind ein Erfolg, kein Parse-Fehler.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
