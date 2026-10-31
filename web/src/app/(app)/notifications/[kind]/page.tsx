@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { channelLabel, EVENTS, isChannelKind, type ChannelKind } from "@/lib/channels";
 import type { ChannelView, NotificationsResponse } from "@/lib/types";
-import { Button, Field, TextInput } from "@/components/Controls";
+import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { Icon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -18,6 +18,10 @@ interface FieldDef {
   label: string;
   placeholder: string;
   hint?: string;
+  /** Feste Auswahl statt Freitext. */
+  options?: { value: string; label: string }[];
+  /** Kein Monospace (Namen, Adressen mit Anzeigename). */
+  plain?: boolean;
 }
 
 interface Spec {
@@ -53,6 +57,51 @@ const SPEC: Record<ChannelKind, Spec> = {
     intro: "Nachricht in einen Discord-Kanal per Webhook. Erwähnungen (@everyone, @here) sind abgeschaltet.",
     config: [],
     secret: { label: "Webhook-URL", hint: "Die URL enthält ein Geheimnis und wird deshalb wie ein Token behandelt.", required: true },
+  },
+  telegram: {
+    intro: "Nachricht über einen Telegram-Bot an einen Chat, eine Gruppe oder einen Kanal.",
+    config: [{ key: "chat_id", label: "Chat-ID", placeholder: "123456789", hint: "Zahl (bei Gruppen negativ) oder @kanalname. Der Bot muss im Chat Mitglied sein." }],
+    secret: { label: "Bot-Token", hint: "Token von @BotFather, Format 123456:ABC….", required: true },
+  },
+  slack: {
+    intro: "Nachricht in einen Slack-Kanal über einen eingehenden Webhook. Erlaubt ist nur hooks.slack.com.",
+    config: [],
+    secret: { label: "Webhook-URL", hint: "https://hooks.slack.com/services/… enthält ein Geheimnis und wird deshalb wie ein Token behandelt.", required: true },
+  },
+  smtp: {
+    intro: "E-Mail über einen SMTP-Server. Die Verbindung ist immer verschlüsselt und das Zertifikat wird geprüft.",
+    config: [
+      { key: "host", label: "SMTP-Server", placeholder: "mail.example.org", hint: "Interne Server müssen in PATCHWATCH_NOTIFY_ALLOWED_HOSTS stehen." },
+      {
+        key: "port",
+        label: "Port",
+        placeholder: "587",
+        options: [
+          { value: "587", label: "587 (STARTTLS)" },
+          { value: "465", label: "465 (TLS)" },
+          { value: "25", label: "25" },
+          { value: "2525", label: "2525" },
+        ],
+      },
+      {
+        key: "security",
+        label: "Verschlüsselung",
+        placeholder: "",
+        options: [
+          { value: "starttls", label: "STARTTLS" },
+          { value: "tls", label: "TLS (implizit)" },
+        ],
+      },
+      { key: "username", label: "Benutzer", placeholder: "patchwatch@example.org", hint: "Leer lassen, wenn der Server keine Anmeldung verlangt." },
+      { key: "from", label: "Absender", placeholder: "patchwatch <patchwatch@example.org>", plain: true },
+      { key: "to", label: "Empfänger", placeholder: "admin@example.org, ops@example.org", hint: "Bis zu 10 Adressen, durch Komma getrennt.", plain: true },
+    ],
+    secret: { label: "Passwort", hint: "Nur nötig, wenn ein Benutzer gesetzt ist.", required: false },
+  },
+  webhook: {
+    intro: "POST mit festem JSON an eine eigene URL: version, event, title, text, priority, tags, time. Ein Token wird als Bearer-Header gesendet.",
+    config: [{ key: "url", label: "URL", placeholder: "https://hooks.example.org/patchwatch" }],
+    secret: { label: "Bearer-Token", hint: "Optional, falls der Empfänger eine Anmeldung verlangt.", required: false },
   },
   browser: {
     intro: "Meldungen erscheinen als Hinweis unten rechts, solange patchwatch in einem Browser-Tab geöffnet ist. Es wird nichts nach außen gesendet.",
@@ -201,15 +250,26 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
             {spec.config.map((f) => (
               <div key={f.key}>
                 <Field label={f.label}>
-                  <TextInput
-                    value={config[f.key] ?? ""}
-                    onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
-                    placeholder={f.placeholder}
-                    autoComplete="off"
-                    spellCheck={false}
-                    maxLength={300}
-                    className="font-mono"
-                  />
+                  {f.options ? (
+                    <Select value={config[f.key] ?? ""} onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}>
+                      {(config[f.key] ?? "") === "" ? <option value="">Bitte wählen</option> : null}
+                      {f.options.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <TextInput
+                      value={config[f.key] ?? ""}
+                      onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
+                      placeholder={f.placeholder}
+                      autoComplete="off"
+                      spellCheck={false}
+                      maxLength={300}
+                      className={f.plain ? "" : "font-mono"}
+                    />
+                  )}
                 </Field>
                 {f.hint ? <p className="mt-1 text-xs text-fg3">{f.hint}</p> : null}
               </div>

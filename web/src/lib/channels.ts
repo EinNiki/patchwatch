@@ -4,6 +4,10 @@ export const CHANNELS = [
   { kind: "matrix", label: "Matrix" },
   { kind: "gotify", label: "Gotify" },
   { kind: "discord", label: "Discord" },
+  { kind: "telegram", label: "Telegram" },
+  { kind: "slack", label: "Slack" },
+  { kind: "smtp", label: "E-Mail (SMTP)" },
+  { kind: "webhook", label: "Webhook" },
   { kind: "browser", label: "Live im Browser" },
 ] as const;
 
