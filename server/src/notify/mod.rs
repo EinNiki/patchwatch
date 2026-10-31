@@ -5,6 +5,7 @@ pub mod channels;
 pub mod crypto;
 pub mod events;
 pub mod messages;
+pub mod smtp;
 pub mod ssrf;
 pub mod store;
 

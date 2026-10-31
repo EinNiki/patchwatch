@@ -5,7 +5,7 @@ use axum::http::{header, Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use patchwatch_server::config::Config;
-use patchwatch_server::notify::channels::{build, Http};
+use patchwatch_server::notify::channels::{build, Http, KINDS};
 use patchwatch_server::notify::{messages, store};
 use patchwatch_server::{admin, router, worker, AppState};
 use serde_json::{json, Value};
@@ -173,7 +173,7 @@ async fn secrets_are_write_only_and_encrypted_at_rest(pool: PgPool) {
     }
     let list = call(&app, Method::GET, "/api/v1/notifications", &admin, None).await;
     assert_eq!(list.json["secret_storage"], true);
-    assert_eq!(list.json["channels"].as_array().unwrap().len(), 5);
+    assert_eq!(list.json["channels"].as_array().unwrap().len(), KINDS.len());
 
     // In der Datenbank liegt nur Chiffretext.
     let blob: Vec<u8> =
@@ -1038,4 +1038,128 @@ async fn daily_summary_is_scheduled_per_channel_with_own_time(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(n, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn new_channels_validate_and_never_echo_secrets(pool: PgPool) {
+    let st = state(pool.clone(), &[("PATCHWATCH_SECRET_KEY", KEY)]);
+    let app = router(st);
+    let (session, csrf) = login(&app, &pool).await;
+    let admin = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let put = |kind: &'static str, body: Value| {
+        let app = app.clone();
+        let admin = admin.map(|(a, b)| (a.to_owned(), b.to_owned()));
+        async move {
+            let h: Vec<(&str, &str)> = admin
+                .iter()
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect();
+            call(
+                &app,
+                Method::PUT,
+                &format!("/api/v1/notifications/{kind}"),
+                &h,
+                Some(body),
+            )
+            .await
+        }
+    };
+
+    // Telegram: Token nur im gültigen Format; weder gültiger noch ungültiger Wert kommt zurück.
+    let token = "123456789:AAE_abcdefghijklmnopqrstuvwxyz012345";
+    let r = put(
+        "telegram",
+        json!({"enabled": true, "config": {"chat_id": "42"}, "secret": token}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert_eq!(r.json["secret_set"], true);
+    assert!(
+        !r.raw.contains("AAE_") && !r.raw.contains("123456789:"),
+        "{}",
+        r.raw
+    );
+    let bad = put(
+        "telegram",
+        json!({"enabled": true, "config": {"chat_id": "42"}, "secret": "kaputt-GEHEIM"}),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    assert!(!bad.raw.contains("GEHEIM"));
+    let bad = put(
+        "telegram",
+        json!({"enabled": true, "config": {"chat_id": "keine zahl"}, "secret": token}),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    // Slack: nur hooks.slack.com, Fehlermeldung ohne die URL.
+    let hook = "https://hooks.slack.com/services/T000/B000/GEHEIMSLACK";
+    let r = put("slack", json!({"enabled": true, "secret": hook})).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert!(!r.raw.contains("GEHEIMSLACK"));
+    let bad = put(
+        "slack",
+        json!({"enabled": true, "secret": "https://evil.example/services/GEHEIMSLACK"}),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    assert!(!bad.raw.contains("GEHEIMSLACK"));
+
+    // Webhook: SSRF-Prüfung der URL, Bearer-Token write-only.
+    let r = put("webhook", json!({"enabled": true, "config": {"url": "https://hook.example.org/in"}, "secret": SECRET})).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert!(!r.raw.contains(SECRET));
+    let bad = put(
+        "webhook",
+        json!({"enabled": true, "config": {"url": "ftp://hook.example.org/in"}}),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    // SMTP: Port-Whitelist, Verschlüsselungspflicht, Header-Injection, Passwort write-only.
+    let smtp = |port: &str, security: &str, from: &str, to: &str| {
+        json!({"enabled": true, "secret": SECRET, "config": {
+            "host": "mail.example.org", "port": port, "security": security,
+            "username": "pw", "from": from, "to": to}})
+    };
+    let ok = put(
+        "smtp",
+        smtp("587", "starttls", "pw@example.org", "a@example.org"),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.raw);
+    assert!(!ok.raw.contains(SECRET));
+    assert_eq!(ok.json["config"]["port"], "587");
+    for (port, sec, from, to) in [
+        ("22", "starttls", "pw@example.org", "a@example.org"),
+        ("587", "none", "pw@example.org", "a@example.org"),
+        (
+            "587",
+            "starttls",
+            "pw@example.org\r\nBcc: x@example.net",
+            "a@example.org",
+        ),
+        (
+            "587",
+            "starttls",
+            "pw@example.org",
+            "a@example.org\nBcc: x@example.net",
+        ),
+    ] {
+        let r = put("smtp", smtp(port, sec, from, to)).await;
+        assert_eq!(
+            r.status,
+            StatusCode::BAD_REQUEST,
+            "{port} {sec} {from:?} {to:?}"
+        );
+        assert!(!r.raw.contains(SECRET));
+    }
+    let list = call(&app, Method::GET, "/api/v1/notifications", &admin, None).await;
+    for s in [SECRET, "AAE_", "GEHEIMSLACK"] {
+        assert!(!list.raw.contains(s), "Liste enthält {s}");
+    }
 }

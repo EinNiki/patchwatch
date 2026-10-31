@@ -5,7 +5,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::extract::{Admin, CsrfAdmin};
 use crate::notify::channels::{self, KINDS};
 use crate::notify::store::{self, Effective, Update};
-use crate::notify::{events, messages, ssrf};
+use crate::notify::{events, messages};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -102,6 +102,9 @@ fn config_keys(kind: &str) -> &'static [&'static str] {
         "ntfy" => &["url", "topic"],
         "gotify" => &["url"],
         "matrix" => &["homeserver", "room_id"],
+        "smtp" => &["host", "port", "security", "username", "from", "to"],
+        "telegram" => &["chat_id"],
+        "webhook" => &["url"],
         _ => &[],
     }
 }
@@ -156,13 +159,7 @@ pub async fn put(
                     "PATCHWATCH_SECRET_KEY ist nicht gesetzt: Geheimnisse können nicht gespeichert werden".into(),
                 ));
             }
-            if kind == "discord" {
-                match ssrf::parse_url(s, true) {
-                    Ok(u) if u.scheme() == "https" => {}
-                    Ok(_) => return Err(bad("Webhook-URL: nur https:// ist erlaubt".into())),
-                    Err(e) => return Err(bad(format!("Webhook-URL: {}", e.message()))),
-                }
-            }
+            channels::validate_secret(&kind, s).map_err(bad)?;
             Some(s.to_owned())
         }
     };

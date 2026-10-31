@@ -1,4 +1,4 @@
-//! Benachrichtigungskanäle. Jeder Kanal implementiert [`Channel`]; weitere (Webhook, E-Mail) kommen
+//! Benachrichtigungskanäle. Jeder Kanal implementiert [`Channel`]; weitere kommen
 //! durch einen neuen Eintrag in [`KINDS`] und [`build`] hinzu.
 //!
 //! Fehlermeldungen sind absichtlich generisch (`nicht erreichbar`, `HTTP <Code>`): Weder URLs noch
@@ -13,7 +13,9 @@ use reqwest::{Method, Url};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
-pub const KINDS: [&str; 5] = ["ntfy", "matrix", "gotify", "discord", "browser"];
+pub const KINDS: [&str; 9] = [
+    "ntfy", "matrix", "gotify", "discord", "browser", "smtp", "telegram", "slack", "webhook",
+];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SendError {
@@ -23,6 +25,8 @@ pub enum SendError {
     Unreachable,
     /// Die Gegenseite hat mit diesem HTTP-Status geantwortet.
     Http(u16),
+    /// Der SMTP-Server hat mit diesem Statuscode geantwortet (nie mit seinem Text).
+    Smtp(u16),
 }
 
 impl SendError {
@@ -32,6 +36,7 @@ impl SendError {
             Self::Config(m) => format!("Konfiguration ungültig: {m}"),
             Self::Unreachable => "nicht erreichbar".to_owned(),
             Self::Http(c) => format!("HTTP {c}"),
+            Self::Smtp(c) => format!("SMTP {c}"),
         }
     }
 }
@@ -84,7 +89,11 @@ impl Http {
             req = req.header(*k, *v);
         }
         // Der Antwort-Body wird nie gelesen.
-        let resp = req.send().await.map_err(|_| SendError::Unreachable)?;
+        // Geheimnisse stecken teils in der URL (Telegram, Slack, Discord): Fehler vor dem Logging von der URL befreien.
+        let resp = req.send().await.map_err(|e| {
+            tracing::warn!(error = %e.without_url(), "Kanal-Versand fehlgeschlagen");
+            SendError::Unreachable
+        })?;
         let code = resp.status().as_u16();
         if resp.status().is_success() {
             Ok(())
@@ -247,6 +256,155 @@ impl Channel for Discord {
     }
 }
 
+/// Telegram: Der Bot-Token steckt im Pfad der API-URL und wird deshalb nie geloggt oder gespeichert.
+pub struct Telegram {
+    base: Url,
+    token: String,
+    chat_id: String,
+    http: Http,
+}
+
+pub const TELEGRAM_API: &str = "https://api.telegram.org";
+
+/// Bot-Token im Format `<Bot-ID>:<Geheimnis>`.
+pub fn valid_telegram_token(t: &str) -> bool {
+    let Some((id, rest)) = t.split_once(':') else {
+        return false;
+    };
+    (5..=16).contains(&id.len())
+        && id.chars().all(|c| c.is_ascii_digit())
+        && (30..=60).contains(&rest.len())
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Chat-ID: Zahl (negativ bei Gruppen) oder `@kanalname`.
+pub fn valid_chat_id(s: &str) -> bool {
+    let num = s.strip_prefix('-').unwrap_or(s);
+    if !num.is_empty() && num.len() <= 20 && num.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    s.strip_prefix('@').is_some_and(|n| {
+        (5..=32).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Telegram mit anderer Basis-URL (Tests und lokale Bot-API-Server); Token und Chat-ID werden wie sonst geprüft.
+pub fn telegram_with_base(
+    base: Url,
+    token: String,
+    chat_id: &str,
+    http: Http,
+) -> Result<Box<dyn Channel>, SendError> {
+    if !valid_telegram_token(&token) {
+        return Err(SendError::Config("Bot-Token: ungültiges Format".into()));
+    }
+    if !valid_chat_id(chat_id) {
+        return Err(SendError::Config("Chat-ID: Zahl oder @name".into()));
+    }
+    Ok(Box::new(Telegram {
+        base,
+        token,
+        chat_id: chat_id.to_owned(),
+        http,
+    }))
+}
+
+#[async_trait]
+impl Channel for Telegram {
+    fn kind(&self) -> &'static str {
+        "telegram"
+    }
+    async fn send(&self, m: &Message) -> Result<(), SendError> {
+        let mut url = self.base.clone();
+        {
+            let Ok(mut seg) = url.path_segments_mut() else {
+                return Err(SendError::Config("URL ungültig".into()));
+            };
+            seg.pop_if_empty()
+                .push(&format!("bot{}", self.token))
+                .push("sendMessage");
+        }
+        let body = json!({
+            "chat_id": self.chat_id,
+            "text": clip(&format!("{}\n{}", m.title, m.body), 4000),
+            "disable_web_page_preview": true,
+        });
+        self.http.send(Method::POST, &url, None, &[], &body).await
+    }
+}
+
+/// Slack: Die Webhook-URL ist das Geheimnis; erlaubt ist nur `https://hooks.slack.com/services/…`.
+pub struct Slack {
+    webhook: Url,
+    http: Http,
+}
+
+pub fn parse_slack_webhook(raw: &str) -> Result<Url, String> {
+    let url = ssrf::parse_url(raw, true).map_err(|e| e.message().to_string())?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("hooks.slack.com")
+        || !url.path().starts_with("/services/")
+    {
+        return Err("nur https://hooks.slack.com/services/… ist erlaubt".into());
+    }
+    Ok(url)
+}
+
+/// Slack verlangt `&`, `<` und `>` als Entities (sonst wirken Inhalte aus Feeds als Link oder Erwähnung).
+fn slack_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+#[async_trait]
+impl Channel for Slack {
+    fn kind(&self) -> &'static str {
+        "slack"
+    }
+    async fn send(&self, m: &Message) -> Result<(), SendError> {
+        let text = slack_escape(&format!("*{}*\n{}", m.title, m.body));
+        let body = json!({ "text": clip(&text, 3500) });
+        self.http
+            .send(Method::POST, &self.webhook, None, &[], &body)
+            .await
+    }
+}
+
+/// Generischer Webhook mit festem JSON-Schema (keine Vorlagen).
+pub struct Webhook {
+    url: Url,
+    token: Option<String>,
+    http: Http,
+}
+
+pub fn webhook_payload(m: &Message, now: chrono::DateTime<chrono::Utc>) -> Value {
+    json!({
+        "version": 1,
+        "event": "patchwatch.notification",
+        "title": clip(&m.title, 250),
+        "text": clip(&m.body, 4000),
+        "priority": m.priority,
+        "tags": m.tags,
+        "time": now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    })
+}
+
+#[async_trait]
+impl Channel for Webhook {
+    fn kind(&self) -> &'static str {
+        "webhook"
+    }
+    async fn send(&self, m: &Message) -> Result<(), SendError> {
+        let body = webhook_payload(m, chrono::Utc::now());
+        self.http
+            .send(Method::POST, &self.url, self.token.as_deref(), &[], &body)
+            .await
+    }
+}
+
 /// Live im Browser: Das Ereignis geht über Postgres NOTIFY an die WebSocket-Clients.
 pub struct Browser {
     pool: PgPool,
@@ -350,6 +508,40 @@ pub fn build(
             }
             Box::new(Discord { webhook: url, http })
         }
+        "smtp" => Box::new(super::smtp::Smtp::new(
+            config,
+            secret,
+            http.allowed_hosts.clone(),
+        )?),
+        "telegram" => {
+            let token = need_secret(secret, "Bot-Token")?;
+            if !valid_telegram_token(&token) {
+                return Err(SendError::Config("Bot-Token: ungültiges Format".into()));
+            }
+            let chat_id = cfg_str(config, "chat_id")
+                .ok_or_else(|| SendError::Config("Chat-ID fehlt".into()))?;
+            if !valid_chat_id(chat_id) {
+                return Err(SendError::Config("Chat-ID: Zahl oder @name".into()));
+            }
+            let base = Url::parse(TELEGRAM_API).map_err(|_| SendError::Unreachable)?;
+            Box::new(Telegram {
+                base,
+                token,
+                chat_id: chat_id.to_owned(),
+                http,
+            })
+        }
+        "slack" => {
+            let raw = need_secret(secret, "Webhook-URL")?;
+            let webhook = parse_slack_webhook(&raw)
+                .map_err(|e| SendError::Config(format!("Webhook-URL: {e}")))?;
+            Box::new(Slack { webhook, http })
+        }
+        "webhook" => Box::new(Webhook {
+            url: cfg_url(config, "url", "URL")?,
+            token: secret.filter(|s| !s.is_empty()),
+            http,
+        }),
         "browser" => Box::new(Browser { pool: pool.clone() }),
         other => return Err(SendError::Config(format!("unbekannter Kanal {other}"))),
     })
@@ -392,10 +584,46 @@ pub fn validate_config(kind: &str, config: &Value, has_secret: bool) -> Result<(
                 return Err("Webhook-URL fehlt".into());
             }
         }
+        "smtp" => {
+            super::smtp::parse(config)?;
+        }
+        "telegram" => {
+            let chat_id = cfg_str(config, "chat_id").ok_or("Chat-ID fehlt")?;
+            if !valid_chat_id(chat_id) {
+                return Err("Chat-ID: Zahl oder @name".into());
+            }
+            if !has_secret {
+                return Err("Bot-Token fehlt".into());
+            }
+        }
+        "slack" => {
+            if !has_secret {
+                return Err("Webhook-URL fehlt".into());
+            }
+        }
+        "webhook" => {
+            cfg_url(config, "url", "URL").map_err(|e| e.summary())?;
+        }
         "browser" => {}
         other => return Err(format!("unbekannter Kanal {other}")),
     }
     Ok(())
+}
+
+/// Prüft ein neues Geheimnis auf Format (beim Speichern; für Kanäle mit Geheimnis in der URL besonders streng).
+pub fn validate_secret(kind: &str, secret: &str) -> Result<(), String> {
+    match kind {
+        "discord" => match ssrf::parse_url(secret, true) {
+            Ok(u) if u.scheme() == "https" => Ok(()),
+            Ok(_) => Err("Webhook-URL: nur https:// ist erlaubt".into()),
+            Err(e) => Err(format!("Webhook-URL: {}", e.message())),
+        },
+        "slack" => parse_slack_webhook(secret)
+            .map(|_| ())
+            .map_err(|e| format!("Webhook-URL: {e}")),
+        "telegram" if !valid_telegram_token(secret) => Err("Bot-Token: ungültiges Format".into()),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -470,5 +698,83 @@ mod tests {
         assert!(ok("discord", json!({}), true).is_ok());
         assert!(ok("browser", json!({}), false).is_ok());
         assert!(ok("pager", json!({}), true).is_err());
+    }
+
+    #[test]
+    fn new_channel_validation() {
+        let ok = |k: &str, c: Value, s: bool| validate_config(k, &c, s);
+        let tok = "123456789:AAE_abcdefghijklmnopqrstuvwxyz012345";
+        assert!(valid_telegram_token(tok));
+        for bad in [
+            "",
+            "abc",
+            "123:short",
+            "12345678:has space xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "x:AAE_abcdefghijklmnopqrstuvwxyz012345",
+        ] {
+            assert!(!valid_telegram_token(bad), "{bad}");
+        }
+        for good in ["12345", "-100123456", "@mein_kanal"] {
+            assert!(valid_chat_id(good), "{good}");
+        }
+        for bad in ["", "-", "@ab", "12a", "@a b cde", "1\n2"] {
+            assert!(!valid_chat_id(bad), "{bad:?}");
+        }
+        assert!(ok("telegram", json!({"chat_id": "42"}), true).is_ok());
+        assert!(ok("telegram", json!({"chat_id": "42"}), false).is_err());
+        assert!(ok("telegram", json!({}), true).is_err());
+        assert!(validate_secret("telegram", "nope").is_err());
+        assert!(validate_secret("telegram", tok).is_ok());
+        assert!(ok("slack", json!({}), true).is_ok());
+        assert!(ok("slack", json!({}), false).is_err());
+        assert!(ok(
+            "webhook",
+            json!({"url": "https://hook.example.org/x"}),
+            false
+        )
+        .is_ok());
+        assert!(ok(
+            "webhook",
+            json!({"url": "https://hook.example.org/x?k=1"}),
+            false
+        )
+        .is_err());
+        assert!(ok("webhook", json!({}), false).is_err());
+    }
+
+    #[test]
+    fn slack_webhook_host_is_fixed_and_text_escaped() {
+        assert!(parse_slack_webhook("https://hooks.slack.com/services/T0/B0/xyz").is_ok());
+        for bad in [
+            "http://hooks.slack.com/services/T0/B0/xyz",
+            "https://hooks.slack.com.evil.example/services/T0/B0/xyz",
+            "https://evil.example/services/T0/B0/xyz",
+            "https://hooks.slack.com/other",
+            "https://user@hooks.slack.com/services/a",
+            "https://127.0.0.1/services/a",
+        ] {
+            assert!(parse_slack_webhook(bad).is_err(), "{bad}");
+        }
+        assert_eq!(slack_escape("<!channel> a&b"), "&lt;!channel&gt; a&amp;b");
+    }
+
+    #[test]
+    fn webhook_payload_has_fixed_schema() {
+        let m = Message {
+            title: "T".into(),
+            body: "B".into(),
+            priority: 4,
+            tags: vec!["warning"],
+        };
+        let v = webhook_payload(&m, chrono::DateTime::from_timestamp(0, 0).unwrap());
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["event", "priority", "tags", "text", "time", "title", "version"]
+        );
+        assert_eq!(v["version"], 1);
+        assert_eq!(v["time"], "1970-01-01T00:00:00Z");
+        assert_eq!(SendError::Smtp(535).summary(), "SMTP 535");
     }
 }
