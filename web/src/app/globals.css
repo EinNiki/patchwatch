@@ -140,6 +140,14 @@ code,
   background: color-mix(in srgb, var(--sunk) 60%, transparent);
 }
 
+/* Entfernte Watchlist-Zeile (Ansicht "nur Watchlist"): blendet nur per Opacity aus (≤ 150 ms), keine Bewegung. */
+.tbl tbody tr {
+  transition: opacity 150ms var(--ease-out);
+}
+.tbl tbody tr[data-leaving] {
+  opacity: 0;
+}
+
 /* Stern-Spalte: schmale Zelle, der Stern ist zugleich der Schalter. */
 .tbl .cell-star {
   width: 2.5rem;

@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
+import { cacheGet, cacheSet } from "@/lib/apiCache";
 import type { CveDetail, CveListItem } from "@/lib/types";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
@@ -18,6 +19,14 @@ import { FeedSources } from "@/components/FeedSources";
 
 const PAGE = 100;
 const CVE_RE = /^CVE-\d{4}-\d{4,7}$/;
+/** Ansicht "nur Watchlist": eine entfernte CVE bleibt so lange sichtbar (mit Rückgängig), dann blendet sie aus. */
+const HIDE_WAIT_MS = 4000;
+const FADE_MS = 150;
+
+function dropFromCache(path: string, id: string) {
+  const cur = cacheGet<CveListItem[]>(path);
+  if (cur) cacheSet(path, cur.filter((x) => x.id !== id));
+}
 
 const FIX_LABEL: Record<string, string> = { fixed: "gefixt", open: "offen" };
 const LEGACY_SPLIT: Record<string, { debian: string; ubuntu: string }> = {
@@ -65,7 +74,62 @@ function CveView() {
   if (distro) qs.set("distro", distro);
   if (debianFix) qs.set("debian", debianFix);
   if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
-  const cves = useApi<CveListItem[]>(`/cves?${qs}`, 60_000, ["host_cve_status", "report_received"]);
+  const listPath = `/cves?${qs}`;
+  const cves = useApi<CveListItem[]>(listPath, 60_000, ["host_cve_status", "report_received"]);
+
+  // Zeilen, die in der Watchlist-Ansicht gerade entfernt wurden: "wait" = Hinweis sichtbar, "fade" = blendet aus.
+  // Je Zeile ein eigener Timer; der Server speichert sofort, nur das Ausblenden ist verzögert.
+  const [hiding, setHiding] = useState<ReadonlyMap<string, "wait" | "fade">>(new Map());
+  const [announce, setAnnounce] = useState("");
+  const pending = useRef(new Map<string, { path: string; timers: ReturnType<typeof setTimeout>[] }>());
+
+  function setHideState(id: string, state: "wait" | "fade" | null) {
+    setHiding((m) => {
+      const n = new Map(m);
+      if (state) n.set(id, state);
+      else n.delete(id);
+      return n;
+    });
+  }
+  function finishHide(id: string) {
+    const p = pending.current.get(id);
+    if (!p) return;
+    p.timers.forEach(clearTimeout);
+    pending.current.delete(id);
+    dropFromCache(p.path, id);
+    setHideState(id, null);
+  }
+  function cancelHide(id: string) {
+    const p = pending.current.get(id);
+    if (!p) return;
+    p.timers.forEach(clearTimeout);
+    pending.current.delete(id);
+    setHideState(id, null);
+  }
+  function startHide(id: string) {
+    const entry = { path: listPath, timers: [] as ReturnType<typeof setTimeout>[] };
+    pending.current.set(id, entry);
+    setHideState(id, "wait");
+    entry.timers.push(
+      setTimeout(() => {
+        setHideState(id, "fade");
+        entry.timers.push(setTimeout(() => finishHide(id), FADE_MS));
+      }, HIDE_WAIT_MS),
+    );
+  }
+
+  // Ansicht wechselt (Filter geändert) oder Seite wird verlassen: ausstehendes Ausblenden sofort abschließen.
+  useEffect(() => {
+    const map = pending.current;
+    return () => {
+      for (const [id, p] of map) {
+        p.timers.forEach(clearTimeout);
+        dropFromCache(p.path, id);
+      }
+      map.clear();
+      setHiding(new Map());
+    };
+  }, [listPath]);
   const filtered = onlyWatch || q.trim() !== "" || allReleases || distro !== "" || debianFix !== "" || ubuntuFix !== "";
   const activeFilters = [q.trim(), onlyWatch, allReleases, distro, debianFix, ubuntuFix].filter(Boolean).length;
   const flashed = useFlash(
@@ -103,13 +167,21 @@ function CveView() {
     if (pendingIds.has(c.id)) return;
     setNotice(null);
     setPendingIds((s) => new Set(s).add(c.id));
+    const hadHide = pending.current.has(c.id);
+    cancelHide(c.id);
     cves.mutate((list) => list.map((x) => (x.id === c.id ? { ...x, watched: want } : x)));
+    if (onlyWatch && !want) {
+      startHide(c.id);
+      setAnnounce(`${c.id} von der Watchlist entfernt, Rückgängig möglich`);
+    } else if (want && hadHide) {
+      setAnnounce(`${c.id} bleibt auf der Watchlist`);
+    }
     try {
       if (want) await api.put(`/watchlist/${c.id}`);
       else await api.del(`/watchlist/${c.id}`);
-      if (onlyWatch && !want) cves.mutate((list) => list.filter((x) => x.id !== c.id));
-      else await refreshRow(c.id).catch(() => undefined);
+      if (!(onlyWatch && !want)) await refreshRow(c.id).catch(() => undefined);
     } catch {
+      if (onlyWatch && !want) cancelHide(c.id);
       cves.mutate((list) => list.map((x) => (x.id === c.id ? { ...x, watched: c.watched } : x)));
       setNotice(`${c.id}: Die Watchlist konnte nicht geändert werden. Der Stand wurde zurückgesetzt.`);
     } finally {
@@ -177,6 +249,7 @@ function CveView() {
             </Button>
           </form>
         </details>
+        <div className="sr-only" role="status" aria-live="polite">{announce}</div>
         <div role="status">{notice ? <ErrorNote message={notice} /> : null}</div>
 
         <div className="mb-3 md:hidden">
@@ -274,7 +347,7 @@ function CveView() {
                 </thead>
                 <tbody>
                   {cves.data.map((c) => (
-                    <tr key={c.id} data-flash={flashed.has(c.id) ? "" : undefined} data-watched={c.watched ? "" : undefined}>
+                    <tr key={c.id} data-flash={flashed.has(c.id) ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hiding.get(c.id) === "fade" ? "" : undefined}>
                       <td className="cell-star">
                         <button
                           type="button"
@@ -291,6 +364,14 @@ function CveView() {
                         <Link href={`/cves/${c.id}`} className="mono whitespace-nowrap font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.id}`)} onFocus={() => prefetchApi(`/cves/${c.id}`)}>
                           {c.id}
                         </Link>
+                        {hiding.has(c.id) ? (
+                          <div className="text-xs text-fg2">
+                            Entfernt.{" "}
+                            <button type="button" className="underline" onClick={() => void toggle(c)}>
+                              Rückgängig
+                            </button>
+                          </div>
+                        ) : null}
                         {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
                         {c.priority ? <div className="text-xs text-fg3 wide:hidden">Priorität {c.priority}</div> : null}
                       </td>
