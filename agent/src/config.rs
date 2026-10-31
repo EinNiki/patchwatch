@@ -18,6 +18,20 @@ pub struct Config {
     /// Erlaubt http:// (nur für lokale Entwicklung).
     #[serde(default)]
     pub insecure_http: bool,
+    /// Check-in: fragt den Server regelmäßig, ob ein Report gewünscht ist (`patchwatch-agent checkin`).
+    #[serde(default = "default_true")]
+    pub checkin_enabled: bool,
+    /// Mindestabstand zwischen zwei Check-ins; der systemd-Timer läuft minütlich, der Agent prüft das Intervall.
+    #[serde(default = "default_checkin_interval")]
+    pub checkin_interval_secs: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_checkin_interval() -> u64 {
+    300
 }
 
 fn default_timeout() -> u64 {
@@ -47,7 +61,19 @@ impl Config {
                 "timeout_secs muss zwischen 1 und 300 liegen".into(),
             ));
         }
+        if !(60..=86_400).contains(&cfg.checkin_interval_secs) {
+            return Err(AgentError::Config(
+                "checkin_interval_secs muss zwischen 60 und 86400 liegen".into(),
+            ));
+        }
         Ok(cfg)
+    }
+
+    pub fn checkin_url(&self) -> String {
+        format!(
+            "{}/api/v1/agent/checkin",
+            self.server_url.trim_end_matches('/')
+        )
     }
 
     pub fn report_url(&self) -> String {
@@ -87,6 +113,12 @@ mod tests {
         let c = Config::parse("server_url = \"https://pw.example.org/\"\ntoken = \"abc\"").unwrap();
         assert!(!c.include_packages);
         assert_eq!(c.timeout_secs, 30);
+        assert!(c.checkin_enabled);
+        assert_eq!(c.checkin_interval_secs, 300);
+        assert_eq!(
+            c.checkin_url(),
+            "https://pw.example.org/api/v1/agent/checkin"
+        );
         assert_eq!(c.report_url(), "https://pw.example.org/api/v1/report");
     }
 
@@ -100,6 +132,18 @@ mod tests {
     fn rejects_unknown_keys_and_bad_timeout() {
         assert!(Config::parse("server_url = \"https://x\"\nfoo = 1").is_err());
         assert!(Config::parse("server_url = \"https://x\"\ntimeout_secs = 0").is_err());
+    }
+
+    #[test]
+    fn checkin_interval_is_bounded_and_can_be_disabled() {
+        let base = "server_url = \"https://x\"\n";
+        assert!(Config::parse(&format!("{base}checkin_interval_secs = 59")).is_err());
+        assert!(Config::parse(&format!("{base}checkin_interval_secs = 86401")).is_err());
+        let c = Config::parse(&format!(
+            "{base}checkin_enabled = false\ncheckin_interval_secs = 60"
+        ))
+        .unwrap();
+        assert!(!c.checkin_enabled);
     }
 
     #[test]
