@@ -173,3 +173,19 @@ dialog::backdrop {
   background: rgb(0 0 0 / 0.45);
 }
 }
+
+/* Seitenwechsel: leiser Crossfade des Inhaltsbereichs (React <ViewTransition default="page">, kein experimentelles Flag). */
+@layer components {
+  ::view-transition-old(.page),
+  ::view-transition-new(.page) {
+    animation-duration: 150ms;
+    animation-timing-function: var(--ease-out);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation: none !important;
+    }
+  }
+}
