@@ -433,3 +433,14 @@ summary {
     transform: translateY(4px);
   }
 }
+
+/* Tablet (768-1023 px): engere Zellen, damit die Hosts-Tabelle ohne seitliches Scrollen passt. */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .tbl td {
+    padding-inline: 8px;
+  }
+  .tbl th > button,
+  .tbl th > .th-pad {
+    padding-inline: 8px;
+  }
+}

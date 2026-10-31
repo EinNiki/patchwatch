@@ -287,7 +287,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         <Link href={`/hosts/${h.id}`} className="font-semibold" onPointerEnter={() => prefetchHost(h.id)} onFocus={() => prefetchHost(h.id)}>
           {h.name}
         </Link>
-        {h.is_proxmox ? <span className="ml-2 inline-flex align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
+        {h.is_proxmox ? <span className="mt-1 flex xl:ml-2 xl:mt-0 xl:inline-flex xl:align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
         {h.hostname && h.hostname !== h.name ? <div className="text-xs text-fg3">{h.hostname}</div> : null}
         <div className="hidden text-xs text-fg3 md:max-xl:block">
           zuletzt <RelTime iso={h.last_report_at} />
