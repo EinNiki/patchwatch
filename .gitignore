@@ -4,3 +4,6 @@ node_modules/
 .env
 *.env.local
 dist/
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
+*.tsbuildinfo

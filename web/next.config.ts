@@ -7,8 +7,9 @@ const apiUrl = process.env.PATCHWATCH_API_URL ?? "http://127.0.0.1:8080";
 
 const config: NextConfig = {
   output: "standalone",
-  // Nur für `next dev`: erlaubt den Zugriff über 127.0.0.1 (sonst blockiert Next.js die Dev-Ressourcen).
-  allowedDevOrigins: ["127.0.0.1"],
+  // Nur für `next dev`: erlaubt den Zugriff über 127.0.0.1 (sonst blockiert Next.js die Dev-Ressourcen
+  // und den HMR-WebSocket). Weitere Hostnamen/IPs: PATCHWATCH_DEV_ORIGINS="10.0.4.90,dev.lan".
+  allowedDevOrigins: ["127.0.0.1", ...(process.env.PATCHWATCH_DEV_ORIGINS?.split(",").map((o) => o.trim()).filter(Boolean) ?? [])],
   poweredByHeader: false,
   async rewrites() {
     return process.env.NODE_ENV === "development"
