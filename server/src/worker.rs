@@ -43,6 +43,13 @@ pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
         .into_iter()
         .filter(|c| c.enabled)
         .collect();
+    let my_releases: std::collections::HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT os_codename FROM hosts WHERE os_codename IS NOT NULL AND os_codename <> ''",
+    )
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .collect();
     let mut tx = state.pool.begin().await?;
     let events: Vec<(i64, String, Value)> = sqlx::query_as(
         "SELECT id, kind, payload FROM events WHERE processed_at IS NULL ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 50",
@@ -76,7 +83,7 @@ pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
             } else {
                 false
             };
-            if let Some((category, m)) = events::route(kind, payload, watched) {
+            if let Some((category, m)) = events::route(kind, payload, watched, &my_releases) {
                 for ch in channels.iter().filter(|c| c.subscribes(category)) {
                     if ch.kind == "browser" {
                         live::publish(&mut tx, &browser_payload(&m)).await;
@@ -179,7 +186,8 @@ async fn handle_job(state: &AppState, job: &Job) -> anyhow::Result<()> {
 
 /// Entfernt alte Reports (Aufbewahrung konfigurierbar), abgelaufene Sessions, erledigte Jobs/Events.
 pub async fn cleanup(state: &AppState) -> anyhow::Result<()> {
-    let days = state.cfg.report_retention_days as f64;
+    let days = crate::routes::settings::retention_days(&state.pool, state.cfg.report_retention_days)
+        .await as f64;
     let reports = sqlx::query(
         "DELETE FROM reports WHERE received_at < now() - make_interval(days => $1::int)",
     )

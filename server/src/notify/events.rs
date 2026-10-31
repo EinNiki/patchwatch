@@ -4,6 +4,7 @@ use super::messages::{
     cve_change_message, feed_failing_message, host_cve_message, status_change_message, Message,
 };
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub const HOST_STATUS: &str = "host_status";
 pub const AGENT_SILENT: &str = "agent_silent";
@@ -28,7 +29,14 @@ fn str_of<'a>(v: &'a Value, k: &str) -> &'a str {
 /// Ordnet ein internes Event einer abonnierbaren Ereignisart und einer Nachricht zu.
 /// `watched` sagt, ob die CVE des Events auf der Watchlist steht (nur dann gibt es CVE-Meldungen).
 /// `None`: keine Benachrichtigung (z. B. UNKNOWN, auch Proxmox, oder nicht beobachtet).
-pub fn route(kind: &str, payload: &Value, watched: bool) -> Option<(&'static str, Message)> {
+/// `my_releases`: Release-Codenamen, die auf mindestens einem Host laufen. Eine Feed-Änderung zu „behoben“
+/// zählt nur dann als `fix_available`, wenn mindestens eine betroffene Release dazugehört.
+pub fn route(
+    kind: &str,
+    payload: &Value,
+    watched: bool,
+    my_releases: &HashSet<String>,
+) -> Option<(&'static str, Message)> {
     match kind {
         "host_status_changed" => {
             let msg = status_change_message(
@@ -59,7 +67,11 @@ pub fn route(kind: &str, payload: &Value, watched: bool) -> Option<(&'static str
             let fixed = payload
                 .get("changes")
                 .and_then(Value::as_array)
-                .is_some_and(|c| c.iter().any(|c| str_of(c, "to") == "fixed"));
+                .is_some_and(|c| {
+                    c.iter().any(|c| {
+                        str_of(c, "to") == "fixed" && my_releases.contains(str_of(c, "release"))
+                    })
+                });
             let category = if fixed { FIX_AVAILABLE } else { WATCHLIST_CVE };
             Some((category, cve_change_message(kind, payload)))
         }
@@ -72,6 +84,11 @@ pub fn route(kind: &str, payload: &Value, watched: bool) -> Option<(&'static str
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Test hosts run "noble" only.
+    fn route(kind: &str, payload: &Value, watched: bool) -> Option<(&'static str, Message)> {
+        super::route(kind, payload, watched, &HashSet::from(["noble".to_owned()]))
+    }
 
     #[test]
     fn stale_is_agent_silent_other_changes_are_host_status() {
@@ -144,6 +161,31 @@ mod tests {
         );
         assert_eq!(
             route("cve_new", &ev("vulnerable"), true).unwrap().0,
+            WATCHLIST_CVE
+        );
+    }
+
+    #[test]
+    fn fix_available_needs_a_release_of_one_of_my_hosts() {
+        let ev = |release: &str| {
+            json!({"cve_id": "CVE-2024-1", "source": "ubuntu",
+            "changes": [{"release": release, "package": "linux", "from": "vulnerable", "to": "fixed", "fix_version": "1"}]})
+        };
+        // A release no host runs is still a watchlist change, but no "fix available" for me.
+        assert_eq!(
+            route("cve_status_changed", &ev("focal"), true).unwrap().0,
+            WATCHLIST_CVE
+        );
+        assert_eq!(
+            route("cve_status_changed", &ev("noble"), true).unwrap().0,
+            FIX_AVAILABLE
+        );
+        // No hosts at all: never fix_available from feed changes.
+        let none = HashSet::new();
+        assert_eq!(
+            super::route("cve_status_changed", &ev("noble"), true, &none)
+                .unwrap()
+                .0,
             WATCHLIST_CVE
         );
     }

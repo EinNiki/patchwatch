@@ -7,6 +7,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// CVE-ID wie `CVE-2024-1086`.
 pub fn valid_cve_id(id: &str) -> bool {
@@ -26,6 +27,12 @@ pub fn valid_cve_id(id: &str) -> bool {
 pub struct ListQuery {
     watchlist: Option<bool>,
     q: Option<String>,
+    /// `mine` (Standard): nur Releases, die auf mindestens einem Host laufen; `all`: alle.
+    releases: Option<String>,
+    /// Nur CVEs mit Eintrag dieser Quelle (`debian`, `ubuntu`, `osv`).
+    distro: Option<String>,
+    /// `debian_fixed_ubuntu_open` oder `ubuntu_fixed_debian_open`.
+    split: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -44,6 +51,15 @@ pub struct CveRow {
     hosts_unknown: i64,
 }
 
+#[derive(Serialize)]
+pub struct CveOut {
+    #[serde(flatten)]
+    cve: CveRow,
+    distros: Vec<Distro>,
+    /// Anzahl Releases, die wegen `releases=mine` nicht in `distros` stehen.
+    hidden_releases: usize,
+}
+
 #[derive(Serialize, sqlx::FromRow)]
 pub struct SourceRow {
     source: String,
@@ -52,6 +68,88 @@ pub struct SourceRow {
     status: String,
     fix_version: Option<String>,
     updated_at: DateTime<Utc>,
+}
+
+/// Ein Chip je (Quelle, Release): der ungünstigste Status über alle Pakete.
+#[derive(Serialize, Clone)]
+pub struct Distro {
+    source: String,
+    release: String,
+    status: String,
+    package: String,
+    fix_version: Option<String>,
+    updated_at: DateTime<Utc>,
+    /// Release läuft auf mindestens einem Host.
+    mine: bool,
+    /// Anzahl Pakete dieser Quelle/Release.
+    packages: usize,
+}
+
+/// Rang für „ungünstigster Status zuerst“.
+fn severity(status: &str) -> u8 {
+    match status {
+        "vulnerable" => 0,
+        "fix_pending" => 1,
+        "unknown" => 2,
+        "fixed" => 3,
+        _ => 4,
+    }
+}
+
+/// Fasst Quellenzeilen je (Quelle, Release) zusammen; Sortierung: Quelle, Release.
+fn collapse(rows: Vec<SourceRow>, mine: &HashSet<String>) -> Vec<Distro> {
+    let mut by: BTreeMap<(String, String), Distro> = BTreeMap::new();
+    for r in rows {
+        let key = (r.source.clone(), r.release.clone());
+        match by.get_mut(&key) {
+            Some(d) => {
+                d.packages += 1;
+                if severity(&r.status) < severity(&d.status) {
+                    d.status = r.status;
+                    d.package = r.package;
+                    d.fix_version = r.fix_version;
+                }
+                d.updated_at = d.updated_at.max(r.updated_at);
+            }
+            None => {
+                let m = mine.contains(&r.release);
+                by.insert(
+                    key,
+                    Distro {
+                        source: r.source,
+                        release: r.release,
+                        status: r.status,
+                        package: r.package,
+                        fix_version: r.fix_version,
+                        updated_at: r.updated_at,
+                        mine: m,
+                        packages: 1,
+                    },
+                );
+            }
+        }
+    }
+    by.into_values().collect()
+}
+
+/// Releases (Codenamen), die auf mindestens einem Host laufen.
+async fn my_releases(st: &AppState) -> ApiResult<HashSet<String>> {
+    let rows: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT os_codename FROM hosts WHERE os_codename IS NOT NULL AND os_codename <> ''",
+    )
+    .fetch_all(&st.pool)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Quellen-Links je Quelle (feste Vorlagen; die CVE-ID ist vorher validiert).
+fn source_link(source: &str, id: &str) -> Option<String> {
+    match source {
+        "ubuntu" => Some(format!("https://ubuntu.com/security/{id}")),
+        "debian" => Some(format!("https://security-tracker.debian.org/tracker/{id}")),
+        "osv" => Some(format!("https://osv.dev/vulnerability/{id}")),
+        _ => None,
+    }
 }
 
 const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at, c.updated_at, \
@@ -65,9 +163,30 @@ pub async fn list(
     _: Admin,
     State(st): State<AppState>,
     Query(q): Query<ListQuery>,
-) -> ApiResult<Json<Vec<CveRow>>> {
+) -> ApiResult<Json<Vec<CveOut>>> {
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let offset = q.offset.unwrap_or(0).max(0);
+    let all_releases = match q.releases.as_deref() {
+        None | Some("mine") => false,
+        Some("all") => true,
+        Some(_) => return Err(ApiError::BadRequest("releases: mine oder all".into())),
+    };
+    let distro = match q.distro.as_deref() {
+        None | Some("") => None,
+        Some(d @ ("debian" | "ubuntu" | "osv")) => Some(d),
+        Some(_) => {
+            return Err(ApiError::BadRequest(
+                "distro: debian, ubuntu oder osv".into(),
+            ))
+        }
+    };
+    // Ein Filter je Richtung: links „behoben“, rechts „offen“ (verwundbar oder Fix angekündigt).
+    let split = match q.split.as_deref() {
+        None | Some("") => None,
+        Some("debian_fixed_ubuntu_open") => Some(("debian", "ubuntu")),
+        Some("ubuntu_fixed_debian_open") => Some(("ubuntu", "debian")),
+        Some(_) => return Err(ApiError::BadRequest("split: ungültiger Wert".into())),
+    };
     // LIKE-Metazeichen im Suchtext entschärfen.
     let pattern = q.q.as_deref().map(|s| {
         format!(
@@ -77,9 +196,16 @@ pub async fn list(
                 .replace('_', "\\_")
         )
     });
+    // Release-Einschränkung für Filter und Chips: `$5 = true` heißt alle Releases.
+    let in_scope =
+        "($5::bool OR s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL))";
     let rows = sqlx::query_as::<_, CveRow>(&format!(
         "{CVE_SELECT} WHERE ($1::bool IS NOT TRUE OR w.cve_id IS NOT NULL) \
          AND ($2::text IS NULL OR c.id ILIKE $2 OR c.description ILIKE $2) \
+         AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $6 AND {in_scope})) \
+         AND ($7::text IS NULL OR ( \
+              EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $7 AND s.status = 'fixed' AND {in_scope}) \
+          AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $8 AND s.status IN ('vulnerable','fix_pending') AND {in_scope}))) \
          GROUP BY c.id, w.cve_id, w.note \
          ORDER BY (w.cve_id IS NOT NULL) DESC, c.updated_at DESC, c.id DESC LIMIT $3 OFFSET $4"
     ))
@@ -87,9 +213,88 @@ pub async fn list(
     .bind(pattern)
     .bind(limit)
     .bind(offset)
+    .bind(all_releases)
+    .bind(distro)
+    .bind(split.map(|s| s.0))
+    .bind(split.map(|s| s.1))
     .fetch_all(&st.pool)
     .await?;
-    Ok(Json(rows))
+
+    let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let sources: Vec<(String, SourceRow)> = sqlx::query_as::<_, SourceWithCve>(
+        "SELECT cve_id, source, release, package, status, fix_version, updated_at FROM cve_source_status \
+         WHERE cve_id = ANY($1) ORDER BY cve_id, source, release, package",
+    )
+    .bind(&ids)
+    .fetch_all(&st.pool)
+    .await?
+    .into_iter()
+    .map(SourceWithCve::split)
+    .collect();
+    let mine = my_releases(&st).await?;
+    let mut per_cve: HashMap<String, Vec<SourceRow>> = HashMap::new();
+    for (cve, row) in sources {
+        per_cve.entry(cve).or_default().push(row);
+    }
+    let out = rows
+        .into_iter()
+        .map(|cve| {
+            let all = collapse(per_cve.remove(&cve.id).unwrap_or_default(), &mine);
+            let total = all.len();
+            let distros: Vec<Distro> = all
+                .into_iter()
+                .filter(|d| all_releases || d.mine)
+                .filter(|d| distro.is_none_or(|x| d.source == x))
+                .collect();
+            let hidden_releases = if all_releases {
+                0
+            } else {
+                total - distros.len()
+            };
+            CveOut {
+                cve,
+                distros,
+                hidden_releases,
+            }
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+#[derive(sqlx::FromRow)]
+struct SourceWithCve {
+    cve_id: String,
+    source: String,
+    release: String,
+    package: String,
+    status: String,
+    fix_version: Option<String>,
+    updated_at: DateTime<Utc>,
+}
+
+impl SourceWithCve {
+    fn split(self) -> (String, SourceRow) {
+        (
+            self.cve_id,
+            SourceRow {
+                source: self.source,
+                release: self.release,
+                package: self.package,
+                status: self.status,
+                fix_version: self.fix_version,
+                updated_at: self.updated_at,
+            },
+        )
+    }
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct AffectedHost {
+    id: i64,
+    name: String,
+    os_codename: Option<String>,
+    status: String,
+    reason: String,
 }
 
 pub async fn detail(
@@ -114,16 +319,54 @@ pub async fn detail(
     .bind(&id)
     .fetch_all(&st.pool)
     .await?;
-    Ok(Json(serde_json::json!({ "cve": cve, "sources": sources })))
+    let hosts = sqlx::query_as::<_, AffectedHost>(
+        "SELECT h.id, h.name, h.os_codename, s.status, s.reason FROM host_cve_status s \
+         JOIN hosts h ON h.id = s.host_id WHERE s.cve_id = $1 ORDER BY h.name",
+    )
+    .bind(&id)
+    .fetch_all(&st.pool)
+    .await?;
+    let mine = my_releases(&st).await?;
+    let last_change = sources
+        .iter()
+        .map(|s| s.updated_at)
+        .max()
+        .map_or(cve.updated_at, |m| m.max(cve.updated_at));
+    let seen: BTreeSet<&str> = sources.iter().map(|s| s.source.as_str()).collect();
+    let links: Vec<Value> = seen
+        .into_iter()
+        .filter_map(|s| source_link(s, &id).map(|u| serde_json::json!({ "source": s, "url": u })))
+        .collect();
+    let distros = collapse(
+        sources
+            .iter()
+            .map(|s| SourceRow {
+                source: s.source.clone(),
+                release: s.release.clone(),
+                package: s.package.clone(),
+                status: s.status.clone(),
+                fix_version: s.fix_version.clone(),
+                updated_at: s.updated_at,
+            })
+            .collect(),
+        &mine,
+    );
+    Ok(Json(serde_json::json!({
+        "cve": cve, "sources": sources, "distros": distros, "links": links,
+        "last_change_at": last_change, "hosts": hosts,
+    })))
 }
 
-pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<CveRow>>> {
+pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<CveOut>>> {
     list(
         admin,
         State(st),
         Query(ListQuery {
             watchlist: Some(true),
             q: None,
+            releases: None,
+            distro: None,
+            split: None,
             limit: Some(500),
             offset: None,
         }),

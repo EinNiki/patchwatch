@@ -8,6 +8,7 @@ mod live;
 mod matrix;
 mod notifications;
 mod report;
+pub mod settings;
 
 use crate::extract::ClientIp;
 use crate::state::AppState;
@@ -47,6 +48,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        .route("/auth/password", post(auth::change_password))
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/request-report", post(hosts::request_report_all))
         .route("/hosts/{id}", get(hosts::detail).delete(hosts::remove))
@@ -69,6 +71,7 @@ pub fn router(state: AppState) -> Router {
             get(notifications::get_one).put(notifications::put),
         )
         .route("/notifications/{kind}/test", post(notifications::test))
+        .route("/settings", get(settings::get).put(settings::put))
         .route("/live", get(live::live))
         .route("/feeds", get(feeds::list))
         .route("/feeds/refresh", post(feeds::refresh))

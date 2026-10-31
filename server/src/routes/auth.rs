@@ -93,6 +93,71 @@ pub async fn logout(
     Ok(resp)
 }
 
+#[derive(Deserialize)]
+pub struct ChangePassword {
+    current_password: String,
+    new_password: String,
+}
+
+/// Ändert das eigene Passwort. Alle anderen Sessions des Benutzers werden beendet.
+pub async fn change_password(
+    State(st): State<AppState>,
+    CsrfAdmin(admin): CsrfAdmin,
+    Json(body): Json<ChangePassword>,
+) -> ApiResult<StatusCode> {
+    st.limiter
+        .check(
+            &format!("pwchange:{}", admin.username.to_lowercase()),
+            5,
+            Duration::from_secs(600),
+        )
+        .map_err(|w| ApiError::TooManyRequests {
+            retry_after_secs: w.as_secs().max(1),
+        })?;
+    if body.current_password.len() > 256 || body.new_password.len() > 256 {
+        return Err(ApiError::BadRequest("ungültige Eingabe".into()));
+    }
+    if body.new_password.chars().count() < 12 {
+        return Err(ApiError::BadRequest(
+            "Neues Passwort: mindestens 12 Zeichen".into(),
+        ));
+    }
+    if body.new_password == body.current_password {
+        return Err(ApiError::BadRequest(
+            "Neues Passwort muss sich vom aktuellen unterscheiden".into(),
+        ));
+    }
+    let (id, hash): (i64, String) =
+        sqlx::query_as("SELECT id, password_hash FROM admin_users WHERE username = $1")
+            .bind(&admin.username)
+            .fetch_one(&st.pool)
+            .await?;
+    let current = body.current_password;
+    let ok = tokio::task::spawn_blocking(move || security::verify_password(&hash, &current))
+        .await
+        .map_err(anyhow::Error::from)?;
+    if !ok {
+        return Err(ApiError::Forbidden("Aktuelles Passwort ist falsch"));
+    }
+    let new = body.new_password;
+    let new_hash = tokio::task::spawn_blocking(move || security::hash_password(&new))
+        .await
+        .map_err(anyhow::Error::from)??;
+    let mut tx = st.pool.begin().await?;
+    sqlx::query("UPDATE admin_users SET password_hash = $2 WHERE id = $1")
+        .bind(id)
+        .bind(new_hash)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM sessions WHERE admin_id = $1 AND id_hash <> $2")
+        .bind(id)
+        .bind(&admin.session_hash)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn me(admin: Admin) -> Json<serde_json::Value> {
     Json(json!({ "username": admin.username, "csrf_token": admin.csrf_token }))
 }
