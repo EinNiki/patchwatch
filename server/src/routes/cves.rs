@@ -31,8 +31,11 @@ pub struct ListQuery {
     releases: Option<String>,
     /// Nur CVEs mit Eintrag dieser Quelle (`debian`, `ubuntu`, `osv`).
     distro: Option<String>,
-    /// `debian_fixed_ubuntu_open` oder `ubuntu_fixed_debian_open`.
+    /// Alt-URL: `debian_fixed_ubuntu_open` oder `ubuntu_fixed_debian_open` (Alias für `debian`/`ubuntu`).
     split: Option<String>,
+    /// Fix-Stand je Distribution: `fixed` oder `open` (verwundbar oder Fix angekündigt); UND zwischen den Distributionen.
+    debian: Option<String>,
+    ubuntu: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -180,13 +183,22 @@ pub async fn list(
             ))
         }
     };
-    // Ein Filter je Richtung: links „behoben“, rechts „offen“ (verwundbar oder Fix angekündigt).
-    let split = match q.split.as_deref() {
-        None | Some("") => None,
-        Some("debian_fixed_ubuntu_open") => Some(("debian", "ubuntu")),
-        Some("ubuntu_fixed_debian_open") => Some(("ubuntu", "debian")),
+    // Alt-URL `split` ist ein Alias für zwei Fix-Filter; explizite Parameter haben Vorrang.
+    let (split_debian, split_ubuntu) = match q.split.as_deref() {
+        None | Some("") => (None, None),
+        Some("debian_fixed_ubuntu_open") => (Some("fixed"), Some("open")),
+        Some("ubuntu_fixed_debian_open") => (Some("open"), Some("fixed")),
         Some(_) => return Err(ApiError::BadRequest("split: ungültiger Wert".into())),
     };
+    let fix_state = |v: &Option<String>, alias: Option<&'static str>, name: &str| match v.as_deref()
+    {
+        None | Some("") => Ok(alias),
+        Some("fixed") => Ok(Some("fixed")),
+        Some("open") => Ok(Some("open")),
+        Some(_) => Err(ApiError::BadRequest(format!("{name}: fixed oder open"))),
+    };
+    let debian_fix = fix_state(&q.debian, split_debian, "debian")?;
+    let ubuntu_fix = fix_state(&q.ubuntu, split_ubuntu, "ubuntu")?;
     // LIKE-Metazeichen im Suchtext entschärfen.
     let pattern = q.q.as_deref().map(|s| {
         format!(
@@ -203,9 +215,10 @@ pub async fn list(
         "{CVE_SELECT} WHERE ($1::bool IS NOT TRUE OR w.cve_id IS NOT NULL) \
          AND ($2::text IS NULL OR c.id ILIKE $2 OR c.description ILIKE $2) \
          AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $6 AND {in_scope})) \
-         AND ($7::text IS NULL OR ( \
-              EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $7 AND s.status = 'fixed' AND {in_scope}) \
-          AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $8 AND s.status IN ('vulnerable','fix_pending') AND {in_scope}))) \
+         AND ($7::text IS NULL OR ($7 = 'fixed' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'debian' AND s.status = 'fixed' AND {in_scope})) \
+              OR ($7 = 'open' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'debian' AND s.status IN ('vulnerable','fix_pending') AND {in_scope}))) \
+         AND ($8::text IS NULL OR ($8 = 'fixed' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'ubuntu' AND s.status = 'fixed' AND {in_scope})) \
+              OR ($8 = 'open' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'ubuntu' AND s.status IN ('vulnerable','fix_pending') AND {in_scope}))) \
          GROUP BY c.id, w.cve_id, w.note \
          ORDER BY (w.cve_id IS NOT NULL) DESC, c.updated_at DESC, c.id DESC LIMIT $3 OFFSET $4"
     ))
@@ -215,8 +228,8 @@ pub async fn list(
     .bind(offset)
     .bind(all_releases)
     .bind(distro)
-    .bind(split.map(|s| s.0))
-    .bind(split.map(|s| s.1))
+    .bind(debian_fix)
+    .bind(ubuntu_fix)
     .fetch_all(&st.pool)
     .await?;
 
@@ -367,6 +380,8 @@ pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Js
             releases: None,
             distro: None,
             split: None,
+            debian: None,
+            ubuntu: None,
             limit: Some(500),
             offset: None,
         }),
@@ -406,9 +421,13 @@ pub async fn watch(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    if let Err(e) = crate::cve::reeval::reevaluate_all(&st).await {
-        tracing::error!(error = %e, "Neubewertung nach Watchlist-Änderung fehlgeschlagen");
-    }
+    // Die Neubewertung aller Hosts dauert Sekunden; die Antwort wartet nicht darauf.
+    // Ergebnisse kommen wie sonst über host_cve_status-Events live in die Oberfläche.
+    tokio::spawn(async move {
+        if let Err(e) = crate::cve::reeval::reevaluate_all(&st).await {
+            tracing::error!(error = %e, "Neubewertung nach Watchlist-Änderung fehlgeschlagen");
+        }
+    });
     Ok(StatusCode::NO_CONTENT)
 }
 

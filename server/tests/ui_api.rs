@@ -256,6 +256,41 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     )
     .await;
     assert_eq!(ids(&r), ["CVE-2024-0002"]);
+    // Combinable per-distro filters: AND between distros, one state per distro.
+    for (query, expected) in [
+        ("debian=fixed&ubuntu=open", vec!["CVE-2024-0001"]),
+        ("ubuntu=fixed&debian=open", vec!["CVE-2024-0002"]),
+        ("debian=fixed&ubuntu=fixed", vec![]),
+    ] {
+        let (r, _) = call(
+            &app,
+            Method::GET,
+            &format!("/api/v1/cves?{query}"),
+            Some(&s),
+            None,
+        )
+        .await;
+        assert_eq!(ids(&r), expected, "{query}");
+    }
+    // A single filter alone, and an invalid value.
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?debian=open",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert!(ids(&r).contains(&"CVE-2024-0002".to_owned()));
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?ubuntu=maybe",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
     // trixie is not mine: with releases=mine the split ignores it, with all it counts as well.
     let (r, _) = call(
         &app,
