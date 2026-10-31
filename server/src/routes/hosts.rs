@@ -15,6 +15,7 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
     (COALESCE(h.reboot_required_file, false) OR COALESCE(h.reboot_needed_kernel, false)) AS reboot_needed, \
     h.updates_pending, h.updates_security, h.uptime_seconds, h.is_proxmox, h.proxmox_version, \
     h.status, h.status_changed_at, h.last_report_at, h.created_at, \
+    h.agent_version, h.last_checkin_at, h.report_requested_at, \
     COALESCE(c.vulnerable, 0) AS cve_vulnerable, COALESCE(c.fix_pending, 0) AS cve_fix_pending, \
     COALESCE(c.unknown, 0) AS cve_unknown \
     FROM hosts h LEFT JOIN LATERAL ( \
@@ -49,6 +50,9 @@ pub struct HostRow {
     status_changed_at: Option<DateTime<Utc>>,
     last_report_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    agent_version: Option<String>,
+    last_checkin_at: Option<DateTime<Utc>>,
+    report_requested_at: Option<DateTime<Utc>>,
     cve_vulnerable: i64,
     cve_fix_pending: i64,
     cve_unknown: i64,
@@ -277,4 +281,71 @@ pub async fn unreview(
         .execute(&st.pool)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Mindestabstand zwischen zwei Report-Anfragen für denselben Host.
+const REQUEST_COOLDOWN_SECS: i32 = 60;
+
+/// "Jetzt aktualisieren": merkt den Wunsch beim Host vor; der Agent holt ihn beim nächsten Check-in ab.
+/// Höchstens eine Anfrage je Host und Minute (in der DB, übersteht Neustarts).
+pub async fn request_report(
+    CsrfAdmin(_): CsrfAdmin,
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    let mut tx = st.pool.begin().await?;
+    let updated: Option<(i64,)> = sqlx::query_as(
+        "UPDATE hosts SET report_requested_at = now(), report_dispatched_at = NULL, last_report_request_at = now() \
+         WHERE id = $1 AND (last_report_request_at IS NULL \
+            OR last_report_request_at < now() - make_interval(secs => $2)) RETURNING id",
+    )
+    .bind(id)
+    .bind(REQUEST_COOLDOWN_SECS)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if updated.is_none() {
+        let wait: Option<(Option<f64>,)> = sqlx::query_as(
+            "SELECT extract(epoch FROM last_report_request_at + make_interval(secs => $2) - now())::float8 \
+             FROM hosts WHERE id = $1",
+        )
+        .bind(id)
+        .bind(REQUEST_COOLDOWN_SECS)
+        .fetch_optional(&mut *tx)
+        .await?;
+        return match wait {
+            None => Err(ApiError::NotFound),
+            Some((w,)) => Err(ApiError::TooManyRequests {
+                retry_after_secs: w.unwrap_or(1.0).ceil().max(1.0) as u64,
+            }),
+        };
+    }
+    crate::live::notify(&mut tx, "report_requested", Some(id), None).await;
+    tx.commit().await?;
+    Ok(Json(json!({ "requested": 1 })))
+}
+
+/// "Alle aktualisieren": gleiche Regel je Host; Hosts im Cooldown werden übersprungen.
+pub async fn request_report_all(
+    CsrfAdmin(_): CsrfAdmin,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Value>> {
+    let mut tx = st.pool.begin().await?;
+    let requested = sqlx::query(
+        "UPDATE hosts SET report_requested_at = now(), report_dispatched_at = NULL, last_report_request_at = now() \
+         WHERE last_report_request_at IS NULL OR last_report_request_at < now() - make_interval(secs => $1)",
+    )
+    .bind(REQUEST_COOLDOWN_SECS)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected() as i64;
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM hosts")
+        .fetch_one(&mut *tx)
+        .await?;
+    if requested > 0 {
+        crate::live::notify(&mut tx, "report_requested", None, None).await;
+    }
+    tx.commit().await?;
+    Ok(Json(
+        json!({ "requested": requested, "skipped": total - requested }),
+    ))
 }

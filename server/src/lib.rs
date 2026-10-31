@@ -5,6 +5,7 @@ pub mod error;
 pub mod extract;
 pub mod hostops;
 pub mod jobs;
+pub mod live;
 pub mod notify;
 pub mod ratelimit;
 pub mod routes;

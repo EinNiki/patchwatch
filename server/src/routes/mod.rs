@@ -1,3 +1,4 @@
+mod agent;
 mod auth;
 pub mod cves;
 mod feeds;
@@ -40,11 +41,14 @@ pub fn router(state: AppState) -> Router {
             "/report",
             post(report::post_report).layer(axum::extract::DefaultBodyLimit::max(report::MAX_BODY)),
         )
+        .route("/agent/checkin", post(agent::checkin))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
         .route("/hosts", get(hosts::list).post(hosts::create))
+        .route("/hosts/request-report", post(hosts::request_report_all))
         .route("/hosts/{id}", get(hosts::detail).delete(hosts::remove))
+        .route("/hosts/{id}/request-report", post(hosts::request_report))
         .route("/hosts/{id}/rotate-token", post(hosts::rotate_token))
         .route("/hosts/{id}/history", get(hosts::history))
         .route("/hosts/{id}/cves", get(hosts::cves))

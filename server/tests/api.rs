@@ -706,3 +706,223 @@ async fn host_cves_are_ordered_by_severity_before_limit(pool: PgPool) {
     .await;
     assert_eq!(r.json.as_array().unwrap().len(), 1);
 }
+
+async fn checkin(app: &Router, token: &str) -> Resp {
+    let auth = bearer(token);
+    call(
+        app,
+        Method::POST,
+        "/api/v1/agent/checkin",
+        &[("authorization", &auth)],
+        None,
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn checkin_without_request_does_nothing(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+
+    let r = checkin(&app, TOKEN).await;
+    assert_eq!(r.status, StatusCode::OK);
+    // Die Antwort enthält ausschließlich dieses eine Feld: keine Befehle, keine Pfade.
+    assert_eq!(r.json, json!({ "report_requested": false }));
+    let (seen, reports): (Option<chrono::DateTime<Utc>>, i64) = sqlx::query_as(
+        "SELECT last_checkin_at, (SELECT count(*) FROM reports WHERE host_id = $1) FROM hosts WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(seen.is_some(), "Check-in aktualisiert last_checkin_at");
+    assert_eq!(reports, 0, "Check-in erzeugt keinen Report");
+    // last_report_at bleibt unberührt (Check-in kaschiert keine veralteten Daten).
+    let last_report: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_report_at FROM hosts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(last_report.is_none());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn checkin_rejects_bad_or_missing_token(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    add_host(&pool, "web1", TOKEN).await;
+    assert_eq!(
+        checkin(&app, "pw_falsches-token").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/agent/checkin", &[], None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    // Auch das Admin-Cookie ersetzt kein Host-Token.
+    let (session, _) = login(&app, &pool).await;
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/agent/checkin",
+            &[("cookie", session.as_str())],
+            None
+        )
+        .await
+        .status,
+        StatusCode::UNAUTHORIZED
+    );
+    let seen: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_checkin_at FROM hosts WHERE name = 'web1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(seen.is_none(), "abgelehnter Check-in ändert nichts");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn requested_report_is_dispatched_exactly_once(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let (session, csrf) = login(&app, &pool).await;
+    let admin = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let uri = format!("/api/v1/hosts/{id}/request-report");
+
+    // Ohne CSRF-Token und ohne Login nicht erlaubt.
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            &uri,
+            &[("cookie", session.as_str())],
+            None
+        )
+        .await
+        .status,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(&app, Method::POST, &uri, &[], None).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    assert_eq!(
+        call(&app, Method::POST, &uri, &admin, None).await.status,
+        StatusCode::OK
+    );
+    // Rate-Limit: eine Anfrage je Host und Minute.
+    let again = call(&app, Method::POST, &uri, &admin, None).await;
+    assert_eq!(again.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(again.headers.contains_key(header::RETRY_AFTER));
+
+    // Erster Check-in: ja, zweiter: nein (genau ein Report je Anfrage).
+    assert_eq!(checkin(&app, TOKEN).await.json["report_requested"], true);
+    assert_eq!(checkin(&app, TOKEN).await.json["report_requested"], false);
+
+    // Der Report löscht die offene Anfrage; es gibt genau einen Report.
+    let auth = bearer(TOKEN);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/report",
+        &[("authorization", &auth)],
+        Some(report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 0)),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let (reports, pending, agent): (i64, Option<chrono::DateTime<Utc>>, Option<String>) =
+        sqlx::query_as(
+            "SELECT (SELECT count(*) FROM reports WHERE host_id = $1), report_requested_at, agent_version \
+             FROM hosts WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(reports, 1);
+    assert!(pending.is_none());
+    assert_eq!(agent.as_deref(), Some("0.1.0"));
+    assert_eq!(checkin(&app, TOKEN).await.json["report_requested"], false);
+
+    // Unbekannter Host: 404.
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/hosts/999999/request-report",
+            &admin,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn lost_request_is_retried_after_ten_minutes(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    sqlx::query("UPDATE hosts SET report_requested_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(checkin(&app, TOKEN).await.json["report_requested"], true);
+    assert_eq!(checkin(&app, TOKEN).await.json["report_requested"], false);
+    // Der Agent hat "ja" gehört, aber nie einen Report geschickt.
+    sqlx::query(
+        "UPDATE hosts SET report_dispatched_at = now() - interval '11 minutes' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(checkin(&app, TOKEN).await.json["report_requested"], true);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn request_all_skips_hosts_in_cooldown(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    add_host(&pool, "a", "pw_token-a-0123456789abcdef-0123456789").await;
+    let b = add_host(&pool, "b", "pw_token-b-0123456789abcdef-0123456789").await;
+    add_host(&pool, "c", "pw_token-c-0123456789abcdef-0123456789").await;
+    let (session, csrf) = login(&app, &pool).await;
+    let admin = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+
+    // Host b wurde gerade erst angefragt.
+    let one = format!("/api/v1/hosts/{b}/request-report");
+    assert_eq!(
+        call(&app, Method::POST, &one, &admin, None).await.status,
+        StatusCode::OK
+    );
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/hosts/request-report",
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json, json!({ "requested": 2, "skipped": 1 }));
+    // Direkt danach sind alle im Cooldown.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/hosts/request-report",
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(r.json, json!({ "requested": 0, "skipped": 3 }));
+}

@@ -1,14 +1,12 @@
 use crate::error::{ApiError, ApiResult};
 use crate::extract::ClientIp;
 use crate::hostops;
-use crate::security;
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use std::time::Duration as StdDuration;
 
 pub const MAX_BODY: usize = 4 * 1024 * 1024;
 const MAX_PACKAGES: usize = 30_000;
@@ -172,35 +170,7 @@ pub async fn post_report(
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
-    st.limiter
-        .check(&format!("report:{ip}"), 300, StdDuration::from_secs(60))
-        .map_err(|w| ApiError::TooManyRequests {
-            retry_after_secs: w.as_secs().max(1),
-        })?;
-
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .filter(|t| !t.is_empty() && t.len() <= 200);
-    let host: Option<(i64,)> = match token {
-        Some(t) => {
-            sqlx::query_as("SELECT id FROM hosts WHERE token_hash = $1")
-                .bind(security::sha256(t))
-                .fetch_optional(&st.pool)
-                .await?
-        }
-        None => None,
-    };
-    let Some((host_id,)) = host else {
-        // Fehlversuche zusätzlich begrenzen.
-        st.limiter
-            .check(&format!("report-bad:{ip}"), 20, StdDuration::from_secs(600))
-            .map_err(|w| ApiError::TooManyRequests {
-                retry_after_secs: w.as_secs().max(1),
-            })?;
-        return Err(ApiError::Unauthorized);
-    };
+    let host_id = super::agent::authenticate_host(&st, &ip, &headers, "report", 300).await?;
 
     let mut raw: serde_json::Value =
         serde_json::from_slice(&body).map_err(|_| bad("kein gültiges JSON"))?;
@@ -225,7 +195,8 @@ pub async fn post_report(
          pretty_name = $7, running_kernel = $8, kernel_package = $9, kernel_package_version = $10, \
          kernel_source = $11, kernel_source_version = $12, newest_kernel = $13, newest_kernel_version = $14, \
          reboot_needed_kernel = $15, reboot_required_file = $16, updates_pending = $17, updates_security = $18, \
-         uptime_seconds = $19, is_proxmox = $20, proxmox_version = $21 WHERE id = $1",
+         uptime_seconds = $19, is_proxmox = $20, proxmox_version = $21, agent_version = $22, last_checkin_at = $2, \
+         report_requested_at = NULL, report_dispatched_at = NULL WHERE id = $1",
     )
     .bind(host_id)
     .bind(now)
@@ -248,6 +219,7 @@ pub async fn post_report(
     .bind(rep.uptime_seconds)
     .bind(rep.proxmox.is_some())
     .bind(rep.proxmox.as_ref().map(|p| &p.version))
+    .bind(&rep.agent_version)
     .execute(&mut *tx)
     .await?;
 
@@ -299,6 +271,7 @@ pub async fn post_report(
     .bind(&raw)
     .execute(&mut *tx)
     .await?;
+    crate::live::notify(&mut tx, "report_received", Some(host_id), None).await;
     tx.commit().await?;
     // Kernel kann sich geändert haben: CVE-Bewertung neu berechnen. Ein Fehler hier lässt den Report nicht scheitern.
     if let Err(e) = crate::cve::reeval::evaluate_host(
