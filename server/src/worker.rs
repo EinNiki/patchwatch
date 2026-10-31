@@ -1,6 +1,7 @@
 use crate::hostops;
 use crate::jobs::{self, Job};
-use crate::notify;
+use crate::live;
+use crate::notify::{self, events, store};
 use crate::state::AppState;
 use chrono::{Duration, Utc};
 use serde_json::{json, Value};
@@ -33,8 +34,15 @@ pub async fn tick(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Events -> Benachrichtigungs-Jobs (in einer Transaktion, `SKIP LOCKED`).
+/// Events -> Benachrichtigungen (in einer Transaktion, `SKIP LOCKED`). Je aktivem Kanal, der die
+/// Ereignisart abonniert hat, entsteht ein eigener Job (eigene Wiederholungen); der Browser-Kanal geht direkt
+/// über NOTIFY an die WebSocket-Clients.
 pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
+    let channels: Vec<store::Effective> = store::load_all(&state.pool, &state.cfg)
+        .await?
+        .into_iter()
+        .filter(|c| c.enabled)
+        .collect();
     let mut tx = state.pool.begin().await?;
     let events: Vec<(i64, String, Value)> = sqlx::query_as(
         "SELECT id, kind, payload FROM events WHERE processed_at IS NULL ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 50",
@@ -42,29 +50,29 @@ pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
     .fetch_all(&mut *tx)
     .await?;
     for (id, kind, payload) in &events {
-        if state.cfg.ntfy.enabled() {
-            let s = |k: &str| payload.get(k).and_then(Value::as_str).unwrap_or("");
-            let msg = match kind.as_str() {
-                "host_status_changed" => {
-                    notify::status_change_message(s("name"), s("from"), s("to"))
-                }
-                "host_cve_status_changed" => notify::host_cve_message(payload),
-                "cve_new" | "cve_status_changed" => {
-                    // Nur Watchlist-CVEs sind eine Meldung wert.
-                    let watched: bool = sqlx::query_scalar(
-                        "SELECT EXISTS (SELECT 1 FROM cve_watchlist WHERE cve_id = $1)",
-                    )
-                    .bind(s("cve_id"))
+        if !channels.is_empty() {
+            let cve_id = payload.get("cve_id").and_then(Value::as_str).unwrap_or("");
+            // Nur Watchlist-CVEs sind eine Meldung wert.
+            let watched: bool = if matches!(kind.as_str(), "cve_new" | "cve_status_changed") {
+                sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM cve_watchlist WHERE cve_id = $1)")
+                    .bind(cve_id)
                     .fetch_one(&mut *tx)
-                    .await?;
-                    watched.then(|| notify::cve_change_message(kind, payload))
-                }
-                "feed_failing" => Some(notify::feed_failing_message(payload)),
-                _ => None,
+                    .await?
+            } else {
+                false
             };
-            if let Some(m) = msg {
-                let msg = json!({ "title": m.title, "body": m.body, "priority": m.priority, "tags": m.tags });
-                jobs::enqueue(&mut tx, "notify", msg, Utc::now(), None).await?;
+            if let Some((category, m)) = events::route(kind, payload, watched) {
+                for ch in channels.iter().filter(|c| c.subscribes(category)) {
+                    if ch.kind == "browser" {
+                        live::publish(&mut tx, &browser_payload(&m)).await;
+                        continue;
+                    }
+                    let job = json!({
+                        "channel": ch.kind, "title": m.title, "body": m.body,
+                        "priority": m.priority, "tags": m.tags,
+                    });
+                    jobs::enqueue(&mut tx, "notify", job, Utc::now(), None).await?;
+                }
             }
         }
         sqlx::query("UPDATE events SET processed_at = now() WHERE id = $1")
@@ -76,38 +84,80 @@ pub async fn process_events(state: &AppState) -> anyhow::Result<usize> {
     Ok(events.len())
 }
 
+fn browser_payload(m: &notify::Message) -> Value {
+    let level = if m.priority >= 4 {
+        "crit"
+    } else if m.priority == 3 {
+        "warn"
+    } else {
+        "info"
+    };
+    json!({ "type": "notification", "title": m.title, "body": m.body, "level": level })
+}
+
+/// Sendet über einen Kanal und merkt sich das (generische) Ergebnis.
+async fn deliver(state: &AppState, kind: &str, msg: &notify::Message) -> anyhow::Result<()> {
+    let Some(ch) = store::load(&state.pool, &state.cfg, kind).await? else {
+        return Ok(());
+    };
+    // Zwischenzeitlich abgeschaltet: Nachricht verwerfen.
+    if !ch.enabled {
+        return Ok(());
+    }
+    let result = match ch.build(&state.cfg, &state.pool) {
+        Ok(c) => c.send(msg).await,
+        Err(e) => Err(e),
+    };
+    match result {
+        Ok(()) => {
+            store::record_result(&state.pool, kind, Ok(())).await;
+            Ok(())
+        }
+        Err(e) => {
+            let summary = e.summary();
+            tracing::warn!(channel = kind, error = %summary, "Benachrichtigung fehlgeschlagen");
+            store::record_result(&state.pool, kind, Err(&summary)).await;
+            anyhow::bail!("{kind}: {summary}")
+        }
+    }
+}
+
 async fn handle_job(state: &AppState, job: &Job) -> anyhow::Result<()> {
     match job.kind.as_str() {
         "notify" => {
             let p = &job.payload;
             let text = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
-            let tags: Vec<String> = p
+            let tags: Vec<&'static str> = p
                 .get("tags")
                 .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|t| t.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let tags: Vec<&str> = tags.iter().map(String::as_str).collect();
-            let prio = p
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter_map(known_tag)
+                .collect();
+            let priority = p
                 .get("priority")
                 .and_then(Value::as_u64)
                 .unwrap_or(3)
                 .clamp(1, 5) as u8;
-            notify::send(
-                &state.http,
-                &state.cfg.ntfy,
-                &text("title"),
-                &text("body"),
-                prio,
-                &tags,
-            )
-            .await
+            let msg = notify::Message {
+                title: text("title"),
+                body: text("body"),
+                priority,
+                tags,
+            };
+            deliver(state, &text("channel"), &msg).await
         }
         "cleanup" => cleanup(state).await,
-        "daily_summary" => daily_summary(state).await,
+        "daily_summary" => {
+            let kind = job
+                .payload
+                .get("channel")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let msg = notify::daily_summary_message(&state.pool).await?;
+            deliver(state, kind, &msg).await
+        }
         other => anyhow::bail!("unbekannter Job-Typ {other}"),
     }
 }
@@ -135,42 +185,18 @@ pub async fn cleanup(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn daily_summary(state: &AppState) -> anyhow::Result<()> {
-    if !state.cfg.ntfy.enabled() {
-        return Ok(());
-    }
-    let rows: Vec<(String, i64)> =
-        sqlx::query_as("SELECT status, count(*) FROM hosts GROUP BY status ORDER BY status")
-            .fetch_all(&state.pool)
-            .await?;
-    let total: i64 = rows.iter().map(|r| r.1).sum();
-    let attention: i64 = rows.iter().filter(|r| r.0 != "ok").map(|r| r.1).sum();
-    let lines: Vec<String> = rows
-        .iter()
-        .map(|(s, n)| format!("{n} × {}", crate::status::HostStatus::label_de(s)))
-        .collect();
-    let (title, prio) = if attention == 0 {
-        (format!("Tagesübersicht: alle {total} Hosts aktuell"), 2)
-    } else {
-        (
-            format!("Tagesübersicht: {attention} von {total} Hosts mit Handlungsbedarf"),
-            3,
-        )
-    };
-    let body = if lines.is_empty() {
-        "Keine Hosts angelegt.".to_owned()
-    } else {
-        lines.join("\n")
-    };
-    notify::send(
-        &state.http,
-        &state.cfg.ntfy,
-        &title,
-        &body,
-        prio,
-        &["bar_chart"],
-    )
-    .await
+/// Tags der Nachrichten sind feste Zeichenketten; aus der Job-Queue werden nur bekannte wieder zugelassen.
+fn known_tag(t: &str) -> Option<&'static str> {
+    [
+        "warning",
+        "hourglass",
+        "white_check_mark",
+        "information_source",
+        "mag",
+        "bar_chart",
+    ]
+    .into_iter()
+    .find(|k| *k == t)
 }
 
 /// Minütlicher Scheduler: Stale-Erkennung, tägliches Cleanup, Tageszusammenfassung.
@@ -199,10 +225,28 @@ pub async fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     )
     .await?;
 
-    let local = now.with_timezone(&state.cfg.tz());
-    if state.cfg.ntfy.enabled() && local.time() >= state.cfg.summary_time() {
-        let key = format!("daily:{}", local.date_naive());
-        jobs::enqueue(&mut conn, "daily_summary", json!({}), now, Some(&key)).await?;
+    // Tageszusammenfassung: je Kanal mit eigener Uhrzeit und Zeitzone (Voreinstellung aus der Server-Konfiguration).
+    for ch in store::load_all(&state.pool, &state.cfg).await? {
+        if !ch.enabled || !ch.subscribes(events::DAILY_SUMMARY) {
+            continue;
+        }
+        let tz = ch
+            .timezone
+            .as_deref()
+            .and_then(|t| t.parse::<chrono_tz::Tz>().ok())
+            .unwrap_or_else(|| state.cfg.tz());
+        let local = now.with_timezone(&tz);
+        if local.time() >= ch.summary_time.unwrap_or_else(|| state.cfg.summary_time()) {
+            let key = format!("daily:{}:{}", ch.kind, local.date_naive());
+            jobs::enqueue(
+                &mut conn,
+                "daily_summary",
+                json!({ "channel": ch.kind }),
+                now,
+                Some(&key),
+            )
+            .await?;
+        }
     }
     Ok(())
 }

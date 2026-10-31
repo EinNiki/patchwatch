@@ -34,6 +34,49 @@ impl Ntfy {
     }
 }
 
+/// 32-Byte-Schlüssel für die Verschlüsselung gespeicherter Geheimnisse (Base64 in der Konfiguration).
+#[derive(Clone)]
+pub struct SecretKey([u8; 32]);
+
+impl SecretKey {
+    pub fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        use base64::Engine;
+        let t = s.trim();
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(t)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(t))
+            .context("secret_key ist kein gültiges Base64")?;
+        let key: [u8; 32] = raw
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("secret_key muss genau 32 Byte lang sein (Base64)"))?;
+        Ok(Self(key))
+    }
+}
+
+impl TryFrom<String> for SecretKey {
+    type Error = anyhow::Error;
+    fn try_from(s: String) -> Result<Self> {
+        Self::parse(&s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretKey {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::parse(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretKey(***)")
+    }
+}
+
 /// CVE-Feeds: Intervall, aktive Quellen, Limits. URLs sind überschreibbar (Tests, Spiegel).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -93,6 +136,12 @@ pub struct Config {
     pub daily_summary_time: String,
     pub ntfy: Ntfy,
     pub cve: CveConfig,
+    /// Schlüssel für Geheimnisse der Benachrichtigungskanäle (`PATCHWATCH_SECRET_KEY`, 32 Byte Base64,
+    /// z. B. `openssl rand -base64 32`). Ohne Schlüssel lassen sich in der UI keine Geheimnisse speichern.
+    pub secret_key: Option<SecretKey>,
+    /// Hosts/IPs, die Kanäle trotz privater Adresse erreichen dürfen (exakte Übereinstimmung).
+    /// Loopback und Link-Local (inkl. 169.254.169.254) bleiben immer gesperrt.
+    pub notify_allowed_hosts: Vec<String>,
 }
 
 impl Default for Config {
@@ -109,6 +158,8 @@ impl Default for Config {
             daily_summary_time: "08:00".into(),
             ntfy: Ntfy::default(),
             cve: CveConfig::default(),
+            secret_key: None,
+            notify_allowed_hosts: Vec::new(),
         }
     }
 }
@@ -184,6 +235,16 @@ impl Config {
         }
         if let Some(v) = s("NTFY_TOKEN") {
             c.ntfy.token = Some(Secret(v));
+        }
+        if let Some(v) = s("SECRET_KEY") {
+            c.secret_key = Some(SecretKey::parse(&v)?);
+        }
+        if let Some(v) = s("NOTIFY_ALLOWED_HOSTS") {
+            c.notify_allowed_hosts = v
+                .split(',')
+                .map(|x| x.trim().to_ascii_lowercase())
+                .filter(|x| !x.is_empty())
+                .collect();
         }
         if let Some(v) = s("CVE_ENABLED") {
             c.cve.enabled = parse_bool("CVE_ENABLED", &v)?;
@@ -347,6 +408,30 @@ mod tests {
             Config::from_sources(None, &env_of(&[("PATCHWATCH_CVE_INTERVAL_MINUTES", "1")]))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn secret_key_and_allowed_hosts() {
+        use base64::Engine;
+        let good = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+        let good: &'static str = Box::leak(good.into_boxed_str());
+        let c = Config::from_sources(None, &|k: &str| match k {
+            "PATCHWATCH_SECRET_KEY" => Some(good.to_owned()),
+            "PATCHWATCH_NOTIFY_ALLOWED_HOSTS" => Some("Gotify.lan, 10.0.0.5,".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(c.secret_key.as_ref().unwrap().bytes(), &[7u8; 32]);
+        assert_eq!(c.notify_allowed_hosts, ["gotify.lan", "10.0.0.5"]);
+        assert!(!format!("{c:?}").contains(good));
+        // Falsche Länge oder kein Base64: Start schlägt mit klarer Meldung fehl.
+        for bad in ["kurz", "%%%"] {
+            assert!(
+                Config::from_sources(None, &|k: &str| (k == "PATCHWATCH_SECRET_KEY")
+                    .then(|| bad.to_owned()))
+                .is_err()
+            );
+        }
     }
 
     #[test]

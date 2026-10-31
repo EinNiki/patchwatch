@@ -74,6 +74,23 @@ Reports, allgemeine API), strikte Eingabevalidierung, Body-Limit 4 MB. Server nu
 VPN/WireGuard oder hinter einem TLS-Reverse-Proxy erreichbar machen; `trust_proxy=true` nur
 setzen, wenn ein vertrauenswürdiger Proxy davorsteht und den echten Client in `X-Forwarded-For` anhängt.
 
+### Benachrichtigungskanäle
+
+ntfy, Matrix, Gotify, Discord-Webhook und „Live im Browser“ werden in der UI eingerichtet und in der Datenbank
+gespeichert. Je Kanal: an/aus, Zugangsdaten, Testnachricht und Ereignisse (Host-Status, Agent still, neue CVE auf
+der Watchlist, Fix verfügbar, Feed-Fehler, Tageszusammenfassung mit Uhrzeit/Zeitzone). Die `PATCHWATCH_NTFY_*`-Variablen
+bleiben als Voreinstellung; Werte aus der UI haben Vorrang.
+
+- **`PATCHWATCH_SECRET_KEY`** (32 Byte, base64; `openssl rand -base64 32`) verschlüsselt Tokens und Webhook-URLs
+  (XChaCha20-Poly1305, der Kanalname ist authentifizierte Zusatzinformation). **Sichere den Schlüssel getrennt von
+  der Datenbank** – geht er verloren, sind gespeicherte Geheimnisse unlesbar und müssen neu eingegeben werden.
+  Ohne Schlüssel lässt sich kein Geheimnis speichern. Geheimnisse sind write-only: die API liefert nur „gesetzt“.
+- **SSRF-Schutz**: Ziele müssen öffentlich erreichbar sein (kein Loopback, privat, link-local, CGNAT …), es gibt keine
+  Redirects, Timeouts sind kurz, die Antwort der Gegenseite wird nie gelesen. Testnachrichten melden nur
+  `ok`, `nicht erreichbar` oder `HTTP <Code>`.
+- **`PATCHWATCH_NOTIFY_ALLOWED_HOSTS`** erlaubt interne Ziele (z. B. `gotify.lan,10.0.0.5`) – nur exakte Hosts/IPs,
+  keine Wildcards. Loopback und `169.254.0.0/16` (inkl. Metadaten-IP) bleiben immer gesperrt.
+
 ## CVE-Abgleich
 
 Ein Hintergrund-Scheduler im Server ruft alle 60 Minuten (konfigurierbar, mit bis zu 10 % Jitter) die Feeds ab.

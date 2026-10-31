@@ -1,37 +1,9 @@
-use crate::config::Ntfy;
+//! Nachrichtentexte: unabhängig vom Kanal. Welche Ereignisse welchen Kanal erreichen, steht in `events.rs`.
+
 use crate::cve::eval::CveStatus;
 use crate::status::HostStatus;
-use anyhow::{bail, Result};
-use serde_json::json;
 
-/// Sendet eine Nachricht über ntfy (JSON-Publish, damit UTF-8 im Titel funktioniert).
-pub async fn send(
-    http: &reqwest::Client,
-    ntfy: &Ntfy,
-    title: &str,
-    message: &str,
-    priority: u8,
-    tags: &[&str],
-) -> Result<()> {
-    let (Some(url), Some(topic)) = (&ntfy.url, &ntfy.topic) else {
-        return Ok(());
-    };
-    let mut req = http.post(url.trim_end_matches('/')).json(&json!({
-        "topic": topic, "title": title, "message": message, "priority": priority, "tags": tags,
-    }));
-    if let Some(t) = &ntfy.token {
-        req = req.bearer_auth(t.expose());
-    }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("ntfy nicht erreichbar: {}", e.without_url()))?;
-    if !resp.status().is_success() {
-        bail!("ntfy antwortete mit HTTP {}", resp.status());
-    }
-    Ok(())
-}
-
+#[derive(Debug, Clone)]
 pub struct Message {
     pub title: String,
     pub body: String,
@@ -132,6 +104,48 @@ pub fn cve_change_message(kind: &str, p: &serde_json::Value) -> Message {
         body: changes.join("\n"),
         priority: 3,
         tags: vec!["mag"],
+    }
+}
+
+/// Tageszusammenfassung aus dem aktuellen Host-Bestand.
+pub async fn daily_summary_message(pool: &sqlx::PgPool) -> sqlx::Result<Message> {
+    let rows: Vec<(String, i64)> =
+        sqlx::query_as("SELECT status, count(*) FROM hosts GROUP BY status ORDER BY status")
+            .fetch_all(pool)
+            .await?;
+    let total: i64 = rows.iter().map(|r| r.1).sum();
+    let attention: i64 = rows.iter().filter(|r| r.0 != "ok").map(|r| r.1).sum();
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|(s, n)| format!("{n} × {}", HostStatus::label_de(s)))
+        .collect();
+    let (title, priority) = if attention == 0 {
+        (format!("Tagesübersicht: alle {total} Hosts aktuell"), 2)
+    } else {
+        (
+            format!("Tagesübersicht: {attention} von {total} Hosts mit Handlungsbedarf"),
+            3,
+        )
+    };
+    let body = if lines.is_empty() {
+        "Keine Hosts angelegt.".to_owned()
+    } else {
+        lines.join("\n")
+    };
+    Ok(Message {
+        title,
+        body,
+        priority,
+        tags: vec!["bar_chart"],
+    })
+}
+
+pub fn test_message() -> Message {
+    Message {
+        title: "patchwatch: Testnachricht".to_owned(),
+        body: "Wenn diese Nachricht ankommt, funktioniert der Kanal.".to_owned(),
+        priority: 3,
+        tags: vec!["white_check_mark"],
     }
 }
 

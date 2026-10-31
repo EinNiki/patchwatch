@@ -7,6 +7,18 @@ use sqlx::PgConnection;
 
 pub const CHANNEL: &str = "patchwatch_live";
 
+/// Sendet ein beliebiges kleines JSON (höchstens ~7 KB, Grenze von `pg_notify`).
+pub async fn publish(conn: &mut PgConnection, payload: &Value) {
+    if let Err(e) = sqlx::query("SELECT pg_notify($1, $2)")
+        .bind(CHANNEL)
+        .bind(payload.to_string())
+        .execute(conn)
+        .await
+    {
+        tracing::warn!(error = %e, "Live-Ereignis konnte nicht gesendet werden");
+    }
+}
+
 /// Sendet ein Live-Ereignis (`type` plus optional Host/CVE). Fehler sind nie fatal für den Aufrufer.
 pub async fn notify(
     conn: &mut PgConnection,
@@ -21,12 +33,5 @@ pub async fn notify(
     if let Some(c) = cve_id {
         payload["cve_id"] = Value::from(c);
     }
-    if let Err(e) = sqlx::query("SELECT pg_notify($1, $2)")
-        .bind(CHANNEL)
-        .bind(payload.to_string())
-        .execute(conn)
-        .await
-    {
-        tracing::warn!(error = %e, "Live-Ereignis konnte nicht gesendet werden");
-    }
+    publish(conn, &payload).await;
 }

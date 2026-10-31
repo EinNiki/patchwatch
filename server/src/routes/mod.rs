@@ -5,6 +5,7 @@ mod feeds;
 mod health;
 mod hosts;
 mod matrix;
+mod notifications;
 mod report;
 
 use crate::extract::ClientIp;
@@ -61,6 +62,12 @@ pub fn router(state: AppState) -> Router {
         .route("/watchlist", get(cves::watchlist))
         .route("/watchlist/{id}", put(cves::watch).delete(cves::unwatch))
         .route("/matrix", get(matrix::matrix))
+        .route("/notifications", get(notifications::list))
+        .route(
+            "/notifications/{kind}",
+            get(notifications::get_one).put(notifications::put),
+        )
+        .route("/notifications/{kind}/test", post(notifications::test))
         .route("/feeds", get(feeds::list))
         .route("/feeds/refresh", post(feeds::refresh))
         .layer(middleware::from_fn_with_state(
