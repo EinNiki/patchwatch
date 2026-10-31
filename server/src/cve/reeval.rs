@@ -69,7 +69,8 @@ async fn load_rows(
 ) -> sqlx::Result<HashMap<String, Vec<SourceRow>>> {
     let rows: Vec<RowDb> = sqlx::query_as(
         "SELECT cve_id, source, release, package, status, fix_version FROM cve_source_status \
-         WHERE cve_id = ANY($1) AND release = $2 AND package = $3",
+         WHERE cve_id = ANY($1) AND release = $2 AND package = $3 \
+         AND NOT EXISTS (SELECT 1 FROM cve_sources d WHERE d.name = cve_source_status.source AND NOT d.enabled)",
     )
     .bind(cves)
     .bind(release)

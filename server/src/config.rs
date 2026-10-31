@@ -83,11 +83,13 @@ impl fmt::Debug for SecretKey {
 pub struct CveConfig {
     pub enabled: bool,
     pub interval_minutes: u64,
-    /// Aktive Quellen: "ubuntu", "debian", "osv" (OSV standardmäßig aus).
+    /// Startwert der Quellen: "ubuntu", "debian" (eingebaut); weitere verwaltet die UI (Tabelle `cve_sources`).
     pub sources: Vec<String>,
     pub ubuntu_url: String,
     pub debian_url: String,
     pub osv_url: String,
+    pub nvd_url: String,
+    pub kev_url: String,
     /// Seiten (je 20 CVEs, ca. 3,7 MB) beim allerersten Ubuntu-Abruf.
     pub ubuntu_backfill_pages: u32,
     /// Obergrenze an Seiten pro Lauf; wird sie vor dem Cursor erreicht, gilt der Abruf als fehlgeschlagen.
@@ -108,6 +110,8 @@ impl Default for CveConfig {
             ubuntu_url: "https://ubuntu.com".into(),
             debian_url: "https://security-tracker.debian.org/tracker/data/json".into(),
             osv_url: "https://api.osv.dev".into(),
+            nvd_url: "https://services.nvd.nist.gov/rest/json/cves/2.0".into(),
+            kev_url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json".into(),
             ubuntu_backfill_pages: 5,
             ubuntu_max_pages: 50,
             ubuntu_max_page_bytes: 32 * 1024 * 1024,

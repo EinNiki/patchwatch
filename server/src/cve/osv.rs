@@ -23,15 +23,23 @@ const REFRESH_SECS: u64 = 6 * 3600;
 
 pub struct Osv {
     base: String,
+    /// An die geprüfte Adresse gebundener Client (nur bei Spiegel-Override), sonst der gemeinsame.
+    client: Option<reqwest::Client>,
     lim: Limits,
 }
 
 impl Osv {
     pub fn new(c: &CveConfig) -> Self {
+        Self::with_base(c, None, None)
+    }
+
+    pub fn with_base(c: &CveConfig, base: Option<String>, client: Option<reqwest::Client>) -> Self {
         Self {
-            base: c.osv_url.trim_end_matches('/').to_owned(),
+            base: base.unwrap_or_else(|| c.osv_url.trim_end_matches('/').to_owned()),
+            client,
             lim: Limits {
-                max_bytes: 32 * 1024 * 1024,
+                // Antworten sind auf 5 MiB begrenzt (Seiten sind begrenzt, siehe MAX_PAGES).
+                max_bytes: 5 * 1024 * 1024,
                 timeout: Duration::from_secs(c.request_timeout_secs),
                 attempts: c.retries,
                 base_delay: Duration::from_millis(c.retry_base_delay_ms),
@@ -168,10 +176,11 @@ impl CveSource for Osv {
 
     async fn fetch(
         &self,
-        client: &reqwest::Client,
+        shared: &reqwest::Client,
         state: &FeedState,
         ctx: &FetchCtx,
     ) -> Result<FetchOutcome, FeedError> {
+        let client = self.client.as_ref().unwrap_or(shared);
         let mut queries: BTreeMap<(String, String, String), (String, &HostRef)> = BTreeMap::new();
         for h in &ctx.hosts {
             if let Some(eco) = ecosystem(&h.distro_id, &h.os_version) {

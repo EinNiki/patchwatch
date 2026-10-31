@@ -1,32 +1,14 @@
 //! Feed-Abruf mit Fehlerrobustheit: Bei Fehlern bleibt der alte Stand erhalten, der Fehler wird gespeichert
 //! und im UI sichtbar ("veraltet seit …"); ein Feed wird nie stillschweigend als gesund gewertet.
 
-use super::debian::Debian;
 use super::http::jitter;
-use super::osv::Osv;
-use super::ubuntu::Ubuntu;
-use super::{ingest, reeval, CveSource, FeedState, FetchCtx, FetchOutcome};
+use super::{ingest, reeval, sources, CveSource, FeedState, FetchCtx, FetchOutcome, Record};
 use crate::state::AppState;
 use anyhow::Result;
 use std::time::Duration;
 
 /// Ab so vielen Fehlschlägen in Folge gibt es eine Benachrichtigung.
 const ALERT_AFTER_FAILURES: i32 = 3;
-
-pub fn build_sources(cfg: &crate::config::Config) -> Vec<Box<dyn CveSource>> {
-    cfg.cve
-        .sources
-        .iter()
-        .filter_map(|s| -> Option<Box<dyn CveSource>> {
-            match s.as_str() {
-                "ubuntu" => Some(Box::new(Ubuntu::new(&cfg.cve))),
-                "debian" => Some(Box::new(Debian::new(&cfg.cve))),
-                "osv" => Some(Box::new(Osv::new(&cfg.cve))),
-                _ => None,
-            }
-        })
-        .collect()
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -69,9 +51,22 @@ async fn context(state: &AppState, name: &str) -> Result<FetchCtx> {
     } else {
         Vec::new()
     };
+    // Anreicherung (NVD): nur bereits bekannte CVEs, die für Hosts relevant sind oder auf der Watchlist stehen.
+    let enrich = if name == "nvd" {
+        sqlx::query_scalar(
+            "SELECT c.id FROM cves c WHERE NOT EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'nvd') \
+             AND (EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) OR EXISTS (SELECT 1 FROM host_cve_status h WHERE h.cve_id = c.id)) \
+             ORDER BY EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) DESC, c.id LIMIT 200",
+        )
+        .fetch_all(&state.pool)
+        .await?
+    } else {
+        Vec::new()
+    };
     Ok(FetchCtx {
         watch_missing,
         hosts,
+        enrich,
     })
 }
 
@@ -98,6 +93,36 @@ async fn record_failure(state: &AppState, name: &str, error: &str) -> Result<()>
     Ok(())
 }
 
+/// Anreicherungsquellen (OSV, NVD, CISA KEV) dürfen nie neue CVEs anlegen: nur Records zu bereits bekannten CVEs
+/// (Tabelle `cves`, Watchlist-CVEs stehen dort ebenfalls) werden übernommen. Beschreibung und Priorität, die schon
+/// aus Debian/Ubuntu stammen, bleiben unangetastet.
+async fn restrict_to_known(state: &AppState, records: Vec<Record>) -> Result<Vec<Record>> {
+    let ids: Vec<String> = records.iter().map(|r| r.cve_id.clone()).collect();
+    let known: std::collections::HashMap<String, (bool, bool)> =
+        sqlx::query_as::<_, (String, bool, bool)>(
+            "SELECT id, description IS NOT NULL, priority IS NOT NULL FROM cves WHERE id = ANY($1)",
+        )
+        .bind(&ids)
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .map(|(id, d, p)| (id, (d, p)))
+        .collect();
+    Ok(records
+        .into_iter()
+        .filter_map(|mut r| {
+            let (has_desc, has_prio) = *known.get(&r.cve_id)?;
+            if has_desc {
+                r.description = None;
+            }
+            if has_prio {
+                r.priority = None;
+            }
+            Some(r)
+        })
+        .collect())
+}
+
 /// Ruft eine Quelle ab und führt Buch über Erfolg und Misserfolg.
 pub async fn refresh_source(state: &AppState, src: &dyn CveSource) -> Result<Outcome> {
     let name = src.name();
@@ -117,8 +142,14 @@ pub async fn refresh_source(state: &AppState, src: &dyn CveSource) -> Result<Out
             state: new_state,
         }) => {
             // Daten und Feed-Zustand gemeinsam übernehmen: schlägt das Speichern fehl, bleibt der alte Stand.
+            let enrich = sources::enrich_only(name);
+            let records = if enrich {
+                restrict_to_known(state, records).await?
+            } else {
+                records
+            };
             let mut tx = state.pool.begin().await?;
-            let stats = match ingest::ingest(&mut tx, name, &records).await {
+            let stats = match ingest::ingest_with(&mut tx, name, &records, !enrich).await {
                 Ok(s) => s,
                 Err(e) => {
                     drop(tx);
@@ -161,20 +192,48 @@ pub async fn refresh_source(state: &AppState, src: &dyn CveSource) -> Result<Out
     }
 }
 
-/// Alle aktiven Quellen nacheinander abrufen.
+/// Alle eingeschalteten Quellen nacheinander abrufen. Abgeschaltete Quellen werden nicht abgerufen (und nie als "ok" gezeigt).
 pub async fn refresh_all(state: &AppState) -> Vec<(&'static str, Outcome)> {
     let mut out = Vec::new();
-    for src in build_sources(&state.cfg) {
-        let name = src.name();
-        match refresh_source(state, src.as_ref()).await {
-            Ok(o) => out.push((name, o)),
-            Err(e) => {
-                tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
-                out.push((name, Outcome::Failed(e.to_string())));
-            }
+    for (name, built) in sources::build_enabled(state).await {
+        let name: &'static str = sources::KNOWN
+            .iter()
+            .copied()
+            .find(|k| *k == name)
+            .unwrap_or("cve_sources");
+        match built {
+            Ok(src) => match refresh_source(state, src.as_ref()).await {
+                Ok(o) => out.push((name, o)),
+                Err(e) => {
+                    tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
+                    out.push((name, Outcome::Failed(e.to_string())));
+                }
+            },
+            Err(e) => out.push((
+                name,
+                Outcome::Failed(fail_unbuildable(state, name, &e).await),
+            )),
         }
     }
     out
+}
+
+/// Eine nicht baubare Quelle (z. B. Spiegel nicht mehr erlaubt, Schlüssel nicht entschlüsselbar) zählt als Fehlschlag.
+async fn fail_unbuildable(state: &AppState, name: &str, e: &anyhow::Error) -> String {
+    let msg = format!("Quelle nicht nutzbar: {e}");
+    if sqlx::query("INSERT INTO feed_state (source) VALUES ($1) ON CONFLICT DO NOTHING")
+        .bind(name)
+        .execute(&state.pool)
+        .await
+        .is_ok()
+    {
+        let _ = sqlx::query("UPDATE feed_state SET last_attempt_at = now() WHERE source = $1")
+            .bind(name)
+            .execute(&state.pool)
+            .await;
+        let _ = record_failure(state, name, &msg).await;
+    }
+    msg
 }
 
 /// Fällig ist eine Quelle, wenn der letzte Versuch länger als ihr Intervall zurückliegt (oder es noch keinen gab).
@@ -197,17 +256,16 @@ pub async fn run(state: AppState) {
     loop {
         // Läuft nie parallel zu einem manuell ausgelösten Abruf.
         if let Ok(_guard) = state.refresh_lock.try_lock() {
-            for src in build_sources(&state.cfg) {
-                let name = src.name();
+            for (name, built) in sources::build_enabled(&state).await {
                 let minutes = crate::schedule::feed_interval_minutes(
                     &state.pool,
-                    name,
+                    &name,
                     state.cfg.cve.interval_minutes as i64,
                 )
                 .await;
                 let last: Option<chrono::DateTime<chrono::Utc>> =
                     sqlx::query_scalar("SELECT last_attempt_at FROM feed_state WHERE source = $1")
-                        .bind(name)
+                        .bind(&name)
                         .fetch_optional(&state.pool)
                         .await
                         .ok()
@@ -216,8 +274,15 @@ pub async fn run(state: AppState) {
                 if !is_due(last, minutes, chrono::Utc::now()) {
                     continue;
                 }
-                if let Err(e) = refresh_source(&state, src.as_ref()).await {
-                    tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
+                match built {
+                    Ok(src) => {
+                        if let Err(e) = refresh_source(&state, src.as_ref()).await {
+                            tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
+                        }
+                    }
+                    Err(e) => {
+                        fail_unbuildable(&state, &name, &e).await;
+                    }
                 }
             }
         }

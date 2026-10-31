@@ -31,7 +31,8 @@ pub async fn retention_days(pool: &PgPool, fallback: i64) -> i64 {
 pub async fn get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>> {
     let now = Utc::now();
     let mut feeds = Vec::new();
-    for source in &st.cfg.cve.sources {
+    for src in crate::cve::sources::list(&st).await? {
+        let source = &src.name;
         let default = st.cfg.cve.interval_minutes as i64;
         feeds.push(json!({
             "source": source,
@@ -92,7 +93,7 @@ pub async fn put(
     if let Some(map) = &body.feed_intervals {
         for (source, minutes) in map {
             // Nur bekannte Quellen: der Schlüssel landet in einem Settings-Key.
-            if !st.cfg.cve.sources.contains(source) {
+            if !crate::cve::sources::is_known(source) {
                 return Err(ApiError::BadRequest("Unbekannte Feed-Quelle".into()));
             }
             schedule::validate_feed_interval(*minutes).map_err(ApiError::BadRequest)?;

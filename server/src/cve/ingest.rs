@@ -88,6 +88,17 @@ pub async fn ingest(
     source: &str,
     records: &[Record],
 ) -> Result<IngestStats> {
+    ingest_with(conn, source, records, true).await
+}
+
+/// Wie [`ingest`]; `emit_events = false` für Anreicherungsquellen (NVD, CISA KEV): deren Einträge ändern keinen
+/// Fix-Stand und sollen keine "CVE-Status geändert"-Meldungen auslösen.
+pub async fn ingest_with(
+    conn: &mut PgConnection,
+    source: &str,
+    records: &[Record],
+    emit_events: bool,
+) -> Result<IngestStats> {
     let recs = merge(records);
     let ids: Vec<String> = recs.iter().map(|r| r.cve_id.clone()).collect();
     let initial: bool =
@@ -180,7 +191,7 @@ pub async fn ingest(
         .await?;
     }
 
-    if !initial {
+    if !initial && emit_events {
         for (cve, changes) in by_cve.iter().take(MAX_EVENTS) {
             let kind = if known.contains(*cve) {
                 "cve_status_changed"

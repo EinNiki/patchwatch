@@ -73,8 +73,12 @@ pub fn router(state: AppState) -> Router {
         .route("/notifications/{kind}/test", post(notifications::test))
         .route("/settings", get(settings::get).put(settings::put))
         .route("/live", get(live::live))
-        .route("/feeds", get(feeds::list))
+        .route("/feeds", get(feeds::list).post(feeds::create))
         .route("/feeds/refresh", post(feeds::refresh))
+        .route(
+            "/feeds/{name}",
+            axum::routing::put(feeds::update).delete(feeds::delete),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             api_rate_limit,

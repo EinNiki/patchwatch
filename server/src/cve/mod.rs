@@ -4,9 +4,12 @@ pub mod debian;
 pub mod eval;
 pub mod http;
 pub mod ingest;
+pub mod kev;
+pub mod nvd;
 pub mod osv;
 pub mod reeval;
 pub mod refresh;
+pub mod sources;
 pub mod ubuntu;
 
 use async_trait::async_trait;
@@ -130,6 +133,8 @@ pub struct FetchCtx {
     /// Watchlist-CVEs, zu denen diese Quelle noch keine Daten hat.
     pub watch_missing: Vec<String>,
     pub hosts: Vec<HostRef>,
+    /// Nur Anreicherungsquellen (NVD): bereits bekannte CVEs ohne Daten dieser Quelle, Watchlist zuerst.
+    pub enrich: Vec<String>,
 }
 
 /// Gemeinsame Schnittstelle aller Feeds; weitere Quellen (Red Hat, Alpine …) kommen als eigener Adapter dazu.

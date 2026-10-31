@@ -49,6 +49,8 @@ pub struct CveRow {
     updated_at: DateTime<Utc>,
     watched: bool,
     note: Option<String>,
+    /// In der CISA-KEV-Liste (aktiv ausgenutzt).
+    exploited: bool,
     hosts_vulnerable: i64,
     hosts_fix_pending: i64,
     hosts_unknown: i64,
@@ -103,6 +105,10 @@ fn severity(status: &str) -> u8 {
 fn collapse(rows: Vec<SourceRow>, mine: &HashSet<String>) -> Vec<Distro> {
     let mut by: BTreeMap<(String, String), Distro> = BTreeMap::new();
     for r in rows {
+        // Anreicherungsquellen (NVD, CISA KEV) führen Release "*": kein Distributions-Chip.
+        if r.release == "*" {
+            continue;
+        }
         let key = (r.source.clone(), r.release.clone());
         match by.get_mut(&key) {
             Some(d) => {
@@ -157,6 +163,7 @@ fn source_link(source: &str, id: &str) -> Option<String> {
 
 const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at, c.updated_at, \
     (w.cve_id IS NOT NULL) AS watched, w.note, \
+    EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = c.id AND k.source = 'cisa_kev') AS exploited, \
     count(h.*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
     count(h.*) FILTER (WHERE h.status = 'fix_pending') AS hosts_fix_pending, \
     count(h.*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \

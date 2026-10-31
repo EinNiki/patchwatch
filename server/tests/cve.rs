@@ -32,6 +32,8 @@ struct Mock {
     debian_body: String,
     debian_status: Option<u16>,
     osv_body: Value,
+    kev_body: Value,
+    kev_status: Option<u16>,
     log: Vec<String>,
 }
 
@@ -115,12 +117,44 @@ async fn osv(State(m): State<Shared>, Json(body): Json<Value>) -> Response {
     Json(m.osv_body.clone()).into_response()
 }
 
+async fn nvd(
+    State(m): State<Shared>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let mut m = m.lock().unwrap();
+    let id = q["cveId"].clone();
+    let key = headers
+        .get("apikey")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_owned();
+    m.log.push(format!("nvd {id} key={key}"));
+    Json(json!({"vulnerabilities": [{"cve": {
+        "id": id, "published": "2026-01-01T00:00:00.000", "lastModified": "2026-02-01T00:00:00.000",
+        "descriptions": [{"lang": "en", "value": format!("NVD-Beschreibung {id}")}],
+        "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8, "baseSeverity": "CRITICAL"}}]}
+    }}]}))
+    .into_response()
+}
+
+async fn kev(State(m): State<Shared>) -> Response {
+    let mut m = m.lock().unwrap();
+    m.log.push("kev".into());
+    if let Some(code) = m.kev_status {
+        return StatusCode::from_u16(code).unwrap().into_response();
+    }
+    Json(m.kev_body.clone()).into_response()
+}
+
 async fn start_mock(mock: Shared) -> String {
     let app = Router::new()
         .route("/security/cves.json", get(ubuntu_list))
         .route("/security/cves/{id}", get(ubuntu_one))
         .route("/tracker/data/json", get(debian))
         .route("/v1/query", post(osv))
+        .route("/nvd", get(nvd))
+        .route("/kev", get(kev))
         .with_state(mock);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -160,7 +194,7 @@ async fn setup(pool: PgPool, sources: &[&str], extra_toml: &str, base: &str) -> 
         .collect::<Vec<_>>()
         .join(",");
     let toml = format!(
-        "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\n\
+        "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\nnvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\n\
          retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\n{extra_toml}\n\
          [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
     );
@@ -1038,12 +1072,32 @@ async fn osv_third_source(pool: PgPool) {
         StatusCode::NO_CONTENT
     );
 
+    // OSV reichert nur bereits bekannte CVEs an (aus Debian/Ubuntu oder der Watchlist), es importiert nie voll.
+    sqlx::query("INSERT INTO cves (id) VALUES ('CVE-2020-12351'), ('CVE-2012-4542')")
+        .execute(&pool)
+        .await
+        .unwrap();
     let out = refresh::refresh_all(&st).await;
     assert!(
         matches!(out[0].1, Outcome::Updated { .. }),
         "{:?}",
         out[0].1
     );
+    let osv_cves: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT cve_id) FROM cve_source_status WHERE source = 'osv'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        osv_cves, 2,
+        "unbekannte CVEs aus der OSV-Antwort werden nicht importiert"
+    );
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM cves")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(total, 2);
     let fix: Option<String> = sqlx::query_scalar("SELECT fix_version FROM cve_source_status WHERE source = 'osv' AND cve_id = 'CVE-2020-12351'").fetch_one(&pool).await.unwrap();
     assert_eq!(fix.as_deref(), Some("6.8.0-35.35"));
     // OSV allein genügt, wenn kein Distributions-Tracker Daten hat: 6.8.0-31.31 < Fix -> verwundbar.
@@ -1067,4 +1121,487 @@ async fn osv_third_source(pool: PgPool) {
     let before = mock.lock().unwrap().log.len();
     assert_eq!(refresh::refresh_all(&st).await[0].1, Outcome::NotModified);
     assert_eq!(mock.lock().unwrap().log.len(), before);
+}
+
+// ---------- Quellenverwaltung (NVD, CISA KEV, an/aus) ----------
+
+const SECRET_B64: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+
+async fn setup_keyed(pool: PgPool, sources: &[&str], base: &str) -> AppState {
+    let list = sources
+        .iter()
+        .map(|s| format!("\"{s}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let toml = format!(
+        "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\n\
+         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\n"
+    );
+    let cfg = Config::from_sources(Some(&toml), &|k| {
+        (k == "PATCHWATCH_SECRET_KEY").then(|| SECRET_B64.to_owned())
+    })
+    .unwrap();
+    AppState::new(pool, cfg).unwrap()
+}
+
+async fn feeds(app: &Router, h: &[(String, String)]) -> Vec<Value> {
+    let r = call(app, Method::GET, "/api/v1/feeds", &hdr(h), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    r.json.as_array().unwrap().clone()
+}
+
+fn feed<'a>(list: &'a [Value], name: &str) -> &'a Value {
+    list.iter()
+        .find(|f| f["source"] == name)
+        .unwrap_or_else(|| panic!("Quelle {name} fehlt"))
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nvd_enriches_only_known_watchlist_cves_within_batch_and_never_leaks_the_key(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+
+    // 12 bekannte, beobachtete CVEs (ohne Beschreibung) und eine unbekannte.
+    for i in 0..12 {
+        let id = format!("CVE-2026-{:04}", 1000 + i);
+        sqlx::query("INSERT INTO cves (id) VALUES ($1)")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO cve_watchlist (cve_id) VALUES ($1)")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("INSERT INTO cves (id, description, priority) VALUES ('CVE-2026-0999', 'aus Ubuntu', 'high')").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO cve_watchlist (cve_id) VALUES ('CVE-2026-0999')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Quelle hinzufügen, Schlüssel ist nur schreibend.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/feeds",
+        &hdr(&h),
+        Some(json!({"name": "nvd", "secret": "geheimer-nvd-schluessel"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let list = feeds(&app, &h).await;
+    assert_eq!(feed(&list, "nvd")["secret_set"], true);
+    assert!(!serde_json::to_string(&list)
+        .unwrap()
+        .contains("geheimer-nvd-schluessel"));
+    let blob: Vec<u8> = sqlx::query_scalar("SELECT secret FROM cve_sources WHERE name = 'nvd'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        !blob.windows(10).any(|w| w == b"geheimer-n"),
+        "Geheimnis liegt verschlüsselt in der DB"
+    );
+    // Der Quellenname ist die AAD: für eine andere Quelle lässt sich das Geheimnis nicht entschlüsseln.
+    let key = st.cfg.secret_key.as_ref().unwrap();
+    assert!(
+        patchwatch_server::notify::crypto::decrypt(key.bytes(), "cve_source:osv", &blob).is_err()
+    );
+    assert_eq!(
+        patchwatch_server::notify::crypto::decrypt(key.bytes(), "cve_source:nvd", &blob).unwrap(),
+        "geheimer-nvd-schluessel"
+    );
+
+    let out = refresh::refresh_all(&st).await;
+    let nvd_out = out.iter().find(|(n, _)| *n == "nvd").unwrap();
+    assert!(
+        matches!(nvd_out.1, Outcome::Updated { .. }),
+        "{:?}",
+        nvd_out.1
+    );
+    let log = mock.lock().unwrap().log.clone();
+    let nvd_calls: Vec<&String> = log.iter().filter(|l| l.starts_with("nvd ")).collect();
+    // Mit Schlüssel bis zu 50 je Lauf: alle 12 offenen, nicht die bereits beschriebene (Quelle hat sie noch nicht -> auch sie).
+    assert_eq!(nvd_calls.len(), 13, "{nvd_calls:?}");
+    assert!(
+        nvd_calls
+            .iter()
+            .all(|l| l.ends_with("key=geheimer-nvd-schluessel")),
+        "Schlüssel geht als Header mit"
+    );
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM cves").await,
+        13,
+        "kein Vollimport, keine neuen CVEs"
+    );
+    let (d, p): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT description, priority FROM cves WHERE id = 'CVE-2026-1000'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (d.as_deref(), p.as_deref()),
+        (Some("NVD-Beschreibung CVE-2026-1000"), Some("critical"))
+    );
+    let (d, p): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT description, priority FROM cves WHERE id = 'CVE-2026-0999'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (d.as_deref(), p.as_deref()),
+        (Some("aus Ubuntu"), Some("high")),
+        "vorhandene Daten bleiben"
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM events WHERE kind IN ('cve_status_changed', 'cve_new')"
+        )
+        .await,
+        0,
+        "Anreicherung löst keine Meldungen aus"
+    );
+
+    // Zweiter Lauf: alles angereichert, keine weitere Anfrage.
+    let before = mock.lock().unwrap().log.len();
+    refresh::refresh_all(&st).await;
+    assert_eq!(
+        mock.lock()
+            .unwrap()
+            .log
+            .iter()
+            .skip(before)
+            .filter(|l| l.starts_with("nvd "))
+            .count(),
+        0
+    );
+    // Die Anreicherung erzeugt weder Distro-Chips noch einen Host-Status.
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves/CVE-2026-1000",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert!(r.json["distros"].as_array().unwrap().is_empty());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nvd_without_key_is_limited_to_ten_per_run(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    for i in 0..25 {
+        let id = format!("CVE-2026-{:04}", 2000 + i);
+        sqlx::query("INSERT INTO cves (id) VALUES ($1)")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO cve_watchlist (cve_id) VALUES ($1)")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/feeds",
+            &hdr(&h),
+            Some(json!({"name": "nvd"}))
+        )
+        .await
+        .status,
+        StatusCode::CREATED
+    );
+    refresh::refresh_all(&st).await;
+    let n = |m: &Shared| {
+        m.lock()
+            .unwrap()
+            .log
+            .iter()
+            .filter(|l| l.starts_with("nvd "))
+            .count()
+    };
+    assert_eq!(
+        n(&mock),
+        10,
+        "ohne Schlüssel höchstens 10 je Lauf (5 Anfragen/30 s)"
+    );
+    assert!(mock
+        .lock()
+        .unwrap()
+        .log
+        .iter()
+        .all(|l| !l.starts_with("nvd ") || l.ends_with("key=-")));
+    refresh::refresh_all(&st).await;
+    assert_eq!(n(&mock), 20, "der Rest folgt in den nächsten Läufen");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn kev_flags_only_known_cves_and_failure_is_never_green(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    mock.lock().unwrap().kev_body = json!({"vulnerabilities": [
+        {"cveID": "CVE-2024-1086", "vulnerabilityName": "Linux Kernel UAF", "dateAdded": "2024-05-30", "dueDate": "2024-06-20", "knownRansomwareCampaignUse": "Known"},
+        {"cveID": "CVE-2023-9999", "vulnerabilityName": "Irgendwas"},
+    ]});
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    sqlx::query("INSERT INTO cves (id) VALUES ('CVE-2024-1086')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/feeds",
+            &hdr(&h),
+            Some(json!({"name": "cisa_kev"}))
+        )
+        .await
+        .status,
+        StatusCode::CREATED
+    );
+
+    refresh::refresh_all(&st).await;
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM cves").await,
+        1,
+        "unbekannte KEV-CVE wird nicht importiert"
+    );
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?releases=all",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(r.json[0]["exploited"], true);
+    let list = feeds(&app, &h).await;
+    assert_eq!(feed(&list, "cisa_kev")["state"], "ok");
+
+    // Ausfall: weder "ok" noch gesund, Fehler sichtbar, alter Stand bleibt.
+    mock.lock().unwrap().kev_status = Some(500);
+    refresh::refresh_all(&st).await;
+    let list = feeds(&app, &h).await;
+    let k = feed(&list, "cisa_kev");
+    assert_eq!(
+        (k["state"].as_str(), k["healthy"].as_bool()),
+        (Some("stale"), Some(false))
+    );
+    assert!(k["last_error"].as_str().unwrap().contains("500"));
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM cve_source_status WHERE source = 'cisa_kev'"
+        )
+        .await,
+        1
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn disabled_source_is_not_fetched_not_green_and_ignored_in_evaluation(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    mock.lock().unwrap().ubuntu = vec![ubuntu_cve(
+        "CVE-2026-10001",
+        Utc::now(),
+        &[("noble", "needed", "")],
+    )];
+    refresh::refresh_all(&st).await;
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-10001").await.as_deref(),
+        Some("vulnerable")
+    );
+    assert_eq!(feed(&feeds(&app, &h).await, "ubuntu")["state"], "ok");
+
+    // Abschalten: nicht mehr abgerufen, nie "ok", Daten der Quelle zählen in der Bewertung nicht mehr.
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/feeds/ubuntu",
+        &hdr(&h),
+        Some(json!({"enabled": false})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let list = feeds(&app, &h).await;
+    let u = feed(&list, "ubuntu");
+    assert_eq!(
+        (
+            u["state"].as_str(),
+            u["healthy"].as_bool(),
+            u["enabled"].as_bool()
+        ),
+        (Some("disabled"), Some(false), Some(false))
+    );
+    let before = mock.lock().unwrap().log.len();
+    assert!(refresh::refresh_all(&st).await.is_empty());
+    assert_eq!(
+        mock.lock().unwrap().log.len(),
+        before,
+        "abgeschaltete Quelle wird nicht abgerufen"
+    );
+    // Neubewertung läuft im Hintergrund; hier synchron anstoßen.
+    patchwatch_server::cve::reeval::reevaluate_all(&st)
+        .await
+        .unwrap();
+    let status = cve_status(&pool, hid, "CVE-2026-10001").await;
+    assert!(
+        status.as_deref() != Some("vulnerable") && status.as_deref() != Some("fixed"),
+        "ohne aktive Quelle kein belastbarer Stand, war: {status:?}"
+    );
+
+    // Wieder einschalten: Daten gelten wieder.
+    call(
+        &app,
+        Method::PUT,
+        "/api/v1/feeds/ubuntu",
+        &hdr(&h),
+        Some(json!({"enabled": true})),
+    )
+    .await;
+    patchwatch_server::cve::reeval::reevaluate_all(&st)
+        .await
+        .unwrap();
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-10001").await.as_deref(),
+        Some("vulnerable")
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn source_management_validates_input_and_ssrf(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu", "debian"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let post = |body: Value| {
+        let (app, h) = (app.clone(), h.clone());
+        async move {
+            call(&app, Method::POST, "/api/v1/feeds", &hdr(&h), Some(body))
+                .await
+                .status
+        }
+    };
+    // Nur bekannte Typen, keine freien URLs.
+    assert_eq!(post(json!({"name": "evil"})).await, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        post(json!({"name": "osv", "url": "http://x"})).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    // Spiegel-URL geht durch die SSRF-Prüfung: Loopback, Link-Local, Metadaten, Zugangsdaten in der URL.
+    for bad in [
+        "http://127.0.0.1:8080/",
+        "http://169.254.169.254/latest",
+        "http://[::1]/",
+        "http://user:pw@example.com/",
+        "ftp://example.com/",
+        "http://localhost/",
+    ] {
+        assert_eq!(
+            post(json!({"name": "osv", "base_url": bad})).await,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+    // Schlüssel nur dort, wo es einen gibt; keine Steuerzeichen; nicht für Debian/Ubuntu-Tracker-URLs.
+    assert_eq!(
+        post(json!({"name": "osv", "secret": "x"})).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(json!({"name": "nvd", "secret": "a\nb"})).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        call(
+            &app,
+            Method::PUT,
+            "/api/v1/feeds/debian",
+            &hdr(&h),
+            Some(json!({"base_url": "https://example.com/"}))
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    // Doppelt, unbekannt, eingebaut.
+    assert_eq!(post(json!({"name": "osv"})).await, StatusCode::CREATED);
+    assert_eq!(post(json!({"name": "osv"})).await, StatusCode::CONFLICT);
+    assert_eq!(
+        call(
+            &app,
+            Method::PUT,
+            "/api/v1/feeds/gibtsnicht",
+            &hdr(&h),
+            Some(json!({"enabled": false}))
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(&app, Method::DELETE, "/api/v1/feeds/debian", &hdr(&h), None)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        call(&app, Method::DELETE, "/api/v1/feeds/osv", &hdr(&h), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(feeds(&app, &h).await.iter().all(|f| f["source"] != "osv"));
+    // Ohne Sitzung/CSRF geht nichts.
+    assert_eq!(
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/feeds",
+            &[],
+            Some(json!({"name": "nvd"}))
+        )
+        .await
+        .status,
+        StatusCode::UNAUTHORIZED
+    );
+    // Ohne Schlüssel in der Konfiguration lässt sich kein Geheimnis speichern.
+    let st2 = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app2 = patchwatch_server::router(st2);
+    let r = call(
+        &app2,
+        Method::POST,
+        "/api/v1/feeds",
+        &hdr(&h),
+        Some(json!({"name": "nvd", "secret": "x"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
