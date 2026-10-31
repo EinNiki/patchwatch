@@ -47,7 +47,7 @@ function FeedStrip() {
   return (
     <Link
       href="/cves#feeds"
-      className="flex items-start gap-1.5 text-xs text-fg2 no-underline hover:text-fg md:max-lg:justify-center"
+      className="flex items-center gap-1.5 text-xs text-fg2 no-underline hover:text-fg max-md:min-h-11 md:max-lg:justify-center"
       title="Zustand der CVE-Feeds anzeigen"
     >
       <span className={s.ok ? "text-ok" : s.info.tone === "warn" ? "text-warn" : "text-unknown"}>

@@ -28,7 +28,7 @@ export default function NotificationsPage() {
       {!n.data ? (
         n.error ? null : <Loading what="Kanäle" />
       ) : (
-        <div className="overflow-x-auto border border-line">
+        <div className="max-xl:overflow-x-auto">
           <table className="tbl stack">
             <caption>Benachrichtigungskanäle mit Zustand</caption>
             <thead>
@@ -44,13 +44,13 @@ export default function NotificationsPage() {
                 const ch = n.data!.channels.find((x) => x.kind === c.kind);
                 return (
                   <tr key={c.kind}>
-                    <td data-label="Kanal">
+                    <td className="cell-primary">
                       <Link href={`/notifications/${c.kind}`} className="font-semibold">
                         {c.label}
                       </Link>
                       {ch?.from_env ? <div className="text-xs text-fg3">aus Umgebungsvariablen</div> : null}
                     </td>
-                    <td data-label="Zustand">
+                    <td className="cell-status lead">
                       {ch?.enabled ? (
                         <StatusBadge info={{ label: "", tone: "ok", icon: "ok", rank: 0 }} label="Aktiv" />
                       ) : (

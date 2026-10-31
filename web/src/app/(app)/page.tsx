@@ -1,30 +1,40 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/useApi";
 import type { Feed, Host, HostStatus } from "@/lib/types";
 import { HOST_STATUS, HOST_STATUS_ORDER } from "@/lib/status";
-import { kernelBase } from "@/lib/format";
+import { kernelBase, uptime } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Icon } from "@/components/Icons";
+import { Marker } from "@/components/DistroChip";
+import { Icon, NavIcon } from "@/components/Icons";
+import { SortHead } from "@/components/SortHead";
+import { TableSkeleton } from "@/components/Skeleton";
+import { useFlash } from "@/lib/useFlash";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
-import { Empty, ErrorNote, Loading } from "@/components/States";
+import { Empty, ErrorNote } from "@/components/States";
 import { Button, TextInput } from "@/components/Controls";
 import { feedSummary } from "@/components/FeedStatus";
 
 type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 
-const COLUMNS: { key: SortKey; label: string; num?: boolean }[] = [
+/** `cls`: Sichtbarkeit je Breite. Der letzte Report rutscht zwischen 768 und 1439 px unter den Hostnamen, Agent und Uptime kommen ab 1600 px dazu. */
+const COLUMNS: { key: SortKey; label: string; num?: boolean; cls?: string }[] = [
   { key: "name", label: "Host" },
   { key: "kernel", label: "Distribution / Kernel" },
-  { key: "report", label: "Letzter Report" },
+  { key: "report", label: "Letzter Report", cls: "md:max-xl:hidden" },
   { key: "updates", label: "Updates", num: true },
   { key: "cve", label: "CVE" },
   { key: "status", label: "Status" },
 ];
+
+const SORT_LABEL: Record<SortKey, string> = { name: "Host", kernel: "Kernel", report: "Letzter Report", updates: "Updates", cve: "CVE", status: "Status" };
+
+/** Rein clientseitige Kennzahlen aus /hosts; jede ist zugleich ein Filter (URL-Parameter). */
+type Kpi = { id: string; label: string; icon: "crit" | "warn" | "reboot" | "unknown" | "clock"; tone: string; count: number; param: Record<string, string> };
 
 function cveWeight(h: Host) {
   return h.cve_vulnerable * 10_000 + h.cve_fix_pending * 100 + h.cve_unknown;
@@ -49,10 +59,12 @@ function HostsView() {
   const params = useSearchParams();
   const hosts = useApi<Host[]>("/hosts", 30_000, ["report_received", "host_status", "host_cve_status"]);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const q = params.get("q") ?? "";
   const status = (params.get("status") ?? "") as HostStatus | "";
   const rebootOnly = params.get("reboot") === "1";
+  const unknownOnly = params.get("cve") === "unknown";
   const sort = (params.get("sort") ?? "status") as SortKey;
   const dir = params.get("dir") === "desc" ? "desc" : "asc";
 
@@ -71,76 +83,123 @@ function HostsView() {
     if (!all) return [];
     const needle = q.trim().toLowerCase();
     const filtered = all.filter(
-      (h) => (!needle || haystack(h).includes(needle)) && (!status || h.status === status) && (!rebootOnly || h.reboot_needed),
+      (h) =>
+        (!needle || haystack(h).includes(needle)) &&
+        (!status || h.status === status) &&
+        (!rebootOnly || h.reboot_needed) &&
+        (!unknownOnly || h.is_proxmox || h.cve_unknown > 0),
     );
     const cmp = SORTERS[sort] ?? SORTERS.status;
     const sorted = [...filtered].sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name, "de", { numeric: true }));
     return dir === "desc" ? sorted.reverse() : sorted;
-  }, [all, q, status, rebootOnly, sort, dir]);
+  }, [all, q, status, rebootOnly, unknownOnly, sort, dir]);
 
-  const counts = useMemo(() => {
-    const c = new Map<HostStatus, number>();
-    for (const h of all ?? []) c.set(h.status, (c.get(h.status) ?? 0) + 1);
-    return c;
+  const flashed = useFlash(
+    all,
+    (h) => h.id,
+    (h) => `${h.status}|${h.updates_pending}|${h.updates_security}|${h.cve_vulnerable}|${h.cve_fix_pending}|${h.cve_unknown}|${h.last_report_at}|${h.running_kernel}`,
+  );
+
+  const kpis = useMemo<Kpi[]>(() => {
+    const n = (f: (h: Host) => boolean) => (all ?? []).filter(f).length;
+    const list: Kpi[] = [
+      { id: "vuln", label: "Verwundbar (CVE)", icon: "crit", tone: "text-crit", count: n((h) => h.status === "cve_vulnerable"), param: { status: "cve_vulnerable" } },
+      { id: "sec", label: "Sicherheitsupdates", icon: "crit", tone: "text-crit", count: n((h) => h.status === "security_updates"), param: { status: "security_updates" } },
+      { id: "reboot", label: "Neustart nötig", icon: "reboot", tone: "text-warn", count: n((h) => h.reboot_needed), param: { reboot: "1" } },
+      { id: "unknown", label: "CVE-Lage unbekannt", icon: "unknown", tone: "text-unknown", count: n((h) => h.is_proxmox || h.cve_unknown > 0), param: { cve: "unknown" } },
+      { id: "stale", label: "Meldet sich nicht", icon: "clock", tone: "text-unknown", count: n((h) => h.status === "stale"), param: { status: "stale" } },
+    ];
+    return list;
   }, [all]);
 
+  const lastReport = useMemo(() => (all ?? []).reduce<string | null>((m, h) => (h.last_report_at && (!m || h.last_report_at > m) ? h.last_report_at : m), null), [all]);
+
   const feedOk = feedSummary(feeds.data)?.ok ?? false;
-  const filtering = Boolean(q || status || rebootOnly);
+  const activeFilters = [q.trim(), status, rebootOnly, unknownOnly].filter(Boolean).length;
+  const filtering = activeFilters > 0;
 
   if (hosts.error && !all) return <ErrorNote message={hosts.error} />;
-  if (!all) return <Loading what="Hosts" />;
+  if (!all) return <TableSkeleton what="Hosts" />;
+
+  const kpiActive = (k: Kpi) => Object.entries(k.param).every(([key, v]) => params.get(key) === v);
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-xl font-semibold">Hosts</h1>
-        <p className="text-fg2" aria-live="polite">
+        <p className="text-sm text-fg3" aria-live="polite">
           {filtering ? `${rows.length} von ${all.length}` : all.length} {all.length === 1 ? "Host" : "Hosts"}
         </p>
       </div>
 
       {all.length === 0 ? (
-        <Empty title="Noch keine Hosts angelegt">
-          Lege unter <Link href="/agents">Agents</Link> einen Agent an und installiere ihn mit dem einmalig angezeigten Token.
-          Nach dem ersten Report erscheint der Host hier.
+        <Empty title="Noch keine Hosts">
+          Lege unter <Link href="/agents">Agents</Link> einen Agent an. Nach dem ersten Report erscheint der Host hier.
         </Empty>
       ) : (
         <>
-          <section aria-label="Verteilung nach Status" className="mb-3 flex flex-wrap gap-2">
-            {HOST_STATUS_ORDER.filter((s) => counts.get(s)).map((s) => {
-              const active = status === s;
+          <section aria-label="Kennzahlen" className="mb-3 grid grid-cols-2 border-y border-line md:grid-cols-3 xl:grid-cols-6">
+            {kpis.map((k) => {
+              const active = kpiActive(k);
               return (
                 <button
-                  key={s}
+                  key={k.id}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setParam({ status: active ? null : s })}
-                  className={`rounded-[2px] border p-0.5 ${active ? "border-accent" : "border-transparent"} max-md:min-h-11`}
-                  title={active ? "Filter aufheben" : "Nach diesem Status filtern"}
+                  disabled={k.count === 0 && !active}
+                  onClick={() => setParam(active ? Object.fromEntries(Object.keys(k.param).map((key) => [key, null])) : k.param)}
+                  title={active ? "Filter aufheben" : `Nur ${k.label} anzeigen`}
+                  className={`flex min-h-11 flex-col items-start gap-0.5 border-l-2 px-3 py-2 text-left first:border-l-0 hover:bg-sunk disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${
+                    active ? "border-accent bg-sunk" : "border-transparent"
+                  }`}
                 >
-                  <StatusBadge info={HOST_STATUS[s]} label={`${counts.get(s)} ${HOST_STATUS[s].label}`} />
+                  <span className="flex items-center gap-1.5">
+                    <span className={k.count > 0 ? k.tone : "text-fg3"}>
+                      <Icon name={k.icon} size={16} />
+                    </span>
+                    <span className="mono text-xl font-semibold leading-none">{k.count}</span>
+                  </span>
+                  <span className="text-xs text-fg2">{k.label}</span>
                 </button>
               );
             })}
+            <div className="flex min-h-11 flex-col items-start gap-0.5 px-3 py-2">
+              <span className="mono text-sm font-semibold leading-[1.25rem]">
+                <RelTime iso={lastReport} />
+              </span>
+              <span className="text-xs text-fg2">zuletzt gemeldet</span>
+            </div>
           </section>
 
-          <form role="search" aria-label="Hosts filtern" onSubmit={(e) => e.preventDefault()} className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
+          <div className="mb-3 md:hidden">
+            <Button aria-expanded={filtersOpen} aria-controls="host-filters" onClick={() => setFiltersOpen((o) => !o)}>
+              <NavIcon name="filter" />
+              Filter{activeFilters ? ` (${activeFilters})` : ""}
+            </Button>
+          </div>
+          <form
+            id="host-filters"
+            role="search"
+            aria-label="Hosts filtern"
+            onSubmit={(e) => e.preventDefault()}
+            className={`mb-3 flex-wrap items-center gap-x-4 gap-y-2 max-md:flex-col max-md:items-stretch ${filtersOpen ? "flex" : "max-md:hidden md:flex"}`}
+          >
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
               Suche
               <TextInput
                 type="search"
                 value={q}
                 onChange={(e) => setParam({ q: e.target.value })}
                 placeholder="Name, Distribution, Kernel"
-                className="w-64 max-w-full font-normal"
+                className="w-64 max-w-full font-normal max-md:w-full"
               />
             </label>
-            <label className="flex items-center gap-2 text-xs font-semibold text-fg2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
               Status
               <select
                 value={status}
                 onChange={(e) => setParam({ status: e.target.value })}
-                className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11"
+                className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11"
               >
                 <option value="">alle</option>
                 {HOST_STATUS_ORDER.map((s) => (
@@ -150,41 +209,64 @@ function HostsView() {
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={rebootOnly} onChange={(e) => setParam({ reboot: e.target.checked ? "1" : null })} className="size-4 accent-[var(--accent)]" />
+            <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
+              <input type="checkbox" checked={rebootOnly} onChange={(e) => setParam({ reboot: e.target.checked ? "1" : null })} className="size-4 accent-(--accent)" />
               nur Neustart nötig
             </label>
-            {filtering ? (
-              <Button onClick={() => router.replace(pathname, { scroll: false })}>Filter zurücksetzen</Button>
-            ) : null}
+            {/* Mobil sind die Spaltenköpfe ausgeblendet: Sortierung steht hier. */}
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1 md:hidden">
+              Sortierung
+              <select
+                value={`${sort}:${dir}`}
+                onChange={(e) => {
+                  const [k, d] = e.target.value.split(":");
+                  setParam({ sort: k ?? null, dir: d ?? null });
+                }}
+                className="min-h-11 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg"
+              >
+                {(Object.keys(SORT_LABEL) as SortKey[]).flatMap((k) => [
+                  <option key={`${k}:asc`} value={`${k}:asc`}>
+                    {SORT_LABEL[k]} aufsteigend
+                  </option>,
+                  <option key={`${k}:desc`} value={`${k}:desc`}>
+                    {SORT_LABEL[k]} absteigend
+                  </option>,
+                ])}
+              </select>
+            </label>
+            {filtering ? <Button onClick={() => router.replace(pathname, { scroll: false })}>Filter zurücksetzen</Button> : null}
           </form>
 
           {rows.length === 0 ? (
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
-            <div className="overflow-x-auto border border-line">
+            <div className="max-lg:overflow-x-auto">
               <table className="tbl stack">
                 <caption>Hosts mit Distribution, Kernel, letztem Report, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
-                    {COLUMNS.map((c) => {
-                      const active = sort === c.key;
-                      return (
-                        <th key={c.key} scope="col" className={c.num ? "num" : ""} aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}>
-                          <button type="button" onClick={() => setParam({ sort: c.key, dir: active && dir === "asc" ? "desc" : "asc" })}>
-                            {c.label}
-                            <span aria-hidden="true" className={active ? "text-accent" : "text-fg3"}>
-                              {active ? (dir === "asc" ? "▲" : "▼") : "↕"}
-                            </span>
-                          </button>
-                        </th>
-                      );
-                    })}
+                    {COLUMNS.map((c) => (
+                      <SortHead
+                        key={c.key}
+                        label={c.label}
+                        num={c.num}
+                        className={c.cls}
+                        active={sort === c.key}
+                        dir={dir}
+                        onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
+                      />
+                    ))}
+                    <th scope="col" className="max-wide:hidden">
+                      <span className="th-pad">Uptime</span>
+                    </th>
+                    <th scope="col" className="max-wide:hidden">
+                      <span className="th-pad">Agent</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((h) => (
-                    <HostRow key={h.id} h={h} feedOk={feedOk} />
+                    <HostRow key={h.id} h={h} feedOk={feedOk} flash={flashed.has(h.id)} />
                   ))}
                 </tbody>
               </table>
@@ -196,34 +278,37 @@ function HostsView() {
   );
 }
 
-function HostRow({ h, feedOk }: { h: Host; feedOk: boolean }) {
+function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolean }) {
   const newer = h.newest_kernel && h.running_kernel && h.newest_kernel !== h.running_kernel;
   const stale = h.status === "stale";
   return (
-    <tr>
-      <td data-label="Host">
+    <tr data-flash={flash ? "" : undefined}>
+      <td className="cell-primary">
         <Link href={`/hosts/${h.id}`} className="font-semibold">
           {h.name}
         </Link>
-        {h.is_proxmox ? <span className="ml-2 rounded-[2px] border border-line px-1 text-[11px] text-fg2">Proxmox {h.proxmox_version}</span> : null}
+        {h.is_proxmox ? <span className="ml-2 inline-flex align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
         {h.hostname && h.hostname !== h.name ? <div className="text-xs text-fg3">{h.hostname}</div> : null}
+        <div className="hidden text-xs text-fg3 md:max-xl:block">
+          zuletzt <RelTime iso={h.last_report_at} />
+        </div>
       </td>
-      <td data-label="Distribution / Kernel">
-        <div>{h.pretty_name ?? (h.os_id ? `${h.os_id} ${h.os_version ?? ""}` : "–")}</div>
-        <div className="text-xs">
+      <td>
+        <span className="block max-md:inline">{h.pretty_name ?? (h.os_id ? `${h.os_id} ${h.os_version ?? ""}` : "–")}</span>{" "}
+        <span className="block text-xs max-md:inline">
           <Mono>{h.running_kernel ? kernelBase(h.running_kernel) : "–"}</Mono>
           {newer ? (
             <span className="ml-1.5 inline-flex items-center gap-1 text-warn" title="Ein neuerer Kernel ist installiert, aber noch nicht gebootet">
-              <Icon name="reboot" size={12} />
+              <Icon name="reboot" />
               <Mono>{kernelBase(h.newest_kernel)}</Mono>
               <span className="sr-only">installiert, Neustart nötig</span>
             </span>
           ) : null}
-        </div>
+        </span>
       </td>
-      <td data-label="Letzter Report" className={stale ? "text-warn" : ""}>
+      <td data-label="Report" className={`md:max-xl:hidden ${stale ? "text-warn" : ""}`}>
         <span className="inline-flex items-center gap-1">
-          {stale ? <Icon name="clock" size={12} /> : null}
+          {stale ? <Icon name="clock" /> : null}
           <RelTime iso={h.last_report_at} />
           {stale ? <span className="sr-only">: meldet sich nicht mehr</span> : null}
         </span>
@@ -233,22 +318,24 @@ function HostRow({ h, feedOk }: { h: Host; feedOk: boolean }) {
           <span className="text-fg3">unbekannt</span>
         ) : (
           <>
-            <span className={h.updates_pending === 0 ? "text-fg3" : ""}>{h.updates_pending} offen</span>
-            {h.updates_security ? <div className="font-semibold text-crit">{h.updates_security} Sicherheit</div> : null}
+            <span className={h.updates_pending === 0 ? "text-fg3" : "mono"}>{h.updates_pending} offen</span>
+            {h.updates_security ? <div className="mono font-semibold text-crit max-md:ml-1.5 max-md:inline">{h.updates_security} Sicherheit</div> : null}
           </>
         )}
       </td>
-      <td data-label="CVE">
+      <td className="cell-status">
         <CveCell h={h} feedOk={feedOk} />
       </td>
-      <td data-label="Status">
-        <StatusBadge info={HOST_STATUS[h.status]} />
+      <td className="cell-status lead">
+        <StatusBadge key={h.status} info={HOST_STATUS[h.status]} />
         {h.reboot_needed && h.status !== "reboot_required" ? (
-          <div className="mt-1 inline-flex items-center gap-1 text-xs text-warn">
-            <Icon name="reboot" size={12} /> Neustart nötig
+          <div className="mt-1 inline-flex items-center gap-1 text-xs text-warn max-md:mt-0">
+            <Icon name="reboot" /> Neustart nötig
           </div>
         ) : null}
       </td>
+      <td className="mono max-wide:hidden">{uptime(h.uptime_seconds)}</td>
+      <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
     </tr>
   );
 }
@@ -259,39 +346,39 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
   if (h.cve_vulnerable > 0)
     parts.push(
       <span key="v" className="inline-flex items-center gap-1 font-semibold text-crit">
-        <Icon name="crit" size={12} /> {h.cve_vulnerable} verwundbar
+        <Icon name="crit" /> {h.cve_vulnerable} verwundbar
       </span>,
     );
   if (h.cve_fix_pending > 0)
     parts.push(
       <span key="p" className="inline-flex items-center gap-1 text-warn">
-        <Icon name="warn" size={12} /> {h.cve_fix_pending} Fix angekündigt
+        <Icon name="warn" /> {h.cve_fix_pending} Fix angekündigt
       </span>,
     );
   if (h.is_proxmox || h.cve_unknown > 0)
     parts.push(
       <span key="u" className="inline-flex items-center gap-1 text-unknown">
-        <Icon name="unknown" size={12} /> {h.is_proxmox ? "manuell prüfen" : `${h.cve_unknown} unbekannt`}
+        <Icon name="unknown" /> {h.is_proxmox ? "manuell prüfen" : `${h.cve_unknown} unbekannt`}
       </span>,
     );
   if (parts.length === 0) {
     if (h.status === "pending") return <span className="text-fg3">–</span>;
     return feedOk ? (
       <span className="inline-flex items-center gap-1 text-fg2">
-        <Icon name="ok" size={12} /> keine offenen
+        <Icon name="ok" /> keine offenen
       </span>
     ) : (
       <span className="inline-flex items-center gap-1 text-unknown">
-        <Icon name="unknown" size={12} /> Feed prüfen
+        <Icon name="unknown" /> Feed prüfen
       </span>
     );
   }
-  return <div className="flex flex-col gap-0.5">{parts}</div>;
+  return <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">{parts}</div>;
 }
 
 export default function HostsPage() {
   return (
-    <Suspense fallback={<Loading what="Hosts" />}>
+    <Suspense fallback={<TableSkeleton what="Hosts" />}>
       <HostsView />
     </Suspense>
   );

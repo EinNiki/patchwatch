@@ -4,15 +4,16 @@ import type { IconName } from "@/lib/status";
  * Statusformen unabhängig von der Farbe unterscheidbar:
  * ok = Kreis mit Haken, warn = Dreieck mit !, crit = Raute mit ×, unknown = gestrichelter Kreis mit ?,
  * reboot = Kreispfeil, clock = Uhr, pending = leerer gestrichelter Kreis.
+ * Alle Icons (auch `NavIcon`): 16er-Raster, Linie 1,5, currentColor.
  */
-export function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
+export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   const common = {
     width: size,
     height: size,
     viewBox: "0 0 16 16",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.6,
+    strokeWidth: 1.5,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     "aria-hidden": true,
@@ -71,7 +72,7 @@ export function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
   }
 }
 
-export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "logout";
+export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "logout" | "sort" | "asc" | "desc" | "filter";
 
 /** Navigations- und Aktions-Icons: eigene Linienformen, immer mit Text daneben (nie allein). */
 export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number }) {
@@ -149,6 +150,30 @@ export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number 
       return (
         <svg {...common}>
           <path d="M8 3v10M3 8h10" />
+        </svg>
+      );
+    case "sort":
+      return (
+        <svg {...common}>
+          <path d="M5.5 6.5L8 4l2.5 2.5M5.5 9.5L8 12l2.5-2.5" />
+        </svg>
+      );
+    case "asc":
+      return (
+        <svg {...common}>
+          <path d="M8 12.5v-9M4.5 7L8 3.5 11.5 7" />
+        </svg>
+      );
+    case "desc":
+      return (
+        <svg {...common}>
+          <path d="M8 3.5v9M4.5 9L8 12.5 11.5 9" />
+        </svg>
+      );
+    case "filter":
+      return (
+        <svg {...common}>
+          <path d="M2.5 3.5h11L9.5 8.5v4l-3 1v-5z" />
         </svg>
       );
     case "chevron":

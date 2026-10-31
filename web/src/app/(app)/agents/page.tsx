@@ -238,7 +238,7 @@ export default function AgentsPage() {
           </div>
         </Empty>
       ) : (
-        <div className="overflow-x-auto border border-line">
+        <div className="max-xl:overflow-x-auto">
           <table className="tbl stack">
             <caption>Agents mit Version, letztem Report und Check-in</caption>
             <thead>
@@ -259,7 +259,7 @@ export default function AgentsPage() {
                 const coolingDown = (limited[h.id] ?? 0) > now;
                 return (
                   <tr key={h.id}>
-                    <td data-label="Name">
+                    <td className="cell-primary">
                       <Link href={`/hosts/${h.id}`} className="whitespace-nowrap font-semibold">
                         {h.name}
                       </Link>

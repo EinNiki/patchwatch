@@ -1,12 +1,10 @@
 import { Icon } from "./Icons";
 import { TONE_CLASS, type StatusInfo } from "@/lib/status";
 
-/** Status immer als Icon + Text + Farbe (DESIGN.md): nie nur Farbe. */
+/** Status immer als Icon + Text + Farbe (DESIGN.md): nie nur Farbe. 22 px hoch, `chip-fade` blendet Wechsel weich ein. */
 export function StatusBadge({ info, label }: { info: StatusInfo; label?: string }) {
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[2px] px-1.5 py-0.5 text-xs font-semibold leading-tight ${TONE_CLASS[info.tone]}`}
-    >
+    <span className={`chip-fade inline-flex h-(--chip-h) items-center gap-1 whitespace-nowrap rounded-xs pl-1 pr-1.5 text-xs font-medium ${TONE_CLASS[info.tone]}`}>
       <Icon name={info.icon} />
       {label ?? info.label}
     </span>

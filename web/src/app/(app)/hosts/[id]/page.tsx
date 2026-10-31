@@ -8,6 +8,7 @@ import { useApi } from "@/lib/useApi";
 import { absTime, kernelBase, uptime } from "@/lib/format";
 import { CVE_STATUS, HOST_STATUS } from "@/lib/status";
 import type { Feed, HistoryRow, Host, HostCve } from "@/lib/types";
+import { Marker } from "@/components/DistroChip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Icon } from "@/components/Icons";
 import { Mono } from "@/components/Version";
@@ -60,7 +61,7 @@ export default function HostDetailPage() {
       <p className="mb-2">
         <Link href="/">← Alle Hosts</Link>
       </p>
-      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-xl font-semibold">{h.name}</h1>
         <StatusBadge info={info} />
         {h.status_changed_at ? (
@@ -70,11 +71,13 @@ export default function HostDetailPage() {
         ) : null}
       </div>
 
-      <section aria-labelledby="facts" className="mb-6">
+      {/* Ab 1600 px: CVE-Bewertung und Verlauf links, Stand rechts (DOM-Reihenfolge bleibt Stand zuerst). */}
+      <div className="wide:grid wide:grid-cols-[minmax(0,1fr)_26rem] wide:gap-x-8">
+      <section aria-labelledby="facts" className="mb-6 wide:col-start-2 wide:row-start-1">
         <h2 id="facts" className="mb-2 text-lg font-semibold">
           Stand
         </h2>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 border border-line bg-surface p-4 md:grid-cols-[max-content_1fr_max-content_1fr]">
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 border-y border-line py-3 md:grid-cols-[max-content_1fr_max-content_1fr] wide:grid-cols-[max-content_1fr]">
           <Fact label="Distribution">
             {h.pretty_name ?? "–"} {h.os_codename ? <span className="text-fg3">({h.os_codename})</span> : null}
           </Fact>
@@ -135,9 +138,10 @@ export default function HostDetailPage() {
         </dl>
       </section>
 
+      <div className="min-w-0 wide:col-start-1 wide:row-start-1">
       <CveSection host={h} cves={cves} limit={cveLimit} onMore={() => setCveLimit(cveLimit + CVE_PAGE * 5)} feedWarning={feed && !feed.ok ? feed.label : null} />
 
-      <section aria-labelledby="hist" className="mt-8">
+      <section aria-labelledby="hist" className="mt-6">
         <h2 id="hist" className="mb-2 text-lg font-semibold">
           Verlauf
         </h2>
@@ -145,7 +149,7 @@ export default function HostDetailPage() {
         {!history.data ? null : history.data.length === 0 ? (
           <Empty title="Noch keine Reports">Der Verlauf füllt sich mit dem ersten Report des Agents (täglich um 12:00).</Empty>
         ) : (
-          <div className="overflow-x-auto border border-line">
+          <div className="max-xl:overflow-x-auto">
             <table className="tbl stack">
               <caption>Verlauf der letzten Reports</caption>
               <thead>
@@ -160,7 +164,7 @@ export default function HostDetailPage() {
               <tbody>
                 {history.data.map((r) => (
                   <tr key={r.id}>
-                    <td data-label="Zeitpunkt">
+                    <td className="cell-primary">
                       <time dateTime={r.received_at}>{absTime(r.received_at)}</time>
                     </td>
                     <td data-label="Kernel">
@@ -171,7 +175,7 @@ export default function HostDetailPage() {
                       {r.updates_security ? <span className="text-crit"> ({r.updates_security} Sicherheit)</span> : null}
                     </td>
                     <td data-label="Neustart">{r.reboot_needed ? "nötig" : <span className="text-fg3">nein</span>}</td>
-                    <td data-label="Status">
+                    <td className="cell-status lead">
                       <StatusBadge info={HOST_STATUS[r.status]} />
                     </td>
                   </tr>
@@ -181,6 +185,8 @@ export default function HostDetailPage() {
           </div>
         )}
       </section>
+      </div>
+      </div>
     </>
   );
 }
@@ -260,7 +266,7 @@ function CveSection({
         </Empty>
       ) : (
         <>
-          <div className="overflow-x-auto border border-line">
+          <div className="max-xl:overflow-x-auto">
             <table className="tbl stack">
               <caption>CVE-Bewertungen dieses Hosts mit Status, Begründung und manueller Prüfung</caption>
               <thead>
@@ -274,14 +280,14 @@ function CveSection({
               <tbody>
                 {list.map((c) => (
                   <tr key={c.cve_id}>
-                    <td data-label="CVE">
+                    <td className="cell-primary">
                       <Link href={`/cves?q=${c.cve_id}`} className="mono font-medium">
                         {c.cve_id}
                       </Link>
-                      {c.watched ? <span className="ml-2 rounded-[2px] border border-accent px-1 text-[11px] text-accent">Watchlist</span> : null}
+                      {c.watched ? <span className="ml-2 inline-flex align-middle"><Marker>Watchlist</Marker></span> : null}
                       {c.priority ? <div className="text-xs text-fg3">Priorität {c.priority}</div> : null}
                     </td>
-                    <td data-label="Status">
+                    <td className="cell-status lead">
                       <StatusBadge info={CVE_STATUS[c.status]} label={host.is_proxmox && c.status === "unknown" ? "Unbekannt: manuell prüfen" : undefined} />
                     </td>
                     <td data-label="Begründung" className="max-w-[44rem]">

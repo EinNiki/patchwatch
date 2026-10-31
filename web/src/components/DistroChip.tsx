@@ -1,5 +1,5 @@
 import { Icon } from "./Icons";
-import { TONE_CLASS, type IconName, type Tone } from "@/lib/status";
+import type { IconName, Tone } from "@/lib/status";
 import { absTime } from "@/lib/format";
 import type { Distro } from "@/lib/types";
 
@@ -14,7 +14,11 @@ const STATUS: Record<string, { word: string; tone: Tone; icon: IconName; muted?:
   unknown: { word: "unbekannt", tone: "unknown", icon: "unknown" },
 };
 
-/** Chip je Quelle und Release: Icon + Text + Farbe (nie nur Farbe), Fix-Version in Mono. */
+/**
+ * Chip je Quelle und Release: Icon + Text + Farbe (nie nur Farbe). Release in Graustufe, Statuswort in der Statusfarbe,
+ * Fix-Version in Mono, kein Trennzeichen. Umriss statt Fläche (viele Chips nebeneinander bleiben ruhig);
+ * gestrichelt = Release läuft auf keinem Host.
+ */
 export function DistroChip({ d }: { d: Distro }) {
   const s = STATUS[d.status] ?? STATUS.unknown!;
   const title = `${distroName(d.source)} ${d.release}: ${s.word}${d.fix_version ? ` ab ${d.fix_version}` : ""} (Paket ${d.package}${
@@ -23,25 +27,25 @@ export function DistroChip({ d }: { d: Distro }) {
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[2px] px-1.5 py-0.5 text-xs font-medium leading-tight ${
-        s.muted ? "bg-unknown-soft text-fg2" : TONE_CLASS[s.tone]
-      } ${d.mine ? "" : "border border-dashed border-current"}`}
+      className={`chip-fade inline-flex h-(--chip-h) items-center gap-1 whitespace-nowrap rounded-xs border pl-1 pr-1.5 text-xs ${
+        d.mine ? "border-line" : "border-dashed border-line"
+      }`}
     >
-      <Icon name={s.icon} />
-      <span>
-        {distroName(d.source)} {d.release} · {s.word}
-        {d.fix_version ? (
-          <>
-            {" "}
-            <span className="font-mono text-[11px]">{d.fix_version}</span>
-          </>
-        ) : null}
+      <span className={s.muted ? "text-fg3" : TONE_TEXT[s.tone]}>
+        <Icon name={s.icon} />
       </span>
+      <span className="text-fg2">
+        {distroName(d.source)} {d.release}
+      </span>
+      <span className={`font-medium ${s.muted ? "text-fg3" : TONE_TEXT[s.tone]}`}>{s.word}</span>
+      {d.fix_version ? <span className="mono text-fg2">{d.fix_version}</span> : null}
     </span>
   );
 }
 
-/** Gedämpfter Marker (Rahmen statt Fläche), z. B. „Watchlist“. */
+const TONE_TEXT: Record<Tone, string> = { ok: "text-ok", warn: "text-warn", crit: "text-crit", unknown: "text-unknown" };
+
+/** Gedämpfter Marker (Umriss statt Fläche), z. B. „Watchlist“, „Proxmox“. Gleiche Höhe wie die Chips. */
 export function Marker({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex items-center whitespace-nowrap rounded-[2px] border border-line px-1.5 py-0.5 text-xs leading-tight text-fg2">{children}</span>;
+  return <span className="inline-flex h-(--chip-h) items-center whitespace-nowrap rounded-xs border border-line px-1.5 text-xs text-fg2">{children}</span>;
 }

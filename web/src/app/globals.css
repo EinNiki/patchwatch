@@ -51,12 +51,12 @@ code,
 }
 
 @layer components {
-/* Tabellen: Hauptwerkzeug. Kopf in "sunk", Haarlinien, keine Rundung. */
+/* Tabellen: Hauptwerkzeug. Flach: nur Linien, kein Kasten; Kopf sticky; Zeile ca. 37 px bei 13 px Text. */
 .tbl {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--text-sm);
-  background: var(--surface);
 }
 .tbl caption {
   position: absolute;
@@ -67,11 +67,15 @@ code,
   white-space: nowrap;
 }
 .tbl th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
   background: var(--sunk);
   color: var(--text-2);
   font-weight: 600;
   text-align: left;
   padding: 0;
+  border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -81,8 +85,8 @@ code,
   align-items: center;
   gap: 4px;
   width: 100%;
-  padding: 8px 12px;
-  min-height: 34px;
+  padding: 4px 12px;
+  min-height: var(--head-h);
   font: inherit;
   color: inherit;
   background: none;
@@ -96,12 +100,13 @@ code,
   color: var(--text);
 }
 .tbl td {
-  padding: 8px 12px;
+  position: relative;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
-.tbl tbody tr:hover {
-  background: color-mix(in srgb, var(--sunk) 55%, transparent);
+.tbl tbody tr:hover td {
+  background: color-mix(in srgb, var(--sunk) 60%, transparent);
 }
 .tbl .num {
   text-align: right;
@@ -112,38 +117,120 @@ code,
   justify-content: flex-end;
 }
 
+/* Live-Update: geänderte Zeile blitzt kurz auf (nur Opacity einer Überlagerung). */
+.tbl td::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+}
+.tbl tr[data-flash] td::after {
+  animation: row-flash 700ms var(--ease-out);
+}
+@keyframes row-flash {
+  from {
+    opacity: 0.16;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Weiche Statuswechsel: ein neu eingesetzter Chip blendet ein. */
+.chip-fade {
+  animation: chip-in var(--dur-2) var(--ease-out);
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Skeleton statt Spinner: ruhiges Pulsieren der Deckkraft, keine Verläufe. */
+.skeleton {
+  background: var(--sunk);
+  border-radius: 2px;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Mobil (< 768 px): gestapelte Einträge. Name oben, Status-Chips darunter, Nebenwerte klein in einer Zeile.
+   Zellklassen: cell-primary (Name), cell-status (Chips), alles andere ist Nebenwert und trägt sein Label per data-label. */
 @media (max-width: 767px) {
   .tbl.stack thead {
     position: absolute;
-    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .tbl.stack,
+  .tbl.stack tbody {
+    display: block;
   }
   .tbl.stack tr {
-    display: block;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 10px 0;
     border-bottom: 1px solid var(--line);
-    padding: 8px 0;
   }
   .tbl.stack td {
     display: block;
-    position: relative;
     border: 0;
-    padding: 3px 12px 3px 9.25rem;
-    min-height: 1.6em;
+    padding: 0;
+    min-width: 0;
     text-align: left;
+    overflow-wrap: anywhere;
+    font-size: var(--text-xs);
+    color: var(--text-2);
   }
-  .tbl.stack td::before {
-    content: attr(data-label);
-    position: absolute;
-    left: 12px;
-    width: 8rem;
+  .tbl.stack td::after {
+    display: none;
+  }
+  .tbl.stack tbody tr:hover td {
+    background: none;
+  }
+  .tbl.stack td[data-label]::before {
+    content: attr(data-label) " ";
     color: var(--text-3);
+  }
+  .tbl.stack td.cell-primary {
+    order: -2;
+    flex: 1 0 100%;
+    font-size: var(--text-base);
+    color: var(--text);
+  }
+  .tbl.stack td.cell-primary::before,
+  .tbl.stack td.cell-status::before {
+    display: none;
+  }
+  .tbl.stack td.cell-status.lead {
+    order: -2;
+  }
+  .tbl.stack td.cell-status {
+    order: -1;
+    flex: 0 1 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
     font-size: var(--text-xs);
   }
-  .tbl.stack td.num {
-    text-align: left;
+  .tbl.stack td.cell-primary a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch);
   }
-  /* Lange Begründungen und URLs dürfen die gestapelte Tabelle nicht breiter als den Bildschirm machen. */
-  .tbl.stack td {
-    overflow-wrap: anywhere;
+  .tbl.stack td.cell-hide {
+    display: none;
   }
 }
 }
