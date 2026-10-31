@@ -14,8 +14,48 @@ const user = process.env.PW_USER ?? "admin";
 const password = process.env.PW_PASSWORD ?? (console.error("PW_PASSWORD setzen"), process.exit(1));
 const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE ?? "playwright");
 
-const DEFAULT_PAGES = "hosts=/,host-ubuntu=/hosts/host:web-01,host-proxmox=/hosts/host:pve-01,cves=/cves,settings=/settings";
+// Standard: Seiten von UI v2. Für v1 PW_PAGES="hosts=/,host-ubuntu=/hosts/host:web-01,host-proxmox=/hosts/host:pve-01,cves=/cves,settings=/settings".
+// Namen mit Eintrag in ACTIONS führen vor dem Foto eine Interaktion aus (Dialog öffnen, Menü aufklappen).
+const DEFAULT_PAGES = [
+  "hosts=/", "host-ubuntu=/hosts/host:web-01", "host-proxmox=/hosts/host:pve-01",
+  "cves=/cves", "cves-filtered=/cves?split=debian_fixed_ubuntu_open", "cve-detail=/cves/CVE-2024-1086",
+  "agents=/agents", "agents-waiting=/agents", "agents-add=/agents", "agents-token=/agents",
+  "notifications=/notifications", "notification-ntfy=/notifications/ntfy", "notification-matrix=/notifications/matrix",
+  "notification-browser=/notifications/browser", "settings=/settings", "menu=/",
+].join(",");
 const pages = (process.env.PW_PAGES ?? DEFAULT_PAGES).split(",").map((p) => p.split("=", 2));
+/** Interaktionen vor dem Foto; `mobileOnly`: nur im schmalen Viewport. */
+const ACTIONS = {
+  "agents-waiting": async (page) => {
+    // Ein früherer Durchlauf kann die Anforderung schon gesetzt haben (Button dann gesperrt).
+    const btn = page.getByRole("button", { name: "web-01 jetzt aktualisieren" });
+    if (await btn.isEnabled()) await btn.click();
+    await page.getByText("wartet auf Agent").first().waitFor();
+  },
+  "agents-add": async (page) => {
+    await page.getByRole("button", { name: "Agent hinzufügen" }).first().click();
+    await page.getByLabel("Name des Hosts").fill("web-03");
+  },
+  // Legt einen Agent an, zeigt den einmaligen Token und löscht den Agent nach dem Foto wieder.
+  "agents-token": async (page) => {
+    await page.getByRole("button", { name: "Agent hinzufügen" }).first().click();
+    await page.getByLabel("Name des Hosts").fill("demo-agent");
+    await page.getByRole("button", { name: "Agent anlegen" }).click();
+    await page.getByRole("button", { name: "Token kopieren" }).waitFor();
+    return async () => {
+      await page.getByRole("button", { name: "Fertig, Token gesichert" }).click();
+      await page.getByRole("button", { name: "Agent demo-agent löschen" }).click();
+      await page.getByRole("button", { name: "demo-agent löschen", exact: true }).click();
+      await page.getByRole("row").filter({ hasText: "demo-agent" }).waitFor({ state: "detached" });
+    };
+  },
+  menu: async (page, vp) => {
+    if (vp !== "mobile") return "skip";
+    await page.getByRole("button", { name: "Menü" }).click();
+    await page.getByRole("dialog", { name: "Navigation" }).waitFor();
+  },
+};
+
 const viewports = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
 
 mkdirSync(out, { recursive: true });
@@ -51,8 +91,13 @@ for (const scheme of ["light", "dark"]) {
       await page.goto(base + resolved);
       await page.waitForLoadState("networkidle");
       await page.waitForTimeout(500); // Daten und Schriften setzen
+      const action = ACTIONS[name];
+      const cleanup = action ? await action(page, vpName) : undefined;
+      if (cleanup === "skip") continue;
+      if (action) await page.waitForTimeout(300);
       await shot(name);
       console.log(`${name}-${vpName}-${scheme}`);
+      if (typeof cleanup === "function") await cleanup();
     }
     await ctx.close();
   }

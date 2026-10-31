@@ -42,6 +42,9 @@ export interface Host {
   status_changed_at: string | null;
   last_report_at: string | null;
   created_at: string;
+  agent_version: string | null;
+  last_checkin_at: string | null;
+  report_requested_at: string | null;
   cve_vulnerable: number;
   cve_fix_pending: number;
   cve_unknown: number;
@@ -89,6 +92,68 @@ export interface Cve {
   hosts_vulnerable: number;
   hosts_fix_pending: number;
   hosts_unknown: number;
+}
+
+/** Ein Chip je (Quelle, Release): ungünstigster Status über alle Pakete. */
+export interface Distro {
+  source: string;
+  release: string;
+  status: string;
+  package: string;
+  fix_version: string | null;
+  updated_at: string;
+  mine: boolean;
+  packages: number;
+}
+
+export interface CveListItem extends Cve {
+  distros: Distro[];
+  /** Releases, die wegen „nur meine Releases“ nicht in `distros` stehen. */
+  hidden_releases: number;
+}
+
+export interface CveSourceRow {
+  source: string;
+  release: string;
+  package: string;
+  status: string;
+  fix_version: string | null;
+  updated_at: string;
+}
+
+export interface CveDetail {
+  cve: Cve;
+  sources: CveSourceRow[];
+  distros: Distro[];
+  links: { source: string; url: string }[];
+  last_change_at: string;
+  hosts: { id: number; name: string; os_codename: string | null; status: CveStatus; reason: string }[];
+}
+
+export interface ChannelView {
+  kind: string;
+  enabled: boolean;
+  from_env: boolean;
+  config: Record<string, string>;
+  secret_set: boolean;
+  events: string[];
+  summary_time: string | null;
+  timezone: string | null;
+  last_error: string | null;
+  last_ok_at: string | null;
+}
+
+export interface NotificationsResponse {
+  secret_storage: boolean;
+  events: string[];
+  channels: ChannelView[];
+}
+
+export interface Settings {
+  report_retention_days: number;
+  report_retention_default_days: number;
+  report_retention_min_days: number;
+  report_retention_max_days: number;
 }
 
 export interface Feed {

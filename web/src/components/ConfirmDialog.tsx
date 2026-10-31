@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { Button } from "./Controls";
 
 /** Bestätigung per natives <dialog> (Fokusfalle, Escape, Backdrop inklusive). */
@@ -22,6 +22,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
@@ -29,8 +30,8 @@ export function ConfirmDialog({
     if (!open && d.open) d.close();
   }, [open]);
   return (
-    <dialog ref={ref} onCancel={onCancel} aria-labelledby="dlg-title">
-      <h2 id="dlg-title" className="mb-2 text-base font-semibold">
+    <dialog ref={ref} onCancel={onCancel} aria-labelledby={titleId}>
+      <h2 id={titleId} className="mb-2 text-base font-semibold">
         {title}
       </h2>
       <div className="mb-4 text-fg2">{children}</div>

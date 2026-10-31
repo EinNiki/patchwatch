@@ -70,3 +70,92 @@ export function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
       );
   }
 }
+
+export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external";
+
+/** Navigations- und Aktions-Icons: eigene Linienformen, immer mit Text daneben (nie allein). */
+export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 16 16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.5,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+    focusable: false,
+    className: "shrink-0",
+  };
+  switch (name) {
+    case "hosts":
+      return (
+        <svg {...common}>
+          <rect x="2" y="2.5" width="12" height="4.5" rx="1" />
+          <rect x="2" y="9" width="12" height="4.5" rx="1" />
+          <path d="M4.6 4.75v.1M4.6 11.25v.1" />
+        </svg>
+      );
+    case "cves":
+      return (
+        <svg {...common}>
+          <path d="M8 1.8l5.2 2v3.7c0 3-2.2 5.3-5.2 6.7-3-1.4-5.2-3.7-5.2-6.7V3.8z" />
+          <path d="M8 5.4v3M8 10.3v.1" />
+        </svg>
+      );
+    case "agents":
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="2" />
+          <path d="M3.9 4.1a5.8 5.8 0 000 7.8M12.1 4.1a5.8 5.8 0 010 7.8" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg {...common}>
+          <path d="M3.5 11.2h9l-1.1-1.6V7a3.4 3.4 0 00-6.8 0v2.6z" />
+          <path d="M6.6 13.4a1.5 1.5 0 002.8 0" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
+          <circle cx="10" cy="4.5" r="1.5" />
+          <circle cx="6" cy="11.5" r="1.5" />
+        </svg>
+      );
+    case "menu":
+      return (
+        <svg {...common}>
+          <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
+        </svg>
+      );
+    case "close":
+      return (
+        <svg {...common}>
+          <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+        </svg>
+      );
+    case "refresh":
+      return (
+        <svg {...common}>
+          <path d="M13.2 8a5.2 5.2 0 11-1.6-3.7" />
+          <path d="M12.2 1.8v3h-3" />
+        </svg>
+      );
+    case "plus":
+      return (
+        <svg {...common}>
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+      );
+    case "external":
+      return (
+        <svg {...common}>
+          <path d="M6.5 3H3.5v9.5H13V9.5M9 2.5h4.5V7M13.5 2.5L7.5 8.5" />
+        </svg>
+      );
+  }
+}

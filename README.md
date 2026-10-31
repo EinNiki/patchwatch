@@ -26,6 +26,15 @@ Installation. Der Token liegt in `/etc/patchwatch/token` (`root:root 0600`) und 
 systemd-`LoadCredential` an den Dienst `patchwatch` (kein `DynamicUser`) gereicht.
 Konfiguration: `/etc/patchwatch/agent.toml`, Beispiel in `agent/dist/agent.toml.example`.
 
+### Check-in und „Jetzt aktualisieren“
+
+Ein zweiter systemd-Timer (`patchwatch-agent-checkin.timer`, minütlich) startet `patchwatch-agent checkin`. Der Agent
+hält das Intervall aus `agent.toml` selbst ein (`checkin_interval_secs`, Standard 300, 60–86400; `checkin_enabled = false`
+schaltet ihn ab) und fragt `POST /api/v1/agent/checkin`. Die Antwort ist ausschließlich `{"report_requested": true|false}`:
+**keine Befehle, Pfade oder Skripte vom Server, kein offener Port am Host.** Nur bei `true` sendet der Agent einen Report.
+In der UI (Seite „Agents“) fordert „Jetzt aktualisieren“ bzw. „Alle aktualisieren“ einen Report an; ein „Ja“ wird pro
+Anforderung genau einmal ausgegeben (Wiederholung nach 10 Minuten ohne Report), pro Host höchstens eine Anforderung je Minute.
+
 Exit-Codes: `1` Konfiguration, `2` Erfassung, `3` Server nicht erreichbar, `4` Server lehnt ab.
 Fehlermeldungen (ohne Token) landen im journald: `journalctl -u patchwatch-agent`.
 `patchwatch-agent --dry-run` gibt den Report als JSON aus, ohne zu senden.
@@ -146,8 +155,23 @@ Größenlimits und Retry mit Backoff; nach 3 Fehlschlägen in Folge gibt es gena
 Next.js (App Router, TypeScript, Tailwind) in `web/`. Die UI hat **kein eigenes Backend**: Sie spricht nur mit der
 Rust-API unter `/api/v1` (Sitzungs-Cookie + CSRF-Token). Seiten: Host-Übersicht (sortier- und filterbar, URL-Zustand),
 Host-Detail (Kernel, Neustart, Updates, CVE-Bewertung mit Begründung, Verlauf), CVE-Liste mit Watchlist und
-Feed-Zustand je Quelle („veraltet seit …“), Einstellungen (Hosts, Agent-Tokens einmalig anzeigen, erneuern, löschen).
-Die Matrix-Seite folgt; die Navigation hat den Platz („Matrix – bald“) bereits.
+Feed-Zustand je Quelle („veraltet seit …“).
+
+**UI v2** (Seitenleiste: Hosts · CVEs · Agents · Benachrichtigungen · Einstellungen):
+
+- **CVEs**: Spalte „Distributionen“ mit einem Chip je Quelle und Release (Icon + Text + Fix-Version). Standard sind nur
+  Releases, die auf deinen Hosts laufen („+ n weitere Releases“ bzw. „Alle Releases“ blendet den Rest ein). Filter:
+  Distribution sowie „Debian gefixt, Ubuntu offen“ und umgekehrt. `/cves/<ID>` zeigt Quellen-Links, letzte Änderung und
+  betroffene Hosts.
+- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, letztem Report und Check-in; „Jetzt aktualisieren“,
+  „Token erneuern“, Löschen mit Bestätigung. „Agent hinzufügen“ zeigt den Token einmalig und einen Installationsbefehl
+  **ohne** Token (`install.sh` fragt ihn ohne Echo ab).
+- **Benachrichtigungen**: ntfy, Matrix, Gotify, Discord und „Live im Browser“, je mit Zugangsdaten (write-only),
+  Ereignisauswahl und Testnachricht.
+- **Einstellungen**: Passwort ändern, Farbschema, Aufbewahrung der Report-Historie (7–3650 Tage).
+- Änderungen erscheinen live (WebSocket, siehe oben) ohne Neuladen; Meldungen des Browser-Kanals als Toast.
+
+Die Matrix über Hosts und CVEs kommt später als Umschalter „Liste | Matrix“ auf der CVE-Seite.
 
 Design und Barrierefreiheit sind in [`web/DESIGN.md`](web/DESIGN.md) festgelegt (Palette mit gemessenen Kontrasten,
 Schriften, Statusdarstellung: immer Icon + Text + Farbe, nie „grün“ bei fehlender Datenlage). Hell/Dunkel folgt dem System.
@@ -170,6 +194,10 @@ cargo run -p patchwatch-server                             # API auf :8080
 python3 scripts/dev-seed.py http://127.0.0.1:8080 admin    # Beispielhosts und -reports
 cd web && npm ci && npm run dev                            # UI auf :3000, /api wird an :8080 weitergereicht
 ```
+
+Der Live-WebSocket läuft in der Entwicklung direkt gegen die API (Next.js leitet keine Upgrades weiter):
+`NEXT_PUBLIC_PATCHWATCH_LIVE_PORT=8080 npm run dev` und dem Server die UI-Origin erlauben, z. B.
+`PATCHWATCH_ALLOWED_ORIGINS=http://localhost:3000`. In Produktion läuft alles über dieselbe Origin (Caddy).
 
 Tests: `cargo test --workspace` (Integrationstests brauchen `DATABASE_URL` auf eine Postgres-Instanz), im Web
 `npm run lint && npm run typecheck && npm run build`.

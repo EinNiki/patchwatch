@@ -8,7 +8,7 @@ Auf `main` wird nie direkt gepusht.
 
 ```bash
 R=EinNiki/patchwatch
-for m in "Agent" "Server" "CVE-Modul" "Web" "Matrix-UI (später)"; do
+for m in "Agent" "Server" "CVE-Modul" "Web" "UI v2" "Matrix-UI (später)"; do
   gh api repos/$R/milestones -f title="$m" >/dev/null && echo "angelegt: $m"
 done
 ```
@@ -54,6 +54,13 @@ mk Web "feat(web): CVE-Liste, Watchlist, Feed-Zustand" "Proxmox: manuell prüfen
 mk Web "feat(web): Einstellungen und Login" ""
 mk Web "feat(web): Hell/Dunkel, Mobil, Barrierefreiheit" ""
 
+# UI v2
+mk "UI v2" "feat(web): Seitenleiste und Agents-Seite" "Navigation Hosts, CVEs, Agents, Benachrichtigungen, Einstellungen; Host- und Token-Verwaltung auf der Agents-Seite"
+mk "UI v2" "feat: Agent-Check-in und Report auf Abruf" "Zweiter Timer, Server antwortet nur mit report_requested, Rate-Limit je Host"
+mk "UI v2" "feat: Benachrichtigungskanäle in der UI" "ntfy, Matrix, Gotify, Discord, Browser; Geheimnisse verschlüsselt und write-only; SSRF-Schutz"
+mk "UI v2" "feat: Live-Updates per WebSocket" "Nur mit Session und passender Origin, Ereignisse per LISTEN/NOTIFY"
+mk "UI v2" "feat: Distributionen je CVE und Filter" "Chips je Quelle/Release, Filter Debian gefixt/Ubuntu offen, CVE-Detailseite"
+
 # Matrix-UI
 mk "Matrix-UI (später)" "feat(web): Matrix-Ansicht" "Zeilen Hosts, Spalten CVEs, Klick = Begründung und Quellen"
 ```
@@ -69,6 +76,7 @@ Reihenfolge und Basis-Branches:
 | `feat/server` | `feat/agent` | Server-Issues |
 | `feat/cve` | `feat/server` | CVE-Issues |
 | `feat/web` | `feat/cve` | Web-Issues |
+| `feat/ui-v2` | `feat/web` | UI-v2-Issues (Text: `docs/pr-ui-v2.md`) |
 
 ```bash
 gh pr create -R EinNiki/patchwatch --base main --head chore/bootstrap \

@@ -47,7 +47,7 @@ function HostsView() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const hosts = useApi<Host[]>("/hosts", 30_000);
+  const hosts = useApi<Host[]>("/hosts", 30_000, ["report_received", "host_status", "host_cve_status"]);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
 
   const q = params.get("q") ?? "";
@@ -101,7 +101,7 @@ function HostsView() {
 
       {all.length === 0 ? (
         <Empty title="Noch keine Hosts angelegt">
-          Lege unter <Link href="/settings">Einstellungen</Link> einen Host an und installiere den Agent mit dem angezeigten Token.
+          Lege unter <Link href="/agents">Agents</Link> einen Agent an und installiere ihn mit dem einmalig angezeigten Token.
           Nach dem ersten Report erscheint der Host hier.
         </Empty>
       ) : (

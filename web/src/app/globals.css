@@ -230,6 +230,10 @@ code,
   .tbl.stack td.num {
     text-align: left;
   }
+  /* Lange Begründungen und URLs dürfen die gestapelte Tabelle nicht breiter als den Bildschirm machen. */
+  .tbl.stack td {
+    overflow-wrap: anywhere;
+  }
 }
 }
 
@@ -245,6 +249,7 @@ code,
 }
 
 dialog {
+  margin: auto;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--control);

@@ -19,6 +19,7 @@ import { feedSummary } from "@/components/FeedStatus";
 
 const PROXMOX_ADVISORIES = "https://forum.proxmox.com/forums/security-advisories.26/";
 const CVE_PAGE = 200;
+const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -31,10 +32,10 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 
 export default function HostDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const host = useApi<Host>(`/hosts/${id}`, 30_000);
+  const host = useApi<Host>(`/hosts/${id}`, 30_000, LIVE);
   const [cveLimit, setCveLimit] = useState(CVE_PAGE);
-  const cves = useApi<HostCve[]>(`/hosts/${id}/cves?limit=${cveLimit}`, 60_000);
-  const history = useApi<HistoryRow[]>(`/hosts/${id}/history?limit=30`, 60_000);
+  const cves = useApi<HostCve[]>(`/hosts/${id}/cves?limit=${cveLimit}`, 60_000, LIVE);
+  const history = useApi<HistoryRow[]>(`/hosts/${id}/history?limit=30`, 60_000, LIVE);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
 
   if (host.error && !host.data) {

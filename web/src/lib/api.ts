@@ -4,6 +4,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Sekunden bis zum nächsten erlaubten Versuch (Header Retry-After bei 429). */
+    public retryAfter?: number,
   ) {
     super(message);
   }
@@ -36,7 +38,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     if (res.status === 401 && path !== "/auth/login" && typeof window !== "undefined") {
       window.dispatchEvent(new Event("pw:unauthorized"));
     }
-    throw new ApiError(res.status, message);
+    const ra = Number(res.headers.get("retry-after"));
+    throw new ApiError(res.status, message, Number.isFinite(ra) && ra > 0 ? ra : undefined);
   }
   if (res.status === 204 || res.status === 202) return undefined as T;
   return (await res.json()) as T;

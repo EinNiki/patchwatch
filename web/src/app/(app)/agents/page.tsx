@@ -1,0 +1,316 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { api, ApiError } from "@/lib/api";
+import { useApi } from "@/lib/useApi";
+import { useNow } from "@/lib/useNow";
+import type { Host, NewHost } from "@/lib/types";
+import { Button, Field, TextInput } from "@/components/Controls";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CopyButton } from "@/components/CopyButton";
+import { Dialog } from "@/components/Dialog";
+import { Icon, NavIcon } from "@/components/Icons";
+import { PageHeader } from "@/components/PageHeader";
+import { RelTime } from "@/components/RelTime";
+import { Empty, ErrorNote, Loading } from "@/components/States";
+import { Mono } from "@/components/Version";
+
+const NAME_RE = /^[A-Za-z0-9._-]{1,63}$/;
+/// Der Server vergibt eine Anforderung erneut, wenn nach 10 Minuten kein Report kam.
+const NO_ANSWER_MS = 10 * 60 * 1000;
+const RELEASE_BASE = "https://github.com/EinNiki/patchwatch/releases/latest/download";
+const LIVE_TYPES = ["report_received", "report_requested", "checkin", "host_status"] as const;
+
+/** Der Befehl enthält den Token nicht: install.sh fragt ihn ohne Echo ab (oder liest ihn mit --token-file). */
+function installCommand(): string {
+  const origin = typeof window === "undefined" ? "https://patchwatch.example.org" : window.location.origin;
+  return `curl -fsSL -o install.sh ${RELEASE_BASE}/install.sh && sudo sh install.sh --server-url ${origin}`;
+}
+
+function TokenStep({ name, token, onDone }: { name: string; token: string; onDone: () => void }) {
+  const cmd = installCommand();
+  return (
+    <>
+      <p className="mb-3 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
+        Der Token für <strong>{name}</strong> wird nur jetzt angezeigt. Der Server speichert nur einen Hash und kann ihn nicht erneut anzeigen.
+      </p>
+      <p className="mb-1 text-[12px] font-semibold text-fg2">1. Token kopieren</p>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{token}</code>
+        <CopyButton text={token} label="Token kopieren" />
+      </div>
+      <p className="mb-1 text-[12px] font-semibold text-fg2">2. Auf dem Host ausführen</p>
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{cmd}</code>
+        <CopyButton text={cmd} label="Befehl kopieren" />
+      </div>
+      <p className="mb-4 text-[12px] text-fg2">
+        Der Installer prüft die SHA256-Summe des Binarys und fragt den Token ab (Eingabe wird nicht angezeigt). Alternativ liest{" "}
+        <Mono>--token-file /pfad</Mono> ihn aus einer Datei. Der Token steht danach nur in <Mono>/etc/patchwatch/token</Mono> (root, 0600).
+      </p>
+      <div className="flex justify-end">
+        <Button variant="primary" onClick={onDone}>
+          Fertig, Token gesichert
+        </Button>
+      </div>
+    </>
+  );
+}
+
+function AddDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState<NewHost | null>(null);
+
+  function close() {
+    setName("");
+    setError(null);
+    setCreated(null);
+    onClose();
+  }
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    const n = name.trim();
+    if (!NAME_RE.test(n)) {
+      setError("Name: 1–63 Zeichen aus A–Z, a–z, 0–9, Punkt, Unterstrich und Bindestrich.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      setCreated(await api.post<NewHost>("/hosts", { name: n }));
+      onCreated();
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 409 ? "Ein Agent mit diesem Namen existiert bereits." : "Agent konnte nicht angelegt werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} title={created ? `Agent ${created.name} eingerichtet` : "Agent hinzufügen"} onClose={close} dismissible={!created}>
+      {created ? (
+        <TokenStep name={created.name} token={created.token} onDone={close} />
+      ) : (
+        <form onSubmit={(e) => void create(e)}>
+          <Field label="Name des Hosts">
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="web1" maxLength={63} autoComplete="off" autoFocus />
+          </Field>
+          <p className="mb-3 mt-1 text-[12px] text-fg3">Erlaubt sind Buchstaben, Ziffern, Punkt, Unterstrich und Bindestrich. Der Name lässt sich später nicht ändern.</p>
+          {error ? <div className="mb-3"><ErrorNote message={error} /></div> : null}
+          <div className="flex justify-end gap-2">
+            <Button onClick={close}>Abbrechen</Button>
+            <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
+              {busy ? "Lege an …" : "Agent anlegen"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+/** „wartet auf Agent …“ solange die Anforderung offen ist; nach 10 Min. ein Hinweis statt endlosem Warten. */
+function RequestState({ h, now }: { h: Host; now: number }) {
+  if (!h.report_requested_at) return <span className="text-fg3">–</span>;
+  const waitedMs = now - new Date(h.report_requested_at).getTime();
+  if (waitedMs > NO_ANSWER_MS) {
+    return (
+      <span className="inline-flex items-start gap-1.5 text-warn">
+        <Icon name="warn" />
+        <span>
+          Keine Antwort seit <RelTime iso={h.report_requested_at} />. Läuft der Check-in-Timer?
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-fg2" role="status">
+      <Icon name="clock" />
+      wartet auf Agent …<span className="text-fg3"> seit <RelTime iso={h.report_requested_at} /></span>
+    </span>
+  );
+}
+
+export default function AgentsPage() {
+  const hosts = useApi<Host[]>("/hosts", 60_000, LIVE_TYPES);
+  const now = useNow();
+  const [adding, setAdding] = useState(false);
+  const [shown, setShown] = useState<{ name: string; token: string } | null>(null);
+  const [confirm, setConfirm] = useState<{ kind: "rotate" | "delete"; host: Host } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [limited, setLimited] = useState<Record<number, number>>({});
+  const [busyAll, setBusyAll] = useState(false);
+
+  async function request(h: Host) {
+    setError(null);
+    setNote(null);
+    try {
+      await api.post(`/hosts/${h.id}/request-report`);
+      setLimited((l) => ({ ...l, [h.id]: 0 }));
+      await hosts.reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 429) {
+        setLimited((l) => ({ ...l, [h.id]: Date.now() + (e.retryAfter ?? 60) * 1000 }));
+        setNote(`Für ${h.name} wurde gerade erst aktualisiert. Erneut möglich in ${e.retryAfter ?? 60} Sek.`);
+      } else {
+        setError(`Aktualisierung von ${h.name} konnte nicht angefordert werden.`);
+      }
+    }
+  }
+
+  async function requestAll() {
+    setError(null);
+    setNote(null);
+    setBusyAll(true);
+    try {
+      const r = await api.post<{ requested: number; skipped: number }>("/hosts/request-report");
+      setNote(
+        r.requested === 0
+          ? "Kein Agent angefragt: alle wurden in der letzten Minute schon angefragt."
+          : `${r.requested} ${r.requested === 1 ? "Agent" : "Agents"} angefragt${r.skipped > 0 ? `, ${r.skipped} übersprungen (Wartezeit 1 Min.)` : ""}. Die Reports treffen beim nächsten Check-in ein.`,
+      );
+      await hosts.reload();
+    } catch {
+      setError("Aktualisierung konnte nicht angefordert werden.");
+    } finally {
+      setBusyAll(false);
+    }
+  }
+
+  async function runConfirmed() {
+    if (!confirm) return;
+    const { kind, host } = confirm;
+    setConfirm(null);
+    setError(null);
+    try {
+      if (kind === "rotate") {
+        const r = await api.post<{ id: number; token: string }>(`/hosts/${host.id}/rotate-token`);
+        setShown({ name: host.name, token: r.token });
+      } else {
+        await api.del(`/hosts/${host.id}`);
+      }
+      await hosts.reload();
+    } catch {
+      setError(kind === "rotate" ? `Token von ${host.name} konnte nicht erneuert werden.` : `${host.name} konnte nicht gelöscht werden.`);
+    }
+  }
+
+  const list = hosts.data;
+  return (
+    <>
+      <PageHeader title="Agents" count={list ? `${list.length} ${list.length === 1 ? "Agent" : "Agents"}` : undefined}>
+        <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0}>
+          <NavIcon name="refresh" />
+          Alle aktualisieren
+        </Button>
+        <Button variant="primary" onClick={() => setAdding(true)}>
+          <NavIcon name="plus" />
+          Agent hinzufügen
+        </Button>
+      </PageHeader>
+
+      <p role="status" className="mb-3 min-h-5 text-fg2">
+        {note}
+      </p>
+      {error ? <div className="mb-3"><ErrorNote message={error} /></div> : null}
+      {hosts.error && !list ? (
+        <div className="mb-3">
+          <ErrorNote message={hosts.error} />
+          <p className="mt-2"><Button onClick={() => void hosts.reload()}>Erneut versuchen</Button></p>
+        </div>
+      ) : null}
+
+      {!list ? (
+        hosts.error ? null : <Loading what="Agents" />
+      ) : list.length === 0 ? (
+        <Empty title="Noch kein Agent eingerichtet">
+          Lege einen Agent an, kopiere den einmalig angezeigten Token und führe den Installationsbefehl auf dem Host aus.
+          <div className="mt-3">
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              <NavIcon name="plus" />
+              Agent hinzufügen
+            </Button>
+          </div>
+        </Empty>
+      ) : (
+        <div className="overflow-x-auto border border-line">
+          <table className="tbl stack">
+            <caption>Agents mit Version, letztem Report und Check-in</caption>
+            <thead>
+              <tr>
+                <th scope="col"><span className="th-pad">Name</span></th>
+                <th scope="col"><span className="th-pad">Hostname laut Agent</span></th>
+                <th scope="col"><span className="th-pad">Distribution</span></th>
+                <th scope="col"><span className="th-pad">Agent-Version</span></th>
+                <th scope="col"><span className="th-pad">Letzter Report</span></th>
+                <th scope="col"><span className="th-pad">Letzter Check-in</span></th>
+                <th scope="col"><span className="th-pad">Aktualisierung</span></th>
+                <th scope="col"><span className="th-pad">Aktionen</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((h) => {
+                const waiting = h.report_requested_at !== null;
+                const coolingDown = (limited[h.id] ?? 0) > now;
+                return (
+                  <tr key={h.id}>
+                    <td data-label="Name">
+                      <Link href={`/hosts/${h.id}`} className="whitespace-nowrap font-semibold">
+                        {h.name}
+                      </Link>
+                    </td>
+                    <td data-label="Hostname">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch kein Report</span>}</td>
+                    <td data-label="Distribution">{h.pretty_name ?? <span className="text-fg3">–</span>}</td>
+                    <td data-label="Agent-Version">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
+                    <td data-label="Letzter Report"><RelTime iso={h.last_report_at} /></td>
+                    <td data-label="Letzter Check-in"><RelTime iso={h.last_checkin_at} /></td>
+                    <td data-label="Aktualisierung" className="max-w-[18rem]"><RequestState h={h} now={now} /></td>
+                    <td data-label="Aktionen">
+                      <div className="flex flex-wrap gap-2">
+                        <Button onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name} jetzt aktualisieren`}>
+                          Jetzt aktualisieren
+                        </Button>
+                        <Button onClick={() => setConfirm({ kind: "rotate", host: h })} aria-label={`Token erneuern für ${h.name}`}>
+                          Token erneuern
+                        </Button>
+                        <Button variant="danger" onClick={() => setConfirm({ kind: "delete", host: h })} aria-label={`Agent ${h.name} löschen`}>
+                          Löschen
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-4 max-w-prose text-[12px] text-fg3">
+        „Jetzt aktualisieren“ bittet den Agent, beim nächsten Check-in (standardmäßig alle 5 Minuten) einen Report zu senden. Der Server startet nichts
+        auf dem Host: Der Agent fragt nur an und bekommt „Report senden: ja/nein“ zurück.
+      </p>
+
+      <AddDialog open={adding} onClose={() => setAdding(false)} onCreated={() => void hosts.reload()} />
+      <Dialog open={shown !== null} title={`Neuer Token für ${shown?.name ?? ""}`} onClose={() => setShown(null)} dismissible={false}>
+        {shown ? <TokenStep name={shown.name} token={shown.token} onDone={() => setShown(null)} /> : null}
+      </Dialog>
+      <ConfirmDialog
+        open={confirm !== null}
+        danger
+        title={confirm?.kind === "delete" ? `Agent ${confirm.host.name} löschen?` : `Token von ${confirm?.host.name} erneuern?`}
+        confirmLabel={confirm?.kind === "delete" ? `${confirm.host.name} löschen` : "Token erneuern"}
+        onConfirm={() => void runConfirmed()}
+        onCancel={() => setConfirm(null)}
+      >
+        {confirm?.kind === "delete"
+          ? "Der Host mit seinem Verlauf und allen CVE-Bewertungen wird entfernt. Das lässt sich nicht rückgängig machen."
+          : "Der bisherige Token wird sofort ungültig. Der Agent muss mit dem neuen Token neu eingerichtet werden."}
+      </ConfirmDialog>
+    </>
+  );
+}

@@ -6,13 +6,15 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
-import type { Cve, Feed } from "@/lib/types";
+import type { CveDetail, CveListItem, Feed } from "@/lib/types";
 import type { StatusInfo } from "@/lib/status";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { Button, Field, TextInput } from "@/components/Controls";
+import { DistroChip } from "@/components/DistroChip";
+import { PageHeader } from "@/components/PageHeader";
 
 const PAGE = 100;
 const CVE_RE = /^CVE-\d{4}-\d{4,7}$/;
@@ -121,6 +123,10 @@ function CveView() {
   const params = useSearchParams();
   const urlQ = params.get("q") ?? "";
   const onlyWatch = params.get("watchlist") === "1";
+  const allReleases = params.get("releases") === "all";
+  const distro = ["debian", "ubuntu"].includes(params.get("distro") ?? "") ? (params.get("distro") as string) : "";
+  const splitRaw = params.get("split") ?? "";
+  const split = ["debian_fixed_ubuntu_open", "ubuntu_fixed_debian_open"].includes(splitRaw) ? splitRaw : "";
   const [qInput, setQInput] = useState(urlQ);
   const q = useDebounced(qInput, 300);
   const [limit, setLimit] = useState(PAGE);
@@ -132,16 +138,22 @@ function CveView() {
   const qs = new URLSearchParams({ limit: String(limit) });
   if (onlyWatch) qs.set("watchlist", "true");
   if (q.trim()) qs.set("q", q.trim());
-  const cves = useApi<Cve[]>(`/cves?${qs}`, 60_000);
+  if (allReleases) qs.set("releases", "all");
+  if (distro) qs.set("distro", distro);
+  if (split) qs.set("split", split);
+  const cves = useApi<CveListItem[]>(`/cves?${qs}`, 60_000, ["host_cve_status", "report_received"]);
+  const filtered = onlyWatch || q.trim() !== "" || allReleases || distro !== "" || split !== "";
 
-  function setWatchFilter(on: boolean) {
+  /** Filter stehen in der URL (teilbar, Zurück-Taste funktioniert). */
+  function setParam(key: string, value: string | null) {
     const p = new URLSearchParams(params.toString());
-    if (on) p.set("watchlist", "1");
-    else p.delete("watchlist");
+    if (value) p.set(key, value);
+    else p.delete(key);
     router.replace(p.toString() ? `${pathname}?${p}` : pathname, { scroll: false });
   }
+  const setWatchFilter = (on: boolean) => setParam("watchlist", on ? "1" : null);
 
-  async function toggle(c: Cve) {
+  async function toggle(c: CveListItem) {
     setFormError(null);
     try {
       if (c.watched) await api.del(`/watchlist/${c.id}`);
@@ -175,7 +187,7 @@ function CveView() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">CVEs</h1>
+      <PageHeader title="CVEs" count={cves.data ? `${cves.data.length}${cves.data.length >= limit ? "+" : ""} angezeigt` : undefined} />
       <FeedPanel />
 
       <section aria-labelledby="wl-h">
@@ -200,19 +212,49 @@ function CveView() {
             Suche
             <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-64 max-w-full font-normal" />
           </label>
+          <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+            Distribution
+            <select value={distro} onChange={(e) => setParam("distro", e.target.value || null)} className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-[13px] font-normal text-fg max-md:min-h-11">
+              <option value="">Alle</option>
+              <option value="debian">Debian</option>
+              <option value="ubuntu">Ubuntu</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[12px] font-semibold text-fg2">
+            Stand der Fixes
+            <select value={split} onChange={(e) => setParam("split", e.target.value || null)} className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-[13px] font-normal text-fg max-md:min-h-11">
+              <option value="">Alle</option>
+              <option value="debian_fixed_ubuntu_open">Debian gefixt, Ubuntu offen</option>
+              <option value="ubuntu_fixed_debian_open">Ubuntu gefixt, Debian offen</option>
+            </select>
+          </label>
           <label className="flex items-center gap-2 text-[13px]">
             <input type="checkbox" checked={onlyWatch} onChange={(e) => setWatchFilter(e.target.checked)} className="size-4 accent-[var(--accent)]" />
             nur Watchlist
           </label>
+          <label className="flex items-center gap-2 text-[13px]">
+            <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-[var(--accent)]" />
+            Alle Releases
+          </label>
+          {filtered ? (
+            <Button
+              onClick={() => {
+                setQInput("");
+                router.replace(pathname, { scroll: false });
+              }}
+            >
+              Filter zurücksetzen
+            </Button>
+          ) : null}
         </div>
 
         {cves.error && !cves.data ? <ErrorNote message={cves.error} /> : null}
         {!cves.data ? (
           <Loading what="CVEs" />
         ) : cves.data.length === 0 ? (
-          <Empty title={onlyWatch || q ? "Keine passenden CVEs" : "Noch keine CVE-Daten"}>
-            {onlyWatch || q ? (
-              "Ändere die Suche oder den Filter."
+          <Empty title={filtered ? "Keine passenden CVEs" : "Noch keine CVE-Daten"}>
+            {filtered ? (
+              "Ändere die Suche oder die Filter. Ohne „Alle Releases“ zählen nur Releases, die auf deinen Hosts laufen."
             ) : (
               <>
                 Sobald ein Feed erfolgreich abgerufen wurde, erscheinen die CVEs hier. Prüfe den Feed-Zustand oben oder rufe die Feeds mit „Jetzt
@@ -224,11 +266,12 @@ function CveView() {
           <>
             <div className="overflow-x-auto border border-line">
               <table className="tbl stack">
-                <caption>CVEs mit Priorität, betroffenen Hosts und Watchlist-Status</caption>
+                <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
                   <tr>
                     <th scope="col"><span className="th-pad">CVE</span></th>
                     <th scope="col"><span className="th-pad">Beschreibung</span></th>
+                    <th scope="col"><span className="th-pad">Distributionen</span></th>
                     <th scope="col"><span className="th-pad">Hosts</span></th>
                     <th scope="col"><span className="th-pad">Aktualisiert</span></th>
                     <th scope="col"><span className="th-pad">Watchlist</span></th>
@@ -238,12 +281,17 @@ function CveView() {
                   {cves.data.map((c) => (
                     <tr key={c.id} className={c.watched ? "bg-accent-soft" : ""}>
                       <td data-label="CVE">
-                        <Mono className="font-medium">{c.id}</Mono>
+                        <Link href={`/cves/${c.id}`} className="whitespace-nowrap font-mono font-medium">
+                          {c.id}
+                        </Link>
                         {c.priority ? <div className="text-[12px] text-fg3">Priorität {c.priority}</div> : null}
                       </td>
                       <td data-label="Beschreibung" className="max-w-[40rem]">
                         {c.description ? <span className="line-clamp-2">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
                         {c.note ? <div className="text-[12px] text-accent">Notiz: {c.note}</div> : null}
+                      </td>
+                      <td data-label="Distributionen" className="min-w-[14rem]">
+                        <Distros c={c} allReleases={allReleases} />
                       </td>
                       <td data-label="Hosts">
                         <HostCounts c={c} />
@@ -269,14 +317,38 @@ function CveView() {
           </>
         )}
         <p className="mt-4 text-[12px] text-fg3">
-          Details zur Bewertung je Host stehen in der Host-Ansicht (<Link href="/">Hosts</Link>). Eine Matrix über Hosts und CVEs folgt.
+          Details zur Bewertung je Host stehen in der Host-Ansicht (<Link href="/">Hosts</Link>). Gestrichelte Chips zeigen Releases, die auf keinem deiner Hosts laufen.
         </p>
       </section>
     </>
   );
 }
 
-function HostCounts({ c }: { c: Cve }) {
+/** Chips der Releases, die auf Hosts laufen; weitere Releases lädt „+ n weitere“ bei Bedarf nach. */
+function Distros({ c, allReleases }: { c: CveListItem; allReleases: boolean }) {
+  const [more, setMore] = useState(false);
+  const detail = useApi<CveDetail>(more ? `/cves/${c.id}` : null);
+  const others = detail.data?.distros.filter((d) => !d.mine) ?? [];
+  if (c.distros.length === 0 && c.hidden_releases === 0) return <span className="text-fg3">keine Quellendaten</span>;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {c.distros.length === 0 ? <span className="text-fg3">Kein Release auf deinen Hosts</span> : null}
+      {c.distros.map((d) => (
+        <DistroChip key={`${d.source}/${d.release}`} d={d} />
+      ))}
+      {more ? others.map((d) => <DistroChip key={`${d.source}/${d.release}`} d={d} />) : null}
+      {!allReleases && c.hidden_releases > 0 ? (
+        <Button aria-expanded={more} onClick={() => setMore(!more)} className="!min-h-7 !px-2 !text-[12px] font-normal">
+          {more ? "Weniger anzeigen" : `+ ${c.hidden_releases} weitere Releases`}
+          <span className="sr-only"> für {c.id}</span>
+        </Button>
+      ) : null}
+      {more && detail.error ? <span className="text-crit">{detail.error}</span> : null}
+    </div>
+  );
+}
+
+function HostCounts({ c }: { c: CveListItem }) {
   const parts = [
     c.hosts_vulnerable > 0 && <span key="v" className="font-semibold text-crit">{c.hosts_vulnerable} verwundbar</span>,
     c.hosts_fix_pending > 0 && <span key="p" className="text-warn">{c.hosts_fix_pending} Fix angekündigt</span>,
