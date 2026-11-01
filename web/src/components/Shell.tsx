@@ -313,7 +313,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      <main id="main" tabIndex={-1} className="md:pl-(--rail-w) lg:pl-(--sidebar-w)">
+      <main id="main" tabIndex={-1} inert={open} className="md:pl-(--rail-w) lg:pl-(--sidebar-w)">
         {/* Volle Breite: Tabellen und Listen haben keine Maximalbreite, nur Formulare begrenzen sich selbst. */}
         {/* Seitenwechsel: neuer Inhalt ist sofort da und blendet in 150 ms ein (nur Opacity). Eine View Transition
             hielt die Aktualisierung bis zum Schnappschuss zurück und kostete 50-100 ms je Klick (docs/perf.md). */}

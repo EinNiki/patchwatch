@@ -92,7 +92,7 @@ function CveView() {
   // Je Zeile ein eigener Timer; der Server speichert sofort, nur das Ausblenden ist verzögert.
   const [hiding, setHiding] = useState<ReadonlyMap<string, "wait" | "fade">>(new Map());
   const [announce, setAnnounce] = useState("");
-  const pending = useRef(new Map<string, { path: string; timers: ReturnType<typeof setTimeout>[] }>());
+  const pending = useRef(new Map<string, { path: string; timers: ReturnType<typeof setTimeout>[]; item?: CveListItem; index: number }>());
 
   function setHideState(id: string, state: "wait" | "fade" | null) {
     setHiding((m) => {
@@ -117,8 +117,8 @@ function CveView() {
     pending.current.delete(id);
     setHideState(id, null);
   }
-  function startHide(id: string) {
-    const entry = { path: listPath, timers: [] as ReturnType<typeof setTimeout>[] };
+  function startHide(id: string, item: CveListItem) {
+    const entry = { path: listPath, timers: [] as ReturnType<typeof setTimeout>[], item, index: cves.data?.findIndex((x) => x.id === id) ?? 0 };
     pending.current.set(id, entry);
     setHideState(id, "wait");
     entry.timers.push(
@@ -128,6 +128,18 @@ function CveView() {
       }, HIDE_WAIT_MS),
     );
   }
+
+  // Lädt ein Live-Ereignis die Liste neu, während eine Zeile noch mit "Rückgängig" sichtbar sein soll, setzen wir sie
+  // an ihre Stelle zurück (der Server liefert sie nach dem Entfernen nicht mehr).
+  useEffect(() => {
+    const list = cves.data;
+    if (!list || cves.stale) return;
+    const missing = [...pending.current.entries()].filter(([id, p]) => p.path === listPath && p.item && !list.some((x) => x.id === id));
+    if (missing.length === 0) return;
+    const next = [...list];
+    for (const [, p] of missing) next.splice(Math.min(Math.max(p.index, 0), next.length), 0, p.item!);
+    cacheSet(listPath, next);
+  }, [cves.data, cves.stale, listPath]);
 
   // Ansicht wechselt (Filter geändert) oder Seite wird verlassen: ausstehendes Ausblenden sofort abschließen.
   useEffect(() => {
@@ -182,7 +194,7 @@ function CveView() {
     cancelHide(c.id);
     cves.mutate((list) => list.map((x) => (x.id === c.id ? { ...x, watched: want } : x)));
     if (onlyWatch && !want) {
-      startHide(c.id);
+      startHide(c.id, { ...c, watched: false });
       setAnnounce(`${c.id} von der Watchlist entfernt, Rückgängig möglich`);
     } else if (want && hadHide) {
       setAnnounce(`${c.id} bleibt auf der Watchlist`);
