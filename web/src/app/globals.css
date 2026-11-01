@@ -148,6 +148,95 @@ code,
   opacity: 0;
 }
 
+/* Liste wird neu geladen (Filter): bisherige Zeilen bleiben stehen und treten leicht zurück; nur Opacity. */
+.updatable {
+  transition: opacity var(--dur-1) var(--ease-out);
+}
+.updatable[data-updating] {
+  opacity: 0.55;
+}
+
+/* Tabellen: Zeilen blenden beim Aufbau ein (Skeleton -> Inhalt, Sortierung/Filter über wechselnden key). Nur Opacity. */
+.tbl tbody {
+  animation: rows-in var(--dur-1) var(--ease-out);
+}
+@keyframes rows-in {
+  from {
+    opacity: 0.35;
+  }
+}
+
+/* Stern: kurzer Puls beim Umschalten (data-pop setzt die Zeile nur für diesen Moment). */
+.star-btn svg {
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.star-btn:active svg {
+  transform: scale(0.82);
+}
+.star-btn[data-pop] svg {
+  animation: star-pop var(--dur-2) var(--ease-out);
+}
+@keyframes star-pop {
+  40% {
+    transform: scale(1.25);
+  }
+}
+
+/* Checkbox: eigene Darstellung, damit Rahmen, Füllung und Haken weich wechseln (Farbe und Skalierung, keine Layout-Werte). */
+input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-content: center;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border: 1px solid var(--control);
+  border-radius: 3px;
+  background: var(--sunk);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+input[type="checkbox"]::after {
+  content: "";
+  width: 0.55rem;
+  height: 0.3rem;
+  margin-top: -0.1rem;
+  border-left: 2px solid var(--bg);
+  border-bottom: 2px solid var(--bg);
+  transform: rotate(-45deg) scale(0);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+@media (max-width: 767px) {
+  input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}
+
+/* Auf- und Zuklappen (details): Inhalt blendet ein und rutscht 4 px nach, ohne die Höhe zu animieren. */
+details[open] > :not(summary) {
+  animation: details-in var(--dur-2) var(--ease-out);
+}
+@keyframes details-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 /* Stern-Spalte: schmale Zelle, der Stern ist zugleich der Schalter. */
 .tbl .cell-star {
   width: 2.5rem;
@@ -332,6 +421,17 @@ code,
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Keine Bewegung, nur ein kurzes Ein- und Ausblenden. */
+  .page-in,
+  .tbl tbody,
+  .updatable {
+    animation-duration: 80ms !important;
+    transition-duration: 80ms !important;
+  }
+  details[open] > :not(summary),
+  .star-btn[data-pop] svg {
+    animation: none !important;
+  }
 }
 
 /* Dialog: Ein- und Ausblenden rein in CSS (@starting-style + allow-discrete). Unter 768 px als Bottom-Sheet. */
@@ -407,18 +507,14 @@ summary {
 }
 }
 
-/* Seitenwechsel: leiser Crossfade des Inhaltsbereichs (React <ViewTransition default="page">, kein experimentelles Flag). */
+/* Seitenwechsel: neuer Inhalt blendet ein (Opacity, kein Warten auf einen Schnappschuss). Bei reduzierter Bewegung kurz und ohne Verschiebung. */
 @layer components {
-  ::view-transition-old(.page),
-  ::view-transition-new(.page) {
-    animation-duration: 150ms;
-    animation-timing-function: var(--ease-out);
+  .page-in {
+    animation: page-in var(--dur-2) var(--ease-out);
   }
-  @media (prefers-reduced-motion: reduce) {
-    ::view-transition-group(*),
-    ::view-transition-old(*),
-    ::view-transition-new(*) {
-      animation: none !important;
+  @keyframes page-in {
+    from {
+      opacity: 0;
     }
   }
 }

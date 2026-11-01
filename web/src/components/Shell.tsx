@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, ViewTransition } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/lib/useApi";
@@ -315,9 +315,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
       <main id="main" tabIndex={-1} className="md:pl-(--rail-w) lg:pl-(--sidebar-w)">
         {/* Volle Breite: Tabellen und Listen haben keine Maximalbreite, nur Formulare begrenzen sich selbst. */}
-        <ViewTransition default="page">
-          <div className="min-w-0 px-4 py-4 md:px-6 md:py-5">{children}</div>
-        </ViewTransition>
+        {/* Seitenwechsel: neuer Inhalt ist sofort da und blendet in 150 ms ein (nur Opacity). Eine View Transition
+            hielt die Aktualisierung bis zum Schnappschuss zurück und kostete 50-100 ms je Klick (docs/perf.md). */}
+        <div key={pathname} className="page-in min-w-0 px-4 py-4 md:px-6 md:py-5">
+          {children}
+        </div>
       </main>
     </>
   );
