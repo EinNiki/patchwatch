@@ -184,6 +184,22 @@ Caddy-Proxy (`/api` → Server, alles andere → Web): `PATCHWATCH_DOMAIN` in `.
 `docker compose --profile proxy up -d`. Hinter einem eigenen Proxy genügt: `/api/*` an `127.0.0.1:8080`, der Rest
 an `127.0.0.1:3000`, und dem Server `PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
 
+### UI als Produktionsbuild starten (schnell)
+
+`npm run dev` (`next dev`) ist für die Entwicklung gedacht und deutlich träger: ungebündelte Module (~800 KB statt ~175 KB
+JavaScript je Seite), Kompilierung beim ersten Aufruf, Entwicklungs-Overlay. Zum Ausprobieren und Messen der echten
+Geschwindigkeit die UI als Produktionsbuild starten:
+
+```sh
+cd web
+npm run build
+npm run start:prod        # http://0.0.0.0:3100, leitet /api (inkl. WebSocket) an PATCHWATCH_API_URL (Standard http://127.0.0.1:8080)
+PORT=3200 PATCHWATCH_API_URL=http://127.0.0.1:8080 npm run start:prod
+```
+
+`start:prod` ersetzt lokal den Reverse-Proxy (komprimiert Text, reicht `/api` und den Live-WebSocket durch); im Betrieb
+übernimmt das Caddy (`encode zstd gzip`) bzw. das Docker-Image. Messwerte und Messskripte: [`docs/perf.md`](docs/perf.md).
+
 ### Entwicklung
 
 ```sh
