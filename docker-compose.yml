@@ -62,17 +62,17 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
-  # TLS-Reverse-Proxy (optional): docker compose --profile proxy up -d
+  # TLS-Reverse-Proxy: leitet /api an den Server, alles andere an die Web-UI (die UI hat kein eigenes /api).
+  # Läuft schon ein eigener Proxy, nur die Dienste starten: docker compose up -d postgres server web
   proxy:
-    profiles: [proxy]
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on: [server, web]
     environment:
       PATCHWATCH_DOMAIN: ${PATCHWATCH_DOMAIN:-localhost}
     ports:
-      - "80:80"
-      - "443:443"
+      - "${PATCHWATCH_HTTP_PORT:-80}:80"
+      - "${PATCHWATCH_HTTPS_PORT:-443}:443"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -179,10 +179,10 @@ Mit axe-core gegen Hell, Dunkel und Mobil geprüft: keine Verstöße.
 
 ### Betrieb mit TLS
 
-`docker compose up -d` startet Postgres, Server und Web (nur auf `127.0.0.1`). Für TLS gibt es einen optionalen
-Caddy-Proxy (`/api` → Server, alles andere → Web): `PATCHWATCH_DOMAIN` in `.env` setzen und
-`docker compose --profile proxy up -d`. Hinter einem eigenen Proxy genügt: `/api/*` an `127.0.0.1:8080`, der Rest
-an `127.0.0.1:3000`, und dem Server `PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
+`docker compose up -d` startet Postgres, Server, Web und den Caddy-Proxy (`/api` → Server, alles andere → Web;
+`PATCHWATCH_DOMAIN` in `.env` setzen, sonst `localhost`). Hinter einem eigenen Proxy startet
+`docker compose up -d postgres server web`: `/api/*` an `127.0.0.1:8080`, der Rest an `127.0.0.1:3000`, und dem Server
+`PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
 
 ### UI als Produktionsbuild starten (schnell)
 
