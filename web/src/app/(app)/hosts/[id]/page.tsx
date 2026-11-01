@@ -275,8 +275,7 @@ function CveSection({
       ) : (
         <>
           <p className="mb-2 text-sm text-fg2">
-            „Manuelle Prüfung“: Ist der Status <strong>unbekannt</strong>, kann patchwatch nicht entscheiden, ob der Host betroffen ist (z. B. fehlen Feed-Daten zum Kernel, typisch bei Proxmox). Prüfst du das selbst, setze das Häkchen. Es gilt nur für den aktuellen Kernel und verfällt nach einem Kernel-Wechsel; der Status bleibt „unbekannt“.
-          </p>
+            „Manuelle Prüfung“: Setze das Häkchen, wenn du diese CVE für diesen Host selbst geprüft hast. Es merkt sich, wer wann geprüft hat, und gilt nur für den aktuellen Kernel; nach einem Kernel-Wechsel verfällt es. Der Status ändert sich dadurch nicht. Besonders nützlich bei „unbekannt“ (z. B. Proxmox, wo Feed-Daten zum Kernel fehlen).</p>
           <div className="max-lg:overflow-x-auto">
             <table className="tbl stack">
               <caption>CVE-Bewertungen dieses Hosts mit Status, Begründung und manueller Prüfung</caption>
@@ -338,8 +337,7 @@ function CveSection({
                       </details>
                     </td>
                     <td data-label="Prüfung">
-                      {c.status === "unknown" ? (
-                        <label className="flex min-h-8 items-start gap-2 py-1 max-md:min-h-11 max-md:items-center">
+                                              <label className="flex min-h-8 items-start gap-2 py-1 max-md:min-h-11 max-md:items-center">
                           <input
                             type="checkbox"
                             className="mt-0.5 size-4 accent-[var(--accent)] max-md:mt-0 max-md:size-5"
@@ -359,9 +357,7 @@ function CveSection({
                             )}
                           </span>
                         </label>
-                      ) : (
-                        <span className="text-fg3">–</span>
-                      )}
+                      
                     </td>
                   </tr>
                 ))}
