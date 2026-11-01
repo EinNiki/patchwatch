@@ -50,6 +50,39 @@ impl ReportSchedule {
         }
     }
 
+    /// Nächster Zeitpunkt (> `now`, bei überfälligem Lauf `now`), zu dem Reports angefordert werden; `None` bei `Off`
+    /// (und beim Intervall, solange noch kein Lauf gezählt wurde).
+    pub fn next_due(
+        &self,
+        last_run: Option<DateTime<Utc>>,
+        now: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Off => None,
+            Self::Interval { every_hours } => {
+                Some((last_run? + Duration::hours(*every_hours)).max(now))
+            }
+            Self::Daily { at, tz } => {
+                if self.last_due(last_run, now).is_some() {
+                    return Some(now); // Lauf ist überfällig, der Scheduler löst ihn innerhalb einer Minute aus
+                }
+                let (t, tz) = (parse_hhmm(at).ok()?, parse_tz(tz).ok()?);
+                let today = now.with_timezone(&tz).date_naive();
+                [today, today.succ_opt()?, today.succ_opt()?.succ_opt()?]
+                    .into_iter()
+                    .find_map(|d| {
+                        let local = match tz.from_local_datetime(&d.and_time(t)) {
+                            LocalResult::Single(x) => x,
+                            LocalResult::Ambiguous(first, _) => first,
+                            LocalResult::None => return None,
+                        };
+                        let utc = local.with_timezone(&Utc);
+                        (utc > now).then_some(utc)
+                    })
+            }
+        }
+    }
+
     /// Letzter Zeitpunkt (<= `now`), zu dem eine Anforderung fällig war; `None` bei `Off`.
     /// Fällig ist der Plan, wenn der letzte Lauf davor liegt.
     pub fn last_due(
@@ -219,6 +252,7 @@ pub fn report_schedule_json(
     let mut v = serde_json::to_value(s).unwrap_or_else(|_| json!({ "mode": "off" }));
     v["last_run"] = json!(last_run);
     v["due_now"] = json!(s.last_due(last_run, now).is_some());
+    v["next_run"] = json!(s.next_due(last_run, now));
     v
 }
 
@@ -228,6 +262,39 @@ mod tests {
 
     fn at(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn next_due_for_interval_and_daily() {
+        let now = at("2026-11-01T10:00:00Z");
+        let iv = ReportSchedule::Interval { every_hours: 6 };
+        assert_eq!(
+            iv.next_due(Some(at("2026-11-01T08:00:00Z")), now),
+            Some(at("2026-11-01T14:00:00Z"))
+        );
+        // Überfällig: sofort.
+        assert_eq!(
+            iv.next_due(Some(at("2026-11-01T01:00:00Z")), now),
+            Some(now)
+        );
+        assert_eq!(iv.next_due(None, now), None);
+        assert_eq!(ReportSchedule::Off.next_due(None, now), None);
+        let daily = ReportSchedule::Daily {
+            at: "04:00".into(),
+            tz: "UTC".into(),
+        };
+        assert_eq!(
+            daily.next_due(Some(at("2026-11-01T04:00:00Z")), now),
+            Some(at("2026-11-02T04:00:00Z"))
+        );
+        let later = ReportSchedule::Daily {
+            at: "23:30".into(),
+            tz: "UTC".into(),
+        };
+        assert_eq!(
+            later.next_due(Some(at("2026-10-31T23:30:00Z")), now),
+            Some(at("2026-11-01T23:30:00Z"))
+        );
     }
 
     #[test]

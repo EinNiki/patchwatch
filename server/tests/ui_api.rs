@@ -228,15 +228,17 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
         "ungünstigster Status über beide Pakete"
     );
     assert_eq!(ubuntu["packages"], 2);
-    let c = mine
+    // CVEs, die nur Releases ohne Host betreffen, fehlen in der Standardansicht, erscheinen aber mit „Alle Releases“.
+    assert!(
+        !ids(&mine).contains(&"CVE-2024-0003".to_owned()),
+        "CVE ohne Bezug zu deinen Hosts ist ausgeblendet"
+    );
+    assert!(all
         .json
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| c["id"] == "CVE-2024-0003")
-        .unwrap();
-    assert!(c["distros"].as_array().unwrap().is_empty());
-    assert_eq!(c["hidden_releases"], 1);
+        .any(|c| c["id"] == "CVE-2024-0003"));
 
     let (r, _) = call(
         &app,

@@ -173,7 +173,7 @@ export interface Settings {
   feeds: { source: string; label: string; interval_minutes: number; default_minutes: number }[];
   feed_interval_min_minutes: number;
   feed_interval_max_minutes: number;
-  report_schedule: ReportSchedule & { last_run: string | null; due_now: boolean };
+  report_schedule: ReportSchedule & { last_run: string | null; due_now: boolean; next_run: string | null };
   report_every_hours_min: number;
   report_every_hours_max: number;
   checkin_interval_hint: string;

@@ -331,6 +331,15 @@ pub async fn list(
     let exists = |source: &str, statuses: &str| {
         format!("EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = '{source}'{statuses} AND {in_scope})")
     };
+    // Wer gezielt sucht, findet jede CVE; die Einschränkung gilt nur für die ungefilterte Liste.
+    if !all_releases && pattern.is_none() {
+        // Standardansicht: nur CVEs, die zu deinen Hosts gehören (Eintrag für ein laufendes Release, das nicht
+        // „nicht betroffen“ ist, oder eine Bewertung eines Hosts) sowie beobachtete CVEs.
+        conds.push(format!(
+            "(w.cve_id IS NOT NULL OR EXISTS (SELECT 1 FROM host_cve_status x WHERE x.cve_id = c.id) \
+             OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.status <> 'not_affected' AND {in_scope}))"
+        ));
+    }
     if let Some(d) = distro {
         conds.push(exists(d, ""));
     }

@@ -380,7 +380,7 @@ function CveView() {
         ) : cves.data.length === 0 ? (
           <Empty title={filtered ? "Keine passenden CVEs" : "Noch keine CVE-Daten"}>
             {filtered ? (
-              "Ändere die Suche oder die Filter. Ohne „Alle Releases“ zählen nur Releases, die auf deinen Hosts laufen."
+              "Ändere die Suche oder die Filter. Ohne „Alle Releases“ erscheinen nur CVEs, die deine Hosts betreffen (und die Watchlist)."
             ) : (
               <>
                 Sobald ein Feed erfolgreich abgerufen wurde, erscheinen die CVEs hier. Prüfe den Feed-Zustand oben oder rufe die Feeds mit „Jetzt

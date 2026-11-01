@@ -1002,18 +1002,39 @@ async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
             .map(|c| c["id"].as_str().unwrap().to_owned())
             .collect()
     };
-    let latest = call(&app, Method::GET, "/api/v1/cves", &cookie, None).await;
+    let latest = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?releases=all",
+        &cookie,
+        None,
+    )
+    .await;
     assert_eq!(
         ids(&latest),
         ["CVE-2026-0002", "CVE-2026-0003", "CVE-2026-0001"]
     );
-    let level = call(&app, Method::GET, "/api/v1/cves?sort=level", &cookie, None).await;
+    let level = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?releases=all&sort=level",
+        &cookie,
+        None,
+    )
+    .await;
     assert_eq!(
         ids(&level),
         ["CVE-2026-0001", "CVE-2026-0003", "CVE-2026-0002"]
     );
     assert_eq!(level.json[0]["level"], 10);
-    let oldest = call(&app, Method::GET, "/api/v1/cves?dir=asc", &cookie, None).await;
+    let oldest = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?releases=all&dir=asc",
+        &cookie,
+        None,
+    )
+    .await;
     assert_eq!(
         ids(&oldest),
         ["CVE-2026-0001", "CVE-2026-0003", "CVE-2026-0002"]

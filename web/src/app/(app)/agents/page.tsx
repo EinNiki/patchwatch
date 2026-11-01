@@ -6,7 +6,8 @@ import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { patchHostRows } from "@/lib/hostsLive";
 import { useNow } from "@/lib/useNow";
-import type { Host, NewHost } from "@/lib/types";
+import type { Host, NewHost, Settings } from "@/lib/types";
+import { absTime, relTime } from "@/lib/format";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
@@ -115,8 +116,8 @@ function AddDialog({ open, onClose, onCreated }: { open: boolean; onClose: () =>
 }
 
 /** „wartet auf Agent …“ solange die Anforderung offen ist; nach 10 Min. ein Hinweis statt endlosem Warten. */
-function RequestState({ h, now }: { h: Host; now: number }) {
-  if (!h.report_requested_at) return <span className="text-fg3">–</span>;
+function RequestState({ h, now, schedule }: { h: Host; now: number; schedule: Settings["report_schedule"] | undefined }) {
+  if (!h.report_requested_at) return <NextUpdate schedule={schedule} now={now} />;
   const waitedMs = now - new Date(h.report_requested_at).getTime();
   if (waitedMs > NO_ANSWER_MS) {
     return (
@@ -136,9 +137,41 @@ function RequestState({ h, now }: { h: Host; now: number }) {
   );
 }
 
+/** Wann kommt der nächste planmäßige Report? Zeitplan des Servers, sonst der tägliche Timer des Agents. */
+function NextUpdate({ schedule, now }: { schedule: Settings["report_schedule"] | undefined; now: number }) {
+  if (!schedule) return <span className="text-fg3">–</span>;
+  if (schedule.mode === "off") {
+    return (
+      <span className="text-fg2">
+        Agent-Timer: täglich ca. 12:00 <span className="text-fg3">(Uhrzeit des Hosts)</span>
+        <span className="block text-xs text-fg3">Kein Server-Zeitplan; unter Einstellungen → Zeitpläne einstellbar.</span>
+      </span>
+    );
+  }
+  const plan = schedule.mode === "interval" ? `alle ${schedule.every_hours} Std.` : `täglich ${schedule.at} (${schedule.tz})`;
+  if (!schedule.next_run) {
+    return (
+      <span className="text-fg2">
+        Zeitplan: {plan}
+        <span className="block text-xs text-fg3">Der erste Lauf folgt nach dem nächsten Zeitplan-Durchlauf.</span>
+      </span>
+    );
+  }
+  const soon = new Date(schedule.next_run).getTime() <= now + 60_000;
+  return (
+    <span className="text-fg2">
+      {soon ? "gleich" : <>nächste <time dateTime={schedule.next_run} title={absTime(schedule.next_run)}>{relTime(schedule.next_run, now)}</time></>}
+      <span className="block text-xs text-fg3">
+        {absTime(schedule.next_run)} · Zeitplan {plan}
+      </span>
+    </span>
+  );
+}
+
 export default function AgentsPage() {
   const hosts = useApi<Host[]>("/hosts", 60_000, LIVE_TYPES, patchHostRows);
   const now = useNow();
+  const settings = useApi<Settings>("/settings", 60_000);
   const [adding, setAdding] = useState(false);
   const [shown, setShown] = useState<{ name: string; token: string } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "rotate" | "delete"; host: Host } | null>(null);
@@ -284,7 +317,7 @@ export default function AgentsPage() {
                     <td data-label="Agent-Version">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
                     <td data-label="Letzter Report"><RelTime iso={h.last_report_at} /></td>
                     <td data-label="Letzter Check-in"><RelTime iso={h.last_checkin_at} /></td>
-                    <td data-label="Aktualisierung" className="max-w-[18rem]"><RequestState h={h} now={now} /></td>
+                    <td data-label="Aktualisierung" className="max-w-[18rem]"><RequestState h={h} now={now} schedule={settings.data?.report_schedule} /></td>
                     <td data-label="Aktionen">
                       <div className="flex flex-wrap gap-2">
                         <Button onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name} jetzt aktualisieren`}>
