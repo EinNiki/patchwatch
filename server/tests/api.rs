@@ -926,3 +926,97 @@ async fn request_all_skips_hosts_in_cooldown(pool: PgPool) {
     .await;
     assert_eq!(r.json, json!({ "requested": 0, "skipped": 3 }));
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn pending_update_list_is_stored_served_and_kept_out_of_history(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let (session, _) = login(&app, &pool).await;
+    let cookie = [("cookie", session.as_str())];
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    let url = format!("/api/v1/hosts/{id}/updates");
+
+    // Älterer Agent ohne Liste: null.
+    let old = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 1);
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(old))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&app, Method::GET, &url, &cookie, None).await.json,
+        Value::Null
+    );
+
+    let mut r = report("web1", "6.8.0-31.31", "6.8.0-31.31", 1, 1);
+    r["updates"]["items"] = json!([{"name": "libc6", "from": "2.35-1", "to": "2.35-2",
+        "origin": "Ubuntu:22.04/jammy-security", "security": true}]);
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(r))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    let got = call(&app, Method::GET, &url, &cookie, None).await;
+    assert_eq!(got.json[0]["name"], "libc6");
+    assert_eq!(got.json[0]["security"], true);
+    let in_history: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM reports WHERE raw->'updates' ? 'items'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(in_history, 0);
+
+    // Ungültige Paketnamen werden abgelehnt.
+    let mut bad = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 1);
+    bad["updates"]["items"] = json!([{"name": "x; rm -rf", "from": null, "to": "1",
+        "origin": "o", "security": false}]);
+    assert_eq!(
+        call(&app, Method::POST, "/api/v1/report", &h, Some(bad))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, _) = login(&app, &pool).await;
+    let cookie = [("cookie", session.as_str())];
+    sqlx::query(
+        "INSERT INTO cves (id, priority, published_at) VALUES \
+        ('CVE-2026-0001', 'critical', '2026-01-01'), ('CVE-2026-0002', 'low', '2026-03-01'), \
+        ('CVE-2026-0003', 'high', '2026-02-01')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let ids = |r: &Resp| -> Vec<String> {
+        r.json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let latest = call(&app, Method::GET, "/api/v1/cves", &cookie, None).await;
+    assert_eq!(
+        ids(&latest),
+        ["CVE-2026-0002", "CVE-2026-0003", "CVE-2026-0001"]
+    );
+    let level = call(&app, Method::GET, "/api/v1/cves?sort=level", &cookie, None).await;
+    assert_eq!(
+        ids(&level),
+        ["CVE-2026-0001", "CVE-2026-0003", "CVE-2026-0002"]
+    );
+    assert_eq!(level.json[0]["level"], 10);
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/cves?sort=x", &cookie, None)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+}

@@ -6,10 +6,11 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const MAX_BODY: usize = 4 * 1024 * 1024;
 const MAX_PACKAGES: usize = 30_000;
+const MAX_UPDATE_ITEMS: usize = 1000;
 
 #[derive(Deserialize)]
 struct ReportIn {
@@ -55,6 +56,17 @@ struct KernelIn {
 struct UpdatesIn {
     pending: i32,
     security: i32,
+    /// Offene Updates im Einzelnen (neuere Agents); fehlt bei älteren.
+    items: Option<Vec<UpdateItemIn>>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct UpdateItemIn {
+    name: String,
+    from: Option<String>,
+    to: String,
+    origin: String,
+    security: bool,
 }
 
 #[derive(Deserialize)]
@@ -143,6 +155,19 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
             return Err(bad("ungültige Update-Zähler"));
         }
     }
+    if let Some(items) = r.updates.as_ref().and_then(|u| u.items.as_ref()) {
+        if items.len() > MAX_UPDATE_ITEMS {
+            return Err(bad("zu viele Update-Einträge"));
+        }
+        for i in items {
+            check(&i.name, 128, NAME_CHARS, "Update-Paketname")?;
+            check_opt(&i.from, 128, VERSION_CHARS, "Update-Version")?;
+            check(&i.to, 128, VERSION_CHARS, "Update-Version")?;
+            if i.origin.len() > 200 || i.origin.chars().any(char::is_control) {
+                return Err(bad("ungültige Update-Herkunft"));
+            }
+        }
+    }
     if r.uptime_seconds.is_some_and(|u| u < 0) {
         return Err(bad("ungültige Uptime"));
     }
@@ -180,7 +205,15 @@ pub async fn post_report(
     // Die Paketliste gehört nicht in die Historie.
     if let Some(o) = raw.as_object_mut() {
         o.remove("packages");
+        if let Some(u) = o.get_mut("updates").and_then(|u| u.as_object_mut()) {
+            u.remove("items");
+        }
     }
+    let updates_list = rep
+        .updates
+        .as_ref()
+        .and_then(|u| u.items.as_ref())
+        .map(|i| serde_json::to_value(i).unwrap_or_default());
 
     let now = Utc::now();
     let k = &rep.kernel;
@@ -195,7 +228,7 @@ pub async fn post_report(
          pretty_name = $7, running_kernel = $8, kernel_package = $9, kernel_package_version = $10, \
          kernel_source = $11, kernel_source_version = $12, newest_kernel = $13, newest_kernel_version = $14, \
          reboot_needed_kernel = $15, reboot_required_file = $16, updates_pending = $17, updates_security = $18, \
-         uptime_seconds = $19, is_proxmox = $20, proxmox_version = $21, agent_version = $22, last_checkin_at = $2, \
+         uptime_seconds = $19, is_proxmox = $20, proxmox_version = $21, agent_version = $22, last_checkin_at = $2, updates_list = $23, \
          report_requested_at = NULL, report_dispatched_at = NULL WHERE id = $1",
     )
     .bind(host_id)
@@ -220,6 +253,7 @@ pub async fn post_report(
     .bind(rep.proxmox.is_some())
     .bind(rep.proxmox.as_ref().map(|p| &p.version))
     .bind(&rep.agent_version)
+    .bind(&updates_list)
     .execute(&mut *tx)
     .await?;
 

@@ -24,6 +24,21 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
                count(*) FILTER (WHERE status = 'unknown') AS unknown \
         FROM host_cve_status WHERE host_id = h.id) c ON true";
 
+/// Offene Paket-Updates laut letztem Report; `null`, wenn der Agent noch keine Liste mitschickt.
+pub async fn updates(
+    _: Admin,
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    let row: Option<(Option<Value>,)> =
+        sqlx::query_as("SELECT updates_list FROM hosts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&st.pool)
+            .await?;
+    let (list,) = row.ok_or(ApiError::NotFound)?;
+    Ok(Json(list.unwrap_or(Value::Null)))
+}
+
 #[derive(Serialize, sqlx::FromRow)]
 pub struct HostRow {
     id: i64,

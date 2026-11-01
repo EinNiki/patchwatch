@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime, kernelBase, uptime } from "@/lib/format";
 import { CVE_STATUS, HOST_STATUS } from "@/lib/status";
-import type { Feed, HistoryRow, Host, HostCve } from "@/lib/types";
+import type { Feed, HistoryRow, Host, HostCve, UpdateItem } from "@/lib/types";
 import { Marker } from "@/components/DistroChip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Icon } from "@/components/Icons";
@@ -102,7 +102,13 @@ export default function HostDetailPage() {
               <span className="text-fg3">unbekannt</span>
             ) : (
               <>
-                {h.updates_pending}
+                {h.updates_pending ? (
+                  <a href="#updates" className="underline">
+                    {h.updates_pending} anzeigen
+                  </a>
+                ) : (
+                  h.updates_pending
+                )}
                 {h.updates_security ? <span className="font-semibold text-crit"> · davon {h.updates_security} Sicherheit</span> : null}
               </>
             )}
@@ -140,6 +146,8 @@ export default function HostDetailPage() {
 
       <div className="min-w-0 wide:col-start-1 wide:row-start-1">
       <CveSection host={h} cves={cves} limit={cveLimit} onMore={() => setCveLimit(cveLimit + CVE_PAGE * 5)} feedWarning={feed && !feed.ok ? feed.label : null} />
+
+      <UpdatesSection hostId={h.id} pending={h.updates_pending ?? 0} />
 
       <section aria-labelledby="hist" className="mt-6">
         <h2 id="hist" className="mb-2 text-lg font-semibold">
@@ -364,6 +372,53 @@ function CveSection({
             {more ? <Button onClick={onMore}>Weitere laden</Button> : null}
           </p>
         </>
+      )}
+    </section>
+  );
+}
+
+/** Liste der offenen Paket-Updates (vom Agent mitgeschickt; Sicherheitsupdates zuerst). */
+function UpdatesSection({ hostId, pending }: { hostId: number; pending: number }) {
+  const updates = useApi<UpdateItem[] | null>(`/hosts/${hostId}/updates`, 0, ["report_received"]);
+  const items = updates.data;
+  if (pending === 0 && !items?.length) return null;
+  return (
+    <section id="updates" aria-labelledby="updates-h" className="mt-6 scroll-mt-4">
+      <h2 id="updates-h" className="mb-2 text-lg font-semibold">
+        Offene Updates
+      </h2>
+      {updates.error && !updates.data ? <ErrorNote message={updates.error} /> : null}
+      {items === undefined ? null : items === null ? (
+        <Empty title="Liste nicht verfügbar">Dieser Agent schickt noch keine Paketliste. Mit dem neuesten Agent (erneut install.sh ausführen) erscheint sie nach dem nächsten Report.</Empty>
+      ) : items.length === 0 ? (
+        <Empty title="Keine offenen Updates">Der letzte Report meldet keine Paket-Updates.</Empty>
+      ) : (
+        <div className="max-lg:overflow-x-auto">
+          <table className="tbl">
+            <caption>Pakete mit verfügbarem Update{items.length < pending ? ` (die ersten ${items.length} von ${pending})` : ""}</caption>
+            <thead>
+              <tr>
+                <th scope="col"><span className="th-pad">Paket</span></th>
+                <th scope="col"><span className="th-pad">Installiert</span></th>
+                <th scope="col"><span className="th-pad">Neu</span></th>
+                <th scope="col"><span className="th-pad">Quelle</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((u) => (
+                <tr key={u.name}>
+                  <td className="cell-primary">
+                    <Mono>{u.name}</Mono>
+                    {u.security ? <span className="ml-2 text-xs font-semibold text-crit">Sicherheit</span> : null}
+                  </td>
+                  <td><Mono className="text-fg2">{u.from ?? "neu"}</Mono></td>
+                  <td><Mono>{u.to}</Mono></td>
+                  <td className="text-fg2">{u.origin}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

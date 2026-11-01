@@ -36,6 +36,8 @@ pub struct ListQuery {
     /// Fix-Stand je Distribution: `fixed` oder `open` (verwundbar oder Fix angekündigt); UND zwischen den Distributionen.
     debian: Option<String>,
     ubuntu: Option<String>,
+    /// Sortierung: `latest` (Standard, neueste Veröffentlichung), `level` (Priorität 10→0) oder `updated`.
+    sort: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -45,6 +47,9 @@ pub struct CveRow {
     id: String,
     description: Option<String>,
     priority: Option<String>,
+    /// Priorität als Stufe 0–10 (0 = unbekannt), abgeleitet aus `priority`.
+    #[sqlx(skip)]
+    level: u8,
     published_at: Option<DateTime<Utc>>,
     updated_at: DateTime<Utc>,
     watched: bool,
@@ -197,6 +202,23 @@ fn source_link(source: &str, id: &str) -> Option<String> {
     }
 }
 
+/// SQL-Gegenstück zu `priority_level` (für die Sortierung); `c` ist die Tabelle `cves`.
+const LEVEL_SQL: &str =
+    "CASE c.priority WHEN 'critical' THEN 10 WHEN 'high' THEN 8 WHEN 'medium' THEN 5 \
+    WHEN 'low' THEN 3 WHEN 'negligible' THEN 1 WHEN 'unimportant' THEN 1 ELSE 0 END";
+
+/// Prioritätstext der Feeds (NVD, Debian, Ubuntu) als Stufe 0–10.
+fn priority_level(p: Option<&str>) -> u8 {
+    match p {
+        Some("critical") => 10,
+        Some("high") => 8,
+        Some("medium") => 5,
+        Some("low") => 3,
+        Some("negligible" | "unimportant") => 1,
+        _ => 0,
+    }
+}
+
 /// Länge der Beschreibung in der Liste (Zeichen); die volle Beschreibung liefert `GET /cves/{id}`.
 const LIST_DESCRIPTION_CHARS: usize = 300;
 
@@ -243,6 +265,18 @@ pub async fn list(
         Some("open") => Ok(Some("open")),
         Some(_) => Err(ApiError::BadRequest(format!("{name}: fixed oder open"))),
     };
+    // Beobachtete CVEs stehen immer oben; danach gilt die gewählte Sortierung (feste Texte, nie Nutzereingabe).
+    let order = match q.sort.as_deref() {
+        None | Some("") | Some("latest") => "c.published_at DESC NULLS LAST, c.id DESC".to_string(),
+        Some("level") => format!("{LEVEL_SQL} DESC, c.published_at DESC NULLS LAST, c.id DESC"),
+        Some("updated") => "c.updated_at DESC, c.id DESC".to_string(),
+        Some(_) => {
+            return Err(ApiError::BadRequest(
+                "sort: latest, level oder updated".into(),
+            ))
+        }
+    };
+    let outer_order = order.replace("c.", "p.");
     let debian_fix = fix_state(&q.debian, split_debian, "debian")?;
     let ubuntu_fix = fix_state(&q.ubuntu, split_ubuntu, "ubuntu")?;
     // LIKE-Metazeichen im Suchtext entschärfen.
@@ -312,19 +346,22 @@ pub async fn list(
          hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_unknown \
          FROM (SELECT c.id, c.priority, c.published_at, c.updated_at, (w.cve_id IS NOT NULL) AS watched, w.note \
                FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id {filter} \
-               ORDER BY (w.cve_id IS NOT NULL) DESC, c.updated_at DESC, c.id DESC LIMIT {limit} OFFSET {offset}) p \
+               ORDER BY (w.cve_id IS NOT NULL) DESC, {order} LIMIT {limit} OFFSET {offset}) p \
          JOIN cves d ON d.id = p.id \
          CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
                                     count(*) FILTER (WHERE h.status = 'fix_pending') AS hosts_fix_pending, \
                                     count(*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \
                              FROM host_cve_status h WHERE h.cve_id = p.id) hc \
-         ORDER BY p.watched DESC, p.updated_at DESC, p.id DESC"
+         ORDER BY p.watched DESC, {outer_order}"
     );
     let mut rows_query = sqlx::query_as::<_, CveRow>(&query);
     if let Some(p) = &pattern {
         rows_query = rows_query.bind(p);
     }
-    let rows = rows_query.fetch_all(&st.pool).await?;
+    let mut rows = rows_query.fetch_all(&st.pool).await?;
+    for r in &mut rows {
+        r.level = priority_level(r.priority.as_deref());
+    }
 
     let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
     let sources: Vec<(String, SourceRow)> = sqlx::query_as::<_, SourceWithCve>(
@@ -424,6 +461,8 @@ pub async fn detail(
     .fetch_optional(&st.pool)
     .await?
     .ok_or(ApiError::NotFound)?;
+    let mut cve = cve;
+    cve.level = priority_level(cve.priority.as_deref());
     let sources = sqlx::query_as::<_, SourceRow>(
         "SELECT source, release, package, status, fix_version, updated_at FROM cve_source_status \
          WHERE cve_id = $1 ORDER BY source, release, package",
@@ -482,6 +521,7 @@ pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Js
             distro: None,
             split: None,
             debian: None,
+            sort: None,
             ubuntu: None,
             limit: Some(500),
             offset: None,

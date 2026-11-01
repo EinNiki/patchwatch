@@ -57,6 +57,7 @@ function CveView() {
   const legacy = LEGACY_SPLIT[splitRaw];
   const debianFix = fixParam(params.get("debian")) || legacy?.debian || "";
   const ubuntuFix = fixParam(params.get("ubuntu")) || legacy?.ubuntu || "";
+  const sort = ["level", "updated"].includes(params.get("sort") ?? "") ? (params.get("sort") as string) : "latest";
   const [qInput, setQInput] = useState(urlQ);
   const q = useDebounced(qInput, 150);
   const [limit, setLimit] = useState(PAGE);
@@ -71,6 +72,7 @@ function CveView() {
   if (onlyWatch) qs.set("watchlist", "true");
   if (q.trim()) qs.set("q", q.trim());
   if (allReleases) qs.set("releases", "all");
+  if (sort !== "latest") qs.set("sort", sort);
   if (distro) qs.set("distro", distro);
   if (debianFix) qs.set("debian", debianFix);
   if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
@@ -294,6 +296,14 @@ function CveView() {
             <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-64 max-w-full font-normal max-md:w-full" />
           </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
+            Sortierung
+            <select value={sort} onChange={(e) => setParam("sort", e.target.value === "latest" ? null : e.target.value)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
+              <option value="latest">Neueste zuerst</option>
+              <option value="level">Level (10 → 0)</option>
+              <option value="updated">Zuletzt aktualisiert</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
             Distribution
             <select value={distro} onChange={(e) => setParam("distro", e.target.value || null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
               <option value="">Alle</option>
@@ -321,7 +331,9 @@ function CveView() {
           </label>
           <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
             <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-(--accent) max-md:size-5" />
-            Alle Releases
+            <span>
+              Alle Releases <span className="text-fg3 max-lg:hidden">(auch ohne eigenen Host)</span>
+            </span>
           </label>
         </div>
 
@@ -371,7 +383,7 @@ function CveView() {
                     <th scope="col"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col"><span className="th-pad">Distributionen</span></th>
                     <th scope="col"><span className="th-pad">Hosts</span></th>
-                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Prio</span></th>
+                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Level</span></th>
                     <th scope="col" className="md:max-xl:hidden"><span className="th-pad">Aktualisiert</span></th>
                   </tr>
                 </thead>
@@ -451,7 +463,7 @@ const CveRow = memo(function CveRow({
             </div>
           ) : null}
           {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
-          {c.priority ? <div className="text-xs text-fg3 wide:hidden">Priorität {c.priority}</div> : null}
+          {c.level ? <div className="text-xs text-fg3 wide:hidden">Level {c.level}/10</div> : null}
         </td>
         <td className="w-full min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
           {c.description ? <span className="line-clamp-2 max-w-[44rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
@@ -463,7 +475,7 @@ const CveRow = memo(function CveRow({
         <td data-label="Hosts">
           <HostCounts c={c} />
         </td>
-        <td className="mono max-wide:hidden">{c.priority ?? "–"}</td>
+        <td className="mono max-wide:hidden" title={c.priority ?? undefined}>{c.level ? `${c.level}/10` : "–"}</td>
         <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
           <RelTime iso={c.updated_at} />
         </td>

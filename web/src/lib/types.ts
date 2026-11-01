@@ -86,6 +86,8 @@ export interface Cve {
   id: string;
   description: string | null;
   priority: string | null;
+  /** Priorität als Stufe 0–10 (0 = unbekannt). */
+  level: number;
   published_at: string | null;
   updated_at: string;
   watched: boolean;
@@ -212,4 +214,14 @@ export interface NewHost {
   id: number;
   name: string;
   token: string;
+}
+
+/** Ein offenes Paket-Update aus dem Report des Agents. */
+export interface UpdateItem {
+  name: string;
+  /** Installierte Version; fehlt bei neu hinzukommenden Paketen. */
+  from: string | null;
+  to: string;
+  origin: string;
+  security: boolean;
 }
