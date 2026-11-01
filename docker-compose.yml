@@ -20,9 +20,6 @@ services:
 
   server:
     image: ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest}
-    build:
-      context: .
-      dockerfile: server/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -49,9 +46,6 @@ services:
 
   web:
     image: ghcr.io/einniki/patchwatch-web:${PATCHWATCH_VERSION:-latest}
-    build:
-      context: .
-      dockerfile: web/Dockerfile
     restart: unless-stopped
     depends_on:
       - server
