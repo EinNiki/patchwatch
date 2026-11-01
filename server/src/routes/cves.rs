@@ -38,6 +38,8 @@ pub struct ListQuery {
     ubuntu: Option<String>,
     /// Sortierung: `latest` (Standard, neueste Veröffentlichung), `level` (Priorität 10→0) oder `updated`.
     sort: Option<String>,
+    /// Richtung: `desc` (Standard) oder `asc`.
+    dir: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -208,7 +210,7 @@ const LEVEL_SQL: &str =
     WHEN 'low' THEN 3 WHEN 'negligible' THEN 1 WHEN 'unimportant' THEN 1 ELSE 0 END";
 
 /// Prioritätstext der Feeds (NVD, Debian, Ubuntu) als Stufe 0–10.
-fn priority_level(p: Option<&str>) -> u8 {
+pub fn priority_level(p: Option<&str>) -> u8 {
     match p {
         Some("critical") => 10,
         Some("high") => 8,
@@ -266,10 +268,22 @@ pub async fn list(
         Some(_) => Err(ApiError::BadRequest(format!("{name}: fixed oder open"))),
     };
     // Beobachtete CVEs stehen immer oben; danach gilt die gewählte Sortierung (feste Texte, nie Nutzereingabe).
+    let dir = match q.dir.as_deref() {
+        None | Some("") | Some("desc") => "DESC",
+        Some("asc") => "ASC",
+        Some(_) => return Err(ApiError::BadRequest("dir: asc oder desc".into())),
+    };
+    let nulls = if dir == "DESC" {
+        "NULLS LAST"
+    } else {
+        "NULLS FIRST"
+    };
     let order = match q.sort.as_deref() {
-        None | Some("") | Some("latest") => "c.published_at DESC NULLS LAST, c.id DESC".to_string(),
-        Some("level") => format!("{LEVEL_SQL} DESC, c.published_at DESC NULLS LAST, c.id DESC"),
-        Some("updated") => "c.updated_at DESC, c.id DESC".to_string(),
+        None | Some("") | Some("latest") => {
+            format!("c.published_at {dir} {nulls}, c.id {dir}")
+        }
+        Some("level") => format!("{LEVEL_SQL} {dir}, c.published_at DESC NULLS LAST, c.id DESC"),
+        Some("updated") => format!("c.updated_at {dir}, c.id {dir}"),
         Some(_) => {
             return Err(ApiError::BadRequest(
                 "sort: latest, level oder updated".into(),
@@ -522,6 +536,7 @@ pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Js
             split: None,
             debian: None,
             sort: None,
+            dir: None,
             ubuntu: None,
             limit: Some(500),
             offset: None,

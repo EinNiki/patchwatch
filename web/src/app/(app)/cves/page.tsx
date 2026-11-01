@@ -58,6 +58,20 @@ function CveView() {
   const debianFix = fixParam(params.get("debian")) || legacy?.debian || "";
   const ubuntuFix = fixParam(params.get("ubuntu")) || legacy?.ubuntu || "";
   const sort = ["level", "updated"].includes(params.get("sort") ?? "") ? (params.get("sort") as string) : "latest";
+  const dir = params.get("dir") === "asc" ? "asc" : "desc";
+  /** Klick auf eine Spaltenüberschrift: gleiche Spalte kehrt die Richtung um, eine andere startet absteigend. */
+  function sortBy(key: string) {
+    const p = new URLSearchParams(params.toString());
+    if (key === sort) {
+      if (dir === "desc") p.set("dir", "asc");
+      else p.delete("dir");
+    } else {
+      p.delete("dir");
+    }
+    if (key === "latest") p.delete("sort");
+    else p.set("sort", key);
+    router.replace(p.toString() ? `${pathname}?${p}` : pathname, { scroll: false });
+  }
   const [qInput, setQInput] = useState(urlQ);
   const q = useDebounced(qInput, 150);
   const [limit, setLimit] = useState(PAGE);
@@ -73,6 +87,7 @@ function CveView() {
   if (q.trim()) qs.set("q", q.trim());
   if (allReleases) qs.set("releases", "all");
   if (sort !== "latest") qs.set("sort", sort);
+  if (dir === "asc") qs.set("dir", "asc");
   if (distro) qs.set("distro", distro);
   if (debianFix) qs.set("debian", debianFix);
   if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
@@ -296,14 +311,6 @@ function CveView() {
             <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-64 max-w-full font-normal max-md:w-full" />
           </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
-            Sortierung
-            <select value={sort} onChange={(e) => setParam("sort", e.target.value === "latest" ? null : e.target.value)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
-              <option value="latest">Neueste zuerst</option>
-              <option value="level">Level (10 → 0)</option>
-              <option value="updated">Zuletzt aktualisiert</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
             Distribution
             <select value={distro} onChange={(e) => setParam("distro", e.target.value || null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
               <option value="">Alle</option>
@@ -379,12 +386,12 @@ function CveView() {
                 <thead>
                   <tr>
                     <th scope="col" className="w-10"><span className="th-pad"><span className="sr-only">Beobachten</span></span></th>
-                    <th scope="col"><span className="th-pad">CVE</span></th>
+                    <SortTh label="CVE" hint={sort === "latest" ? (dir === "desc" ? "neueste zuerst" : "älteste zuerst") : "nach Datum sortieren"} active={sort === "latest"} dir={dir} onClick={() => sortBy("latest")} />
                     <th scope="col"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col"><span className="th-pad">Distributionen</span></th>
                     <th scope="col"><span className="th-pad">Hosts</span></th>
-                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Level</span></th>
-                    <th scope="col" className="md:max-xl:hidden"><span className="th-pad">Aktualisiert</span></th>
+                    <SortTh label="Level" className="max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
+                    <SortTh label="Aktualisiert" className="md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -533,5 +540,20 @@ export default function CvesPage() {
     <Suspense fallback={<TableSkeleton what="CVEs" />}>
       <CveView />
     </Suspense>
+  );
+}
+
+/** Spaltenüberschrift mit Sortierung: Pfeil zeigt die Richtung der aktiven Spalte. */
+function SortTh({ label, hint, active, dir, onClick, className }: { label: string; hint?: string; active: boolean; dir: "asc" | "desc"; onClick: () => void; className?: string }) {
+  return (
+    <th scope="col" className={className} aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}>
+      <span className="th-pad">
+        <button type="button" onClick={onClick} className="inline-flex min-h-7 items-center gap-1 font-semibold max-md:min-h-11">
+          {label}
+          <span aria-hidden="true" className={active ? "" : "text-fg3"}>{active ? (dir === "asc" ? "↑" : "↓") : "↕"}</span>
+          {hint ? <span className="sr-only">{hint}</span> : null}
+        </button>
+      </span>
+    </th>
   );
 }

@@ -80,6 +80,8 @@ export interface HostCve {
   watched: boolean;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  /** Priorität als Stufe 0–10 (0 = unbekannt). */
+  level: number;
 }
 
 export interface Cve {

@@ -24,7 +24,7 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
                count(*) FILTER (WHERE status = 'unknown') AS unknown \
         FROM host_cve_status WHERE host_id = h.id) c ON true";
 
-/// Offene Paket-Updates laut letztem Report; `null`, wenn der Agent noch keine Liste mitschickt.
+/// Offene Paket-Updates laut letztem Report; `{"items": null}`, wenn der Agent noch keine Liste mitschickt.
 pub async fn updates(
     _: Admin,
     State(st): State<AppState>,
@@ -36,7 +36,7 @@ pub async fn updates(
             .fetch_optional(&st.pool)
             .await?;
     let (list,) = row.ok_or(ApiError::NotFound)?;
-    Ok(Json(list.unwrap_or(Value::Null)))
+    Ok(Json(json!({ "items": list })))
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -140,6 +140,9 @@ pub struct HostCveRow {
     /// Manuelle Prüfung (z. B. Proxmox); gilt nur für den Kernel, bei dem sie gesetzt wurde.
     reviewed_at: Option<DateTime<Utc>>,
     reviewed_by: Option<String>,
+    /// Priorität als Stufe 0–10 (0 = unbekannt).
+    #[sqlx(skip)]
+    level: u8,
 }
 
 #[derive(Deserialize)]
@@ -172,6 +175,13 @@ pub async fn cves(
     .bind(limit)
     .fetch_all(&st.pool)
     .await?;
+    let rows = rows
+        .into_iter()
+        .map(|mut r| {
+            r.level = super::cves::priority_level(r.priority.as_deref());
+            r
+        })
+        .collect();
     Ok(Json(rows))
 }
 

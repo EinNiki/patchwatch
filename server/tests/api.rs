@@ -946,7 +946,7 @@ async fn pending_update_list_is_stored_served_and_kept_out_of_history(pool: PgPo
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        call(&app, Method::GET, &url, &cookie, None).await.json,
+        call(&app, Method::GET, &url, &cookie, None).await.json["items"],
         Value::Null
     );
 
@@ -960,8 +960,8 @@ async fn pending_update_list_is_stored_served_and_kept_out_of_history(pool: PgPo
         StatusCode::NO_CONTENT
     );
     let got = call(&app, Method::GET, &url, &cookie, None).await;
-    assert_eq!(got.json[0]["name"], "libc6");
-    assert_eq!(got.json[0]["security"], true);
+    assert_eq!(got.json["items"][0]["name"], "libc6");
+    assert_eq!(got.json["items"][0]["security"], true);
     let in_history: i64 =
         sqlx::query_scalar("SELECT count(*) FROM reports WHERE raw->'updates' ? 'items'")
             .fetch_one(&pool)
@@ -1013,6 +1013,11 @@ async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
         ["CVE-2026-0001", "CVE-2026-0003", "CVE-2026-0002"]
     );
     assert_eq!(level.json[0]["level"], 10);
+    let oldest = call(&app, Method::GET, "/api/v1/cves?dir=asc", &cookie, None).await;
+    assert_eq!(
+        ids(&oldest),
+        ["CVE-2026-0001", "CVE-2026-0003", "CVE-2026-0002"]
+    );
     assert_eq!(
         call(&app, Method::GET, "/api/v1/cves?sort=x", &cookie, None)
             .await

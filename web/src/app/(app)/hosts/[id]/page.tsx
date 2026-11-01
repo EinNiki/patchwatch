@@ -274,6 +274,9 @@ function CveSection({
         </Empty>
       ) : (
         <>
+          <p className="mb-2 text-sm text-fg2">
+            „Manuelle Prüfung“: Ist der Status <strong>unbekannt</strong>, kann patchwatch nicht entscheiden, ob der Host betroffen ist (z. B. fehlen Feed-Daten zum Kernel, typisch bei Proxmox). Prüfst du das selbst, setze das Häkchen. Es gilt nur für den aktuellen Kernel und verfällt nach einem Kernel-Wechsel; der Status bleibt „unbekannt“.
+          </p>
           <div className="max-lg:overflow-x-auto">
             <table className="tbl stack">
               <caption>CVE-Bewertungen dieses Hosts mit Status, Begründung und manueller Prüfung</caption>
@@ -293,7 +296,7 @@ function CveSection({
                         {c.cve_id}
                       </Link>
                       {c.watched ? <span className="ml-2 inline-flex align-middle"><Marker>Watchlist</Marker></span> : null}
-                      {c.priority ? <div className="text-xs text-fg3">Priorität {c.priority}</div> : null}
+                      {c.level ? <div className="text-xs text-fg3">Level {c.level}/10</div> : null}
                     </td>
                     <td className="cell-status lead">
                       <StatusBadge info={CVE_STATUS[c.status]} label={host.is_proxmox && c.status === "unknown" ? "Unbekannt: manuell prüfen" : undefined} />
@@ -379,8 +382,8 @@ function CveSection({
 
 /** Liste der offenen Paket-Updates (vom Agent mitgeschickt; Sicherheitsupdates zuerst). */
 function UpdatesSection({ hostId, pending }: { hostId: number; pending: number }) {
-  const updates = useApi<UpdateItem[] | null>(`/hosts/${hostId}/updates`, 0, ["report_received"]);
-  const items = updates.data;
+  const updates = useApi<{ items: UpdateItem[] | null }>(`/hosts/${hostId}/updates`, 0, ["report_received"]);
+  const items = updates.data?.items;
   if (pending === 0 && !items?.length) return null;
   return (
     <section id="updates" aria-labelledby="updates-h" className="mt-6 scroll-mt-4">
@@ -388,6 +391,7 @@ function UpdatesSection({ hostId, pending }: { hostId: number; pending: number }
         Offene Updates
       </h2>
       {updates.error && !updates.data ? <ErrorNote message={updates.error} /> : null}
+      {updates.loading ? <Loading what="Updates" /> : null}
       {items === undefined ? null : items === null ? (
         <Empty title="Liste nicht verfügbar">Dieser Agent schickt noch keine Paketliste. Mit dem neuesten Agent (erneut install.sh ausführen) erscheint sie nach dem nächsten Report.</Empty>
       ) : items.length === 0 ? (
