@@ -215,6 +215,20 @@ export default function AgentsPage() {
         </Button>
       </PageHeader>
 
+      <details className="mb-3">
+        <summary className="cursor-pointer text-fg2">Agent aktualisieren</summary>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className="text-fg2">
+            Auf dem Host ausführen (Server-URL und Token bleiben erhalten):
+          </p>
+          <code className="mono rounded-sm border border-line bg-sunk px-2 py-1">sudo patchwatch-agent-update</code>
+          <CopyButton text="sudo patchwatch-agent-update" label="Befehl kopieren" />
+        </div>
+        <p className="mt-2 text-fg3">
+          Agents, die vor diesem Befehl installiert wurden, aktualisierst du einmalig mit dem Installationsbefehl aus „Agent hinzufügen“ (ohne neuen Token; vorhandene Einstellungen bleiben). Mit <code className="mono">--auto-update</code> prüft der Host danach wöchentlich selbst.
+        </p>
+      </details>
+
       <p role="status" className="mb-3 min-h-5 text-fg2">
         {note}
       </p>

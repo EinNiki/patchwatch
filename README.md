@@ -21,6 +21,11 @@ Installation (als root, Token kommt aus dem Server, siehe Betrieb):
 PATCHWATCH_TOKEN=… sh install.sh --server-url https://patchwatch.example.org
 ```
 
+**Agent aktualisieren:** `sudo patchwatch-agent-update` (lädt die neueste Version, prüft die SHA256-Summe, behält
+Server-URL und Token). Bei Agents ohne diesen Befehl einmal den Installationsbefehl erneut ausführen – Server-URL
+und Token werden aus `/etc/patchwatch` übernommen. Mit `--auto-update` prüft ein wöchentlicher Timer selbst auf
+neue Versionen (`--no-auto-update` schaltet ihn ab).
+
 `install.sh` lädt das Binary aus dem GitHub Release und prüft die SHA256-Summe vor der
 Installation. Der Token liegt in `/etc/patchwatch/token` (`root:root 0600`) und wird per
 systemd-`LoadCredential` an den Dienst `patchwatch` (kein `DynamicUser`) gereicht.

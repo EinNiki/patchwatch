@@ -4,6 +4,11 @@
 #
 #   sh install.sh --server-url https://patchwatch.example.org [--version v0.1.0] [--token-file PFAD]
 #
+# Aktualisieren: einfach erneut ausführen. Ist der Agent schon installiert, werden Server-URL und
+# Token aus /etc/patchwatch übernommen (kein --server-url, keine Token-Eingabe nötig). Danach gibt es
+# außerdem den Befehl `sudo patchwatch-agent-update`. Mit --auto-update prüft ein wöchentlicher
+# Timer selbst auf neue Versionen (--no-auto-update schaltet ihn wieder ab).
+#
 # Der Token steht nie im Befehl (sichtbar in `ps` und in der Shell-History): Er wird ohne Echo
 # abgefragt (Standard), aus einer Datei gelesen (--token-file) oder per Umgebungsvariable
 # PATCHWATCH_TOKEN übergeben (nur für Automatisierung). Gespeichert wird er als
@@ -15,6 +20,7 @@ BASE="${PATCHWATCH_RELEASE_BASE:-https://github.com/$REPO/releases}"
 VERSION="latest"
 SERVER_URL=""
 TOKEN_FILE=""
+AUTO_UPDATE=""
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 
@@ -23,11 +29,17 @@ while [ $# -gt 0 ]; do
     --server-url) SERVER_URL="${2:-}"; shift 2 ;;
     --version) VERSION="${2:-}"; shift 2 ;;
     --token-file) TOKEN_FILE="${2:-}"; shift 2 ;;
+    --auto-update) AUTO_UPDATE=yes; shift ;;
+    --no-auto-update) AUTO_UPDATE=no; shift ;;
     *) die "unbekannte Option: $1" ;;
   esac
 done
 
 [ "$(id -u)" -eq 0 ] || die "bitte als root ausführen"
+# Bereits installiert: Server-URL aus der bestehenden Konfiguration übernehmen.
+if [ -z "$SERVER_URL" ] && [ -r /etc/patchwatch/agent.toml ]; then
+  SERVER_URL="$(sed -n 's/^server_url *= *"\(.*\)".*/\1/p' /etc/patchwatch/agent.toml | head -n 1)"
+fi
 [ -n "$SERVER_URL" ] || die "--server-url fehlt"
 case "$SERVER_URL" in https://*) ;; *) die "server-url muss mit https:// beginnen" ;; esac
 command -v systemctl >/dev/null || die "systemd wird benötigt"
@@ -44,6 +56,10 @@ if [ -n "$TOKEN_FILE" ]; then
   [ -r "$TOKEN_FILE" ] || die "Token-Datei nicht lesbar: $TOKEN_FILE"
   # Nur die erste Zeile; Leerraum am Rand entfernen.
   TOKEN="$(head -n 1 "$TOKEN_FILE" | tr -d '[:space:]')"
+fi
+# Bereits installiert: vorhandenen Token weiterverwenden (Update ohne Eingabe).
+if [ -z "$TOKEN" ] && [ -r /etc/patchwatch/token ]; then
+  TOKEN="$(head -n 1 /etc/patchwatch/token | tr -d '[:space:]')"
 fi
 if [ -z "$TOKEN" ]; then
   # Eingabe vom Terminal (auch wenn das Skript per Pipe läuft), ohne Echo.
@@ -79,7 +95,23 @@ fetch "$URL_BASE/$NAME.sha256" "$TMP/$NAME.sha256"
 ( cd "$TMP" && sha256sum -c "$NAME.sha256" ) || die "SHA256-Prüfsumme stimmt nicht, Abbruch"
 
 id patchwatch >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin patchwatch
+OLD_VERSION="$(/usr/local/bin/patchwatch-agent --version 2>/dev/null || true)"
 install -m 0755 "$TMP/$NAME" /usr/local/bin/patchwatch-agent
+NEW_VERSION="$(/usr/local/bin/patchwatch-agent --version 2>/dev/null || true)"
+
+# Update-Befehl: lädt das Installationsskript der neuesten Version und führt es aus.
+cat > /usr/local/bin/patchwatch-agent-update <<EOF
+#!/bin/sh
+# Aktualisiert den patchwatch-agent auf die neueste Version (Konfiguration und Token bleiben).
+set -eu
+[ "\$(id -u)" -eq 0 ] || { echo "bitte als root ausführen (sudo patchwatch-agent-update)" >&2; exit 1; }
+T="\$(mktemp -d)"; trap 'rm -rf "\$T"' EXIT
+URL="$BASE/latest/download/install.sh"
+if command -v curl >/dev/null; then curl -fsSL --proto '=https' --tlsv1.2 -o "\$T/install.sh" "\$URL"
+else wget -q -O "\$T/install.sh" "\$URL"; fi
+exec sh "\$T/install.sh" "\$@"
+EOF
+chmod 0755 /usr/local/bin/patchwatch-agent-update
 
 install -d -m 0755 /etc/patchwatch
 # Token: nur root lesbar; systemd reicht ihn per LoadCredential an den Dienst.
@@ -189,10 +221,46 @@ AccuracySec=1s
 WantedBy=timers.target
 EOF
 
+# Automatische Updates (nur auf Wunsch): wöchentlich als root, Konfiguration und Token bleiben unverändert.
+if [ "$AUTO_UPDATE" = "yes" ]; then
+  cat > /etc/systemd/system/patchwatch-agent-update.service <<'EOF'
+[Unit]
+Description=patchwatch agent aktualisieren
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/patchwatch-agent-update
+EOF
+  cat > /etc/systemd/system/patchwatch-agent-update.timer <<'EOF'
+[Unit]
+Description=patchwatch agent wöchentlich auf Updates prüfen
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+elif [ "$AUTO_UPDATE" = "no" ]; then
+  systemctl disable --now patchwatch-agent-update.timer 2>/dev/null || true
+  rm -f /etc/systemd/system/patchwatch-agent-update.service /etc/systemd/system/patchwatch-agent-update.timer
+fi
+
 systemctl daemon-reload
+if [ "$AUTO_UPDATE" = "yes" ]; then systemctl enable --now patchwatch-agent-update.timer; fi
 systemctl enable --now patchwatch-agent.timer
 # Check-in-Timer: weckt den Agent minütlich; bei checkin_enabled = false beendet er sich sofort.
 systemctl enable --now patchwatch-agent-checkin.timer
 echo "Test-Lauf ..."
 systemctl start patchwatch-agent.service && echo "OK: erster Report gesendet" \
   || echo "Hinweis: erster Lauf fehlgeschlagen, siehe: journalctl -u patchwatch-agent" >&2
+if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  echo "Aktualisiert: $OLD_VERSION -> $NEW_VERSION"
+else
+  echo "Installiert: $NEW_VERSION"
+fi
+echo "Später aktualisieren: sudo patchwatch-agent-update"
