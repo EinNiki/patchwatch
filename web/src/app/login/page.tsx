@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, setCsrf } from "@/lib/api";
 import type { Me } from "@/lib/types";
@@ -12,8 +12,16 @@ const subscribe = () => () => {};
 export default function LoginPage() {
   const router = useRouter();
   const hydrated = useSyncExternalStore(subscribe, () => true, () => false);
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setError] = useState<string | null>(null);
+  // Rückkehr von einer abgelehnten SSO-Anmeldung (?error=oidc).
+  const ssoDenied = useSyncExternalStore(subscribe, () => window.location.search.includes("error=oidc"), () => false);
+  const error = formError ?? (ssoDenied ? "Anmeldung per Single Sign-On abgelehnt. Ist dein Konto freigegeben?" : null);
   const [busy, setBusy] = useState(false);
+  const [oidc, setOidc] = useState<{ enabled: boolean; name: string } | null>(null);
+
+  useEffect(() => {
+    api.get<{ oidc: { enabled: boolean; name: string } }>("/auth/providers").then((p) => setOidc(p.oidc), () => undefined);
+  }, []);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -57,6 +65,14 @@ export default function LoginPage() {
           Anmelden
         </Button>
       </form>
+      {oidc?.enabled ? (
+        <a
+          href="/api/v1/auth/oidc/login"
+          className="mt-3 inline-flex min-h-9 items-center justify-center border border-control bg-surface px-3 font-semibold hover:border-accent max-md:min-h-11"
+        >
+          Mit {oidc.name} anmelden
+        </a>
+      ) : null}
     </main>
   );
 }

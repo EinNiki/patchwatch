@@ -34,6 +34,40 @@ impl Ntfy {
     }
 }
 
+/// OpenID Connect (Authorization-Code-Flow mit PKCE). Ohne Allow-List (E-Mails oder Domains) bleibt es abgeschaltet:
+/// Sonst könnte sich jeder Benutzer des Identity Providers als Admin anmelden.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct Oidc {
+    pub issuer: Option<String>,
+    pub client_id: Option<String>,
+    pub client_secret: Option<Secret>,
+    /// Muss beim Provider eingetragen sein, z. B. `https://patchwatch.example.org/api/v1/auth/oidc/callback`.
+    pub redirect_url: Option<String>,
+    /// Anzeigename des Providers auf dem Anmelde-Button.
+    pub name: Option<String>,
+    pub scopes: Option<String>,
+    pub allowed_emails: Vec<String>,
+    pub allowed_domains: Vec<String>,
+}
+
+impl Oidc {
+    pub fn enabled(&self) -> bool {
+        self.issuer.is_some()
+    }
+
+    /// Darf sich diese (verifizierte) E-Mail-Adresse anmelden?
+    pub fn allows(&self, email: &str) -> bool {
+        let email = email.to_ascii_lowercase();
+        if self.allowed_emails.contains(&email) {
+            return true;
+        }
+        email
+            .rsplit_once('@')
+            .is_some_and(|(_, d)| self.allowed_domains.iter().any(|a| a == d))
+    }
+}
+
 /// 32-Byte-Schlüssel für die Verschlüsselung gespeicherter Geheimnisse (Base64 in der Konfiguration).
 #[derive(Clone)]
 pub struct SecretKey([u8; 32]);
@@ -149,6 +183,7 @@ pub struct Config {
     /// Zusätzliche Origins (exakt, z. B. `https://ui.example.org`), die den Live-WebSocket öffnen dürfen.
     /// Standard: nur die Origin, die zum `Host`-Header passt.
     pub allowed_origins: Vec<String>,
+    pub oidc: Oidc,
 }
 
 impl Default for Config {
@@ -168,6 +203,7 @@ impl Default for Config {
             secret_key: None,
             notify_allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            oidc: Oidc::default(),
         }
     }
 }
@@ -261,6 +297,36 @@ impl Config {
                 .filter(|x| !x.is_empty())
                 .collect();
         }
+        if let Some(v) = s("OIDC_ISSUER") {
+            c.oidc.issuer = Some(v.trim_end_matches('/').to_owned());
+        }
+        if let Some(v) = s("OIDC_CLIENT_ID") {
+            c.oidc.client_id = Some(v);
+        }
+        if let Some(v) = s("OIDC_CLIENT_SECRET") {
+            c.oidc.client_secret = Some(Secret(v));
+        }
+        if let Some(v) = s("OIDC_REDIRECT_URL") {
+            c.oidc.redirect_url = Some(v);
+        }
+        if let Some(v) = s("OIDC_NAME") {
+            c.oidc.name = Some(v);
+        }
+        if let Some(v) = s("OIDC_SCOPES") {
+            c.oidc.scopes = Some(v);
+        }
+        let list = |v: String| -> Vec<String> {
+            v.split(',')
+                .map(|x| x.trim().to_ascii_lowercase())
+                .filter(|x| !x.is_empty())
+                .collect()
+        };
+        if let Some(v) = s("OIDC_ALLOWED_EMAILS") {
+            c.oidc.allowed_emails = list(v);
+        }
+        if let Some(v) = s("OIDC_ALLOWED_DOMAINS") {
+            c.oidc.allowed_domains = list(v);
+        }
         if let Some(v) = s("CVE_ENABLED") {
             c.cve.enabled = parse_bool("CVE_ENABLED", &v)?;
         }
@@ -301,6 +367,21 @@ impl Config {
             bail!(
                 "stale_after_hours, report_retention_days und session_ttl_hours müssen >= 1 sein"
             );
+        }
+        let o = &self.oidc;
+        if o.enabled() {
+            let local =
+                |u: &str| u.starts_with("http://localhost") || u.starts_with("http://127.0.0.1");
+            let issuer = o.issuer.as_deref().unwrap_or_default();
+            if !(issuer.starts_with("https://") || local(issuer)) {
+                bail!("OIDC_ISSUER muss mit https:// beginnen");
+            }
+            if o.client_id.is_none() || o.client_secret.is_none() || o.redirect_url.is_none() {
+                bail!("OIDC: OIDC_CLIENT_ID, OIDC_CLIENT_SECRET und OIDC_REDIRECT_URL sind nötig");
+            }
+            if o.allowed_emails.is_empty() && o.allowed_domains.is_empty() {
+                bail!("OIDC: OIDC_ALLOWED_EMAILS oder OIDC_ALLOWED_DOMAINS setzen (wer darf sich anmelden?)");
+            }
         }
         if self.cve.interval_minutes < 5 {
             bail!("cve.interval_minutes muss >= 5 sein");

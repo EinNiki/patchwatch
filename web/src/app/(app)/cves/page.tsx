@@ -282,8 +282,8 @@ function CveView() {
         <h2 id="wl-h" className="mb-2 text-lg font-semibold">
           CVE-Liste
         </h2>
-        <details className="mb-3 border-y border-line">
-          <summary className="flex min-h-9 cursor-pointer items-center gap-2 font-semibold text-fg2 max-md:min-h-11">Watchlist: CVE hinzufügen</summary>
+        <div className="mb-3 border-y border-line">
+          <h3 className="flex min-h-9 items-center font-semibold text-fg2">Watchlist: CVE hinzufügen</h3>
           <form onSubmit={(e) => void add(e)} className="flex flex-wrap items-end gap-3 pb-3 pt-1">
             <Field label="CVE-ID beobachten">
               <TextInput value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="CVE-2024-1086" className="w-48 font-mono" maxLength={20} />
@@ -295,7 +295,7 @@ function CveView() {
               Zur Watchlist
             </Button>
           </form>
-        </details>
+        </div>
         <div className="sr-only" role="status" aria-live="polite">{announce}</div>
         <div role="status">{notice ? <ErrorNote message={notice} /> : null}</div>
 
@@ -550,7 +550,8 @@ function SortTh({ label, hint, active, dir, onClick, className }: { label: strin
       <span className="th-pad">
         <button type="button" onClick={onClick} className="inline-flex min-h-7 items-center gap-1 font-semibold max-md:min-h-11">
           {label}
-          <span aria-hidden="true" className={active ? "" : "text-fg3"}>{active ? (dir === "asc" ? "↑" : "↓") : "↕"}</span>
+          {/* ↑ = höchster Wert / neuestes zuerst, ↓ = niedrigster / ältestes zuerst; inaktive Spalten zeigen keinen Pfeil */}
+          {active ? <span aria-hidden="true">{dir === "desc" ? "↑" : "↓"}</span> : null}
           {hint ? <span className="sr-only">{hint}</span> : null}
         </button>
       </span>

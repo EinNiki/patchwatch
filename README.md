@@ -222,3 +222,12 @@ Der Live-WebSocket läuft in der Entwicklung direkt gegen die API (Next.js leite
 
 Tests: `cargo test --workspace` (Integrationstests brauchen `DATABASE_URL` auf eine Postgres-Instanz), im Web
 `npm run lint && npm run typecheck && npm run build`.
+
+## Anmeldung per OpenID Connect
+
+Zusätzlich zum Passwort lässt sich ein OIDC-Provider (Authentik, Keycloak, Google, Entra ...) einrichten. Variablen siehe
+`.env.example` (`PATCHWATCH_OIDC_*`). Der Ablauf ist Authorization Code mit PKCE, nonce und einem state-Cookie.
+Angemeldet wird nur, wer in `PATCHWATCH_OIDC_ALLOWED_EMAILS` oder `PATCHWATCH_OIDC_ALLOWED_DOMAINS` steht und eine
+verifizierte E-Mail-Adresse hat; ohne Allow-List startet der Server nicht. SSO-Benutzer erscheinen als `oidc:<email>`
+und haben kein Passwort. Die Signatur des ID-Tokens wird nicht geprüft, weil er direkt vom Token-Endpunkt über TLS kommt
+(OIDC Core 3.1.3.7); Aussteller, Zielgruppe, Ablauf und nonce werden geprüft.

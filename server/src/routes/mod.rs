@@ -7,6 +7,7 @@ pub mod hosts;
 mod live;
 mod matrix;
 mod notifications;
+mod oidc;
 mod report;
 pub mod settings;
 
@@ -48,6 +49,9 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        .route("/auth/providers", get(oidc::providers))
+        .route("/auth/oidc/login", get(oidc::login))
+        .route("/auth/oidc/callback", get(oidc::callback))
         .route("/auth/password", post(auth::change_password))
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/request-report", post(hosts::request_report_all))
