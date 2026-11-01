@@ -34,7 +34,7 @@ Konfiguration: `/etc/patchwatch/agent.toml`, Beispiel in `agent/dist/agent.toml.
 ### Check-in und „Jetzt aktualisieren“
 
 Ein zweiter systemd-Timer (`patchwatch-agent-checkin.timer`, minütlich) startet `patchwatch-agent checkin`. Der Agent
-hält das Intervall aus `agent.toml` selbst ein (`checkin_interval_secs`, Standard 300, 60–86400; `checkin_enabled = false`
+wartet per Long-Poll (`checkin_wait_secs`, Standard 40): „Jetzt aktualisieren“ erreicht den Agent so binnen Sekunden. Mit `checkin_wait_secs = 0` gilt stattdessen das Intervall aus `agent.toml` (`checkin_interval_secs`, Standard 300, 60–86400; `checkin_enabled = false`
 schaltet ihn ab) und fragt `POST /api/v1/agent/checkin`. Die Antwort ist ausschließlich `{"report_requested": true|false}`:
 **keine Befehle, Pfade oder Skripte vom Server, kein offener Port am Host.** Nur bei `true` sendet der Agent einen Report.
 In der UI (Seite „Agents“) fordert „Jetzt aktualisieren“ bzw. „Alle aktualisieren“ einen Report an; ein „Ja“ wird pro

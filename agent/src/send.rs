@@ -7,8 +7,13 @@ use std::time::Duration;
 const MAX_RESPONSE_BYTES: u64 = 4096;
 
 pub(crate) fn http_agent(cfg: &Config) -> ureq::Agent {
+    http_agent_with(cfg, 0)
+}
+
+/// `extra_secs`: zusätzliche Wartezeit für Long-Poll-Anfragen.
+fn http_agent_with(cfg: &Config, extra_secs: u64) -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(cfg.timeout_secs)))
+        .timeout_global(Some(Duration::from_secs(cfg.timeout_secs + extra_secs)))
         // Keine Redirects: der Authorization-Header soll den Zielserver nie verlassen.
         .max_redirects(0)
         .build()
@@ -23,7 +28,7 @@ pub fn ask_checkin(cfg: &Config, token: &str) -> Result<bool, AgentError> {
         #[serde(default)]
         report_requested: bool,
     }
-    let agent = http_agent(cfg);
+    let agent = http_agent_with(cfg, cfg.checkin_wait_secs);
     let mut resp = match agent
         .post(&cfg.checkin_url())
         .header("Authorization", &format!("Bearer {token}"))

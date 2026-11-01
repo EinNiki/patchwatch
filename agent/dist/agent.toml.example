@@ -8,3 +8,6 @@ timeout_secs = 30
 # (und optional: systemctl disable --now patchwatch-agent-checkin.timer).
 checkin_enabled = true
 checkin_interval_secs = 300
+# Long-Poll: der Server hält den Check-in bis zu so viele Sekunden offen und antwortet sofort, sobald in der UI
+# "Jetzt aktualisieren" gedrückt wird (0-55; 0 = nur alle checkin_interval_secs fragen).
+checkin_wait_secs = 40

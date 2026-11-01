@@ -24,6 +24,14 @@ pub struct Config {
     /// Mindestabstand zwischen zwei Check-ins; der systemd-Timer läuft minütlich, der Agent prüft das Intervall.
     #[serde(default = "default_checkin_interval")]
     pub checkin_interval_secs: u64,
+    /// Long-Poll: Der Server hält den Check-in bis zu so viele Sekunden offen und antwortet sofort, sobald in der UI
+    /// „Jetzt aktualisieren“ gedrückt wird. Mit Wert > 0 entfällt das Intervall; 0 = klassisch (nur `checkin_interval_secs`).
+    #[serde(default = "default_checkin_wait")]
+    pub checkin_wait_secs: u64,
+}
+
+fn default_checkin_wait() -> u64 {
+    40
 }
 
 fn default_true() -> bool {
@@ -66,14 +74,24 @@ impl Config {
                 "checkin_interval_secs muss zwischen 60 und 86400 liegen".into(),
             ));
         }
+        if cfg.checkin_wait_secs > 55 {
+            return Err(AgentError::Config(
+                "checkin_wait_secs muss zwischen 0 und 55 liegen".into(),
+            ));
+        }
         Ok(cfg)
     }
 
     pub fn checkin_url(&self) -> String {
-        format!(
+        let base = format!(
             "{}/api/v1/agent/checkin",
             self.server_url.trim_end_matches('/')
-        )
+        );
+        if self.checkin_wait_secs > 0 {
+            format!("{base}?wait={}", self.checkin_wait_secs)
+        } else {
+            base
+        }
     }
 
     pub fn report_url(&self) -> String {
@@ -117,7 +135,7 @@ mod tests {
         assert_eq!(c.checkin_interval_secs, 300);
         assert_eq!(
             c.checkin_url(),
-            "https://pw.example.org/api/v1/agent/checkin"
+            "https://pw.example.org/api/v1/agent/checkin?wait=40"
         );
         assert_eq!(c.report_url(), "https://pw.example.org/api/v1/report");
     }

@@ -67,7 +67,8 @@ pub fn run<R: Serialize>(
         return Ok(Outcome::Skipped);
     }
     if let Some(path) = state {
-        if !due(read_stamp(path), now, cfg.checkin_interval_secs) {
+        // Mit Long-Poll hält der Server die Anfrage offen; ein Intervall zwischen den Aufrufen ist dann nicht nötig.
+        if cfg.checkin_wait_secs == 0 && !due(read_stamp(path), now, cfg.checkin_interval_secs) {
             return Ok(Outcome::Skipped);
         }
         // Zeitstempel vor dem Netzwerkzugriff: auch bei Fehlern gilt das Intervall, kein Hämmern auf den Server.
@@ -187,7 +188,7 @@ mod tests {
         assert_eq!(out.unwrap(), Outcome::NothingRequested);
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
-        assert!(seen[0].starts_with("POST /api/v1/agent/checkin "));
+        assert!(seen[0].starts_with("POST /api/v1/agent/checkin?wait=40 "));
         assert!(seen[0]
             .to_lowercase()
             .contains("authorization: bearer pw_tok"));
@@ -200,7 +201,7 @@ mod tests {
         assert_eq!(out, Outcome::ReportSent);
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
-        assert!(seen[0].starts_with("POST /api/v1/agent/checkin "));
+        assert!(seen[0].starts_with("POST /api/v1/agent/checkin?wait=40 "));
         assert!(seen[1].starts_with("POST /api/v1/report "));
         let body: serde_json::Value =
             serde_json::from_str(seen[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
@@ -247,7 +248,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let state = dir.join(STATE_FILE);
         std::fs::write(&state, "1000").unwrap();
-        let on = cfg("http://127.0.0.1:1", "checkin_interval_secs = 300");
+        let on = cfg(
+            "http://127.0.0.1:1",
+            "checkin_interval_secs = 300\ncheckin_wait_secs = 0",
+        );
         assert_eq!(
             run(&on, "t", Some(&state), 1100, report).unwrap(),
             Outcome::Skipped

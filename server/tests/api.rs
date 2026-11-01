@@ -1046,3 +1046,47 @@ async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
         StatusCode::BAD_REQUEST
     );
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn long_poll_checkin_answers_as_soon_as_a_report_is_requested(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let started = std::time::Instant::now();
+    let headers = [("authorization", auth.as_str())];
+    let poll = call(
+        &app,
+        Method::POST,
+        "/api/v1/agent/checkin?wait=20",
+        &headers,
+        None,
+    );
+    let request = async {
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        sqlx::query("UPDATE hosts SET report_requested_at = now(), report_dispatched_at = NULL WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    };
+    let (resp, ()) = tokio::join!(poll, request);
+    assert_eq!(resp.json["report_requested"], true);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(8),
+        "Antwort kam erst nach {:?}",
+        started.elapsed()
+    );
+
+    // Ohne Anforderung endet der Long-Poll nach der Wartezeit mit „nein“.
+    let t = std::time::Instant::now();
+    let none = call(
+        &app,
+        Method::POST,
+        "/api/v1/agent/checkin?wait=1",
+        &[("authorization", &auth)],
+        None,
+    )
+    .await;
+    assert_eq!(none.json["report_requested"], false);
+    assert!(t.elapsed() >= std::time::Duration::from_millis(900));
+}
