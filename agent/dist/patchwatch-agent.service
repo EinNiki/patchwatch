@@ -1,0 +1,29 @@
+[Unit]
+Description=patchwatch agent (einmaliger Patch- und Kernel-Report)
+Documentation=https://github.com/EinNiki/patchwatch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=patchwatch
+Group=patchwatch
+# Token-Datei gehört root:root 0600; systemd stellt sie dem Dienst als Credential bereit.
+LoadCredential=token:/etc/patchwatch/token
+ExecStart=/usr/local/bin/patchwatch-agent --config /etc/patchwatch/agent.toml
+TimeoutStartSec=120
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service

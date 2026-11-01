@@ -1,0 +1,11 @@
+[Unit]
+Description=patchwatch agent Check-in (Intervall: checkin_interval_secs in agent.toml)
+
+[Timer]
+# Der Timer weckt den Agent minütlich; ob ein Check-in fällig ist, entscheidet der Agent anhand des Intervalls.
+OnCalendar=minutely
+RandomizedDelaySec=15
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
