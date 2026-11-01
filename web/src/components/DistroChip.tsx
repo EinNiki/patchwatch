@@ -9,7 +9,7 @@ export const distroName = (source: string): string => DISTRO_NAME[source] ?? sou
 const STATUS: Record<string, { word: string; tone: Tone; icon: IconName; muted?: boolean }> = {
   fixed: { word: "gefixt", tone: "ok", icon: "ok" },
   not_affected: { word: "nicht betroffen", tone: "ok", icon: "ok", muted: true },
-  fix_pending: { word: "Fix in Arbeit", tone: "warn", icon: "clock" },
+  fix_pending: { word: "verwundbar, Fix in Arbeit", tone: "crit", icon: "crit" },
   vulnerable: { word: "verwundbar", tone: "crit", icon: "crit" },
   unknown: { word: "unbekannt", tone: "unknown", icon: "unknown" },
 };

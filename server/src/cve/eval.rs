@@ -148,9 +148,10 @@ fn row_verdict(
                 .as_deref()
                 .map(|v| format!(" (voraussichtlich in {v})"))
                 .unwrap_or_default();
+            // Solange der Fix nicht veröffentlicht ist, ist der Host verwundbar (wie auf ubuntu.com: "Vulnerable").
             (
-                CveStatus::FixPending,
-                format!("{who}: Fix angekündigt{target}, noch nicht veröffentlicht."),
+                CveStatus::Vulnerable,
+                format!("{who}: verwundbar, Fix in Arbeit{target}, noch nicht veröffentlicht."),
             )
         }
         SourceStatus::Fixed => {
@@ -369,7 +370,7 @@ mod tests {
                     FixPending,
                     Some("6.8.0-149.149"),
                 ),
-                CveStatus::FixPending,
+                CveStatus::Vulnerable,
             ),
             (
                 row("ubuntu", "noble", "linux", NotAffected, None),

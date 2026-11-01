@@ -98,6 +98,13 @@ async fn main() -> Result<()> {
             }
             let listen = cfg.listen.clone();
             let state = AppState::new(pool, cfg)?;
+            // Statuswerte einmal neu berechnen (Bewertungsregeln können sich zwischen Versionen ändern).
+            let re = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = patchwatch_server::cve::reeval::reevaluate_all(&re).await {
+                    tracing::warn!(error = %e, "Neubewertung beim Start fehlgeschlagen");
+                }
+            });
             tokio::spawn(patchwatch_server::live::run(state.clone()));
             tokio::spawn(worker::scheduler(state.clone()));
             tokio::spawn(patchwatch_server::cve::refresh::run(state.clone()));
