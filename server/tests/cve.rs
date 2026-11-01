@@ -2094,3 +2094,66 @@ async fn list_shortens_descriptions_and_search_finds_ids_and_text(pool: PgPool) 
     assert_eq!(evil.status, StatusCode::OK);
     assert!(evil.json.as_array().unwrap().is_empty());
 }
+
+/// Regression: der Distributions-Chip zeigte "verwundbar", weil ein Paket, das der Host nicht nutzt (linux-nvidia),
+/// den Release rot färbte, obwohl die Bewertung des Hosts auf `linux` ("Fix angekündigt") beruht.
+#[sqlx::test(migrations = "./migrations")]
+async fn distro_chip_only_counts_packages_the_hosts_use(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let host = add_host(&pool, "res-01").await;
+    sqlx::query("UPDATE hosts SET os_codename = 'resolute' WHERE id = $1")
+        .bind(host)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO cves (id, description) VALUES ('CVE-2026-77801', 'x')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (pkg, status, fix) in [
+        ("linux", "fix_pending", Some("7.0.0-43.43")),
+        ("linux-nvidia", "vulnerable", None),
+    ] {
+        sqlx::query(
+            "INSERT INTO cve_source_status (cve_id, source, release, package, status, fix_version, raw, source_id) \
+             VALUES ('CVE-2026-77801', 'ubuntu', 'resolute', $1, $2, $3, '{}', 'ubuntu')",
+        )
+        .bind(pkg)
+        .bind(status)
+        .bind(fix)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO host_cve_status (host_id, cve_id, status, reason, sources) VALUES ($1, 'CVE-2026-77801', 'fix_pending', 'r', \
+         '[{\"source\":\"ubuntu\",\"release\":\"resolute\",\"package\":\"linux\",\"status\":\"fix_pending\",\"fix_version\":\"7.0.0-43.43\"}]')",
+    )
+    .bind(host)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for path in [
+        "/api/v1/cves?q=CVE-2026-77801",
+        "/api/v1/cves/CVE-2026-77801",
+    ] {
+        let r = call(&app, Method::GET, path, &hdr(&h), None).await;
+        let distros = if r.json.is_array() {
+            &r.json[0]["distros"]
+        } else {
+            &r.json["distros"]
+        };
+        let d = distros.as_array().unwrap();
+        assert_eq!(d.len(), 1, "{path}");
+        assert_eq!(
+            d[0]["status"], "fix_pending",
+            "{path}: Chip folgt dem Paket des Hosts"
+        );
+        assert_eq!(d[0]["package"], "linux", "{path}");
+    }
+}

@@ -102,9 +102,24 @@ fn severity(status: &str) -> u8 {
 }
 
 /// Fasst Quellenzeilen je (Quelle, Release) zusammen; Sortierung: Quelle, Release.
-fn collapse(rows: Vec<SourceRow>, mine: &HashSet<String>) -> Vec<Distro> {
+///
+/// `used`: (Quelle, Release, Paket), auf die sich die Bewertung der Hosts stützt. Für Releases, die auf einem Host laufen,
+/// zählen nur diese Pakete; sonst färbt z. B. `linux-nvidia` den Chip rot, obwohl der Host `linux` nutzt.
+fn collapse(
+    rows: Vec<SourceRow>,
+    mine: &HashSet<String>,
+    used: &HashSet<(String, String, String)>,
+) -> Vec<Distro> {
     let mut by: BTreeMap<(String, String), Distro> = BTreeMap::new();
+    let has_used =
+        |source: &str, release: &str| used.iter().any(|(s, r, _)| s == source && r == release);
     for r in rows {
+        if mine.contains(&r.release)
+            && has_used(&r.source, &r.release)
+            && !used.contains(&(r.source.clone(), r.release.clone(), r.package.clone()))
+        {
+            continue;
+        }
         // Anreicherungsquellen (NVD, CISA KEV) führen Release "*": kein Distributions-Chip.
         if r.release == "*" {
             continue;
@@ -139,6 +154,27 @@ fn collapse(rows: Vec<SourceRow>, mine: &HashSet<String>) -> Vec<Distro> {
         }
     }
     by.into_values().collect()
+}
+
+/// Quellenzeilen, auf die sich die Host-Bewertungen der CVEs stützen (siehe `collapse`).
+async fn used_packages(
+    st: &AppState,
+    ids: &[String],
+) -> ApiResult<HashMap<String, HashSet<(String, String, String)>>> {
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT DISTINCT h.cve_id, s->>'source', s->>'release', s->>'package' \
+         FROM host_cve_status h CROSS JOIN LATERAL jsonb_array_elements(h.sources) s WHERE h.cve_id = ANY($1)",
+    )
+    .bind(ids)
+    .fetch_all(&st.pool)
+    .await?;
+    let mut out: HashMap<String, HashSet<(String, String, String)>> = HashMap::new();
+    for (cve, source, release, package) in rows {
+        out.entry(cve)
+            .or_default()
+            .insert((source, release, package));
+    }
+    Ok(out)
 }
 
 /// Releases (Codenamen), die auf mindestens einem Host laufen.
@@ -302,6 +338,8 @@ pub async fn list(
     .map(SourceWithCve::split)
     .collect();
     let mine = my_releases(&st).await?;
+    let used = used_packages(&st, &ids).await?;
+    let no_used = HashSet::new();
     let mut per_cve: HashMap<String, Vec<SourceRow>> = HashMap::new();
     for (cve, row) in sources {
         per_cve.entry(cve).or_default().push(row);
@@ -309,7 +347,11 @@ pub async fn list(
     let out = rows
         .into_iter()
         .map(|cve| {
-            let all = collapse(per_cve.remove(&cve.id).unwrap_or_default(), &mine);
+            let all = collapse(
+                per_cve.remove(&cve.id).unwrap_or_default(),
+                &mine,
+                used.get(&cve.id).unwrap_or(&no_used),
+            );
             let total = all.len();
             let distros: Vec<Distro> = all
                 .into_iter()
@@ -407,6 +449,7 @@ pub async fn detail(
         .into_iter()
         .filter_map(|s| source_link(s, &id).map(|u| serde_json::json!({ "source": s, "url": u })))
         .collect();
+    let used = used_packages(&st, std::slice::from_ref(&id)).await?;
     let distros = collapse(
         sources
             .iter()
@@ -420,6 +463,7 @@ pub async fn detail(
             })
             .collect(),
         &mine,
+        used.get(&id).unwrap_or(&HashSet::new()),
     );
     Ok(Json(serde_json::json!({
         "cve": cve, "sources": sources, "distros": distros, "links": links,
