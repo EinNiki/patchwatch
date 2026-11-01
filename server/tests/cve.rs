@@ -2020,3 +2020,77 @@ async fn migration_0005_keeps_existing_sources_data_and_secrets(pool: PgPool) {
             .is_err()
     );
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn list_shortens_descriptions_and_search_finds_ids_and_text(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let long = format!("Pufferueberlauf {}", "x".repeat(990));
+    sqlx::query("INSERT INTO cves (id, description) VALUES ('CVE-2026-77701', $1), ('CVE-2026-77702', 'kurz')")
+        .bind(&long)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let list = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?q=cve-2026-777",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(list.status, StatusCode::OK);
+    let rows = list.json.as_array().unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "ID-Suche (auch in Kleinbuchstaben und als Teil) findet beide"
+    );
+    let long_row = rows.iter().find(|r| r["id"] == "CVE-2026-77701").unwrap();
+    assert_eq!(
+        long_row["description"].as_str().unwrap().chars().count(),
+        300,
+        "Liste kürzt die Beschreibung"
+    );
+
+    let detail = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves/CVE-2026-77701",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(
+        detail.json["cve"]["description"].as_str().unwrap(),
+        long,
+        "Detail liefert die volle Beschreibung"
+    );
+
+    // Volltext: Treffer in der Beschreibung, Zähler und Watchlist bleiben je Zeile korrekt.
+    let text = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?q=Pufferueberlauf&limit=5",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(text.json.as_array().unwrap().len(), 1);
+    assert_eq!(text.json[0]["hosts_vulnerable"], 0);
+    // LIKE-Metazeichen und SQL-Anführungszeichen in der Suche bleiben Text.
+    let evil = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?q=%25%27%3B--",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(evil.status, StatusCode::OK);
+    assert!(evil.json.as_array().unwrap().is_empty());
+}

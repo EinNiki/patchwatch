@@ -161,6 +161,9 @@ fn source_link(source: &str, id: &str) -> Option<String> {
     }
 }
 
+/// Länge der Beschreibung in der Liste (Zeichen); die volle Beschreibung liefert `GET /cves/{id}`.
+const LIST_DESCRIPTION_CHARS: usize = 300;
+
 const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at, c.updated_at, \
     (w.cve_id IS NOT NULL) AS watched, w.note, \
     EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = c.id AND k.source = 'cisa_kev') AS exploited, \
@@ -215,30 +218,77 @@ pub async fn list(
                 .replace('_', "\\_")
         )
     });
-    // Release-Einschränkung für Filter und Chips: `$5 = true` heißt alle Releases.
-    let in_scope =
-        "($5::bool OR s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL))";
-    let rows = sqlx::query_as::<_, CveRow>(&format!(
-        "{CVE_SELECT} WHERE ($1::bool IS NOT TRUE OR w.cve_id IS NOT NULL) \
-         AND ($2::text IS NULL OR c.id ILIKE $2 OR c.description ILIKE $2) \
-         AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = $6 AND {in_scope})) \
-         AND ($7::text IS NULL OR ($7 = 'fixed' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'debian' AND s.status = 'fixed' AND {in_scope})) \
-              OR ($7 = 'open' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'debian' AND s.status IN ('vulnerable','fix_pending') AND {in_scope}))) \
-         AND ($8::text IS NULL OR ($8 = 'fixed' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'ubuntu' AND s.status = 'fixed' AND {in_scope})) \
-              OR ($8 = 'open' AND EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = 'ubuntu' AND s.status IN ('vulnerable','fix_pending') AND {in_scope}))) \
-         GROUP BY c.id, w.cve_id, w.note \
-         ORDER BY (w.cve_id IS NOT NULL) DESC, c.updated_at DESC, c.id DESC LIMIT $3 OFFSET $4"
-    ))
-    .bind(q.watchlist)
-    .bind(pattern)
-    .bind(limit)
-    .bind(offset)
-    .bind(all_releases)
-    .bind(distro)
-    .bind(debian_fix)
-    .bind(ubuntu_fix)
-    .fetch_all(&st.pool)
-    .await?;
+    // Die Filter werden als Konstanten in die Abfrage geschrieben (nur geprüfte Werte aus den festen Listen oben, nie
+    // Nutzertext): Mit Parametern wählt der Planer einen generischen Plan und braucht für "Debian offen" ~0,5 s statt ~0,1 s.
+    // Nutzertext (Suche) bleibt ein gebundener Parameter.
+    let in_scope = if all_releases {
+        "true"
+    } else {
+        "s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL)"
+    };
+    let mut conds: Vec<String> = Vec::new();
+    if q.watchlist == Some(true) {
+        conds.push("w.cve_id IS NOT NULL".into());
+    }
+    if pattern.is_some() {
+        // Sieht die Eingabe wie (der Anfang) einer CVE-ID aus, genügt die ID; die Volltextsuche in den Beschreibungen
+        // liest alle Texte (~0,4 s bei 20 000 CVEs).
+        let id_like = q.q.as_deref().is_some_and(|t| {
+            t.len() >= 4
+                && t[..4].eq_ignore_ascii_case("cve-")
+                && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+        conds.push(if id_like {
+            "c.id ILIKE $1".into()
+        } else {
+            "(c.id ILIKE $1 OR c.description ILIKE $1)".into()
+        });
+    }
+    let exists = |source: &str, statuses: &str| {
+        format!("EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = '{source}'{statuses} AND {in_scope})")
+    };
+    if let Some(d) = distro {
+        conds.push(exists(d, ""));
+    }
+    for (source, state) in [("debian", debian_fix), ("ubuntu", ubuntu_fix)] {
+        match state {
+            Some("fixed") => conds.push(exists(source, " AND s.status = 'fixed'")),
+            Some("open") => conds.push(exists(
+                source,
+                " AND s.status IN ('vulnerable','fix_pending')",
+            )),
+            _ => {}
+        }
+    }
+    let filter = if conds.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conds.join(" AND "))
+    };
+    // Erst die Seite (Filter, Sortierung, LIMIT) bestimmen, danach nur für diese Zeilen Zähler und KEV-Flag bilden.
+    // Eine Aggregation über alle CVEs vor dem LIMIT kostete ~190 ms bei 20 000 CVEs (siehe docs/perf.md).
+    // Die Beschreibung wird für die Liste gekürzt (erst für die Zeilen der Seite, sonst wird sie für alle CVEs entpackt);
+    // die volle steht im Detail.
+    // limit und offset sind geklemmte Zahlen (keine Nutzerstrings) und stehen deshalb direkt in der Abfrage.
+    let query = format!(
+        "SELECT p.id, left(d.description, {LIST_DESCRIPTION_CHARS}) AS description, p.priority, p.published_at, p.updated_at, p.watched, p.note, \
+         EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = p.id AND k.source = 'cisa_kev') AS exploited, \
+         hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_unknown \
+         FROM (SELECT c.id, c.priority, c.published_at, c.updated_at, (w.cve_id IS NOT NULL) AS watched, w.note \
+               FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id {filter} \
+               ORDER BY (w.cve_id IS NOT NULL) DESC, c.updated_at DESC, c.id DESC LIMIT {limit} OFFSET {offset}) p \
+         JOIN cves d ON d.id = p.id \
+         CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
+                                    count(*) FILTER (WHERE h.status = 'fix_pending') AS hosts_fix_pending, \
+                                    count(*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \
+                             FROM host_cve_status h WHERE h.cve_id = p.id) hc \
+         ORDER BY p.watched DESC, p.updated_at DESC, p.id DESC"
+    );
+    let mut rows_query = sqlx::query_as::<_, CveRow>(&query);
+    if let Some(p) = &pattern {
+        rows_query = rows_query.bind(p);
+    }
+    let rows = rows_query.fetch_all(&st.pool).await?;
 
     let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
     let sources: Vec<(String, SourceRow)> = sqlx::query_as::<_, SourceWithCve>(
