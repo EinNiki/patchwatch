@@ -206,3 +206,121 @@ fn oidc_needs_an_allow_list() {
     };
     assert!(Config::from_sources(None, &env).is_err());
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn oidc_can_be_configured_in_the_ui(pool: PgPool) {
+    use axum::http::Method;
+    let idp = start_idp().await;
+    // Ohne OIDC-Umgebungsvariablen, aber mit Schlüssel für Geheimnisse.
+    let cfg = Config::from_sources(None, &|k| {
+        (k == "PATCHWATCH_SECRET_KEY").then(|| URL_SAFE_NO_PAD.encode([7u8; 32]))
+    })
+    .unwrap();
+    let app = router(AppState::new(pool.clone(), cfg).unwrap());
+    patchwatch_server::admin::upsert_admin(&pool, "admin", "ein-langes-test-passwort")
+        .await
+        .unwrap();
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"username":"admin","password":"ein-langes-test-passwort"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session = login.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let body = axum::body::to_bytes(login.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let csrf = serde_json::from_slice::<Value>(&body).unwrap()["csrf_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let put = |payload: Value| {
+        let app = app.clone();
+        let (session, csrf) = (session.clone(), csrf.clone());
+        async move {
+            let r = app
+                .oneshot(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/api/v1/settings/oidc")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .header(header::COOKIE, session)
+                        .header("x-csrf-token", csrf)
+                        .body(Body::from(payload.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = r.status();
+            let b = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&b).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let mut payload = json!({
+        "enabled": true, "issuer": idp.base, "client_id": "pw-client", "client_secret": "secret",
+        "redirect_url": "https://pw.example/api/v1/auth/oidc/callback", "name": "Test-IdP",
+        "allowed_emails": [], "allowed_domains": []
+    });
+    // Ohne Allow-List abgelehnt.
+    assert_eq!(put(payload.clone()).await.0, StatusCode::BAD_REQUEST);
+    payload["allowed_domains"] = json!(["Example.org"]);
+    let (status, view) = put(payload).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["secret_set"], true);
+    assert!(
+        view.to_string().find("\"secret\"").is_none()
+            && !view.to_string().contains("client_secret")
+    );
+
+    let providers = get_path(&app, "/api/v1/auth/providers", None).await;
+    let b = axum::body::to_bytes(providers.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&b).unwrap();
+    assert_eq!(v["oidc"]["enabled"], true);
+    assert_eq!(v["oidc"]["name"], "Test-IdP");
+
+    *idp.email.lock().unwrap() = "carol@example.org".into();
+    let (state, cookie) = begin(&app, &idp).await;
+    let cb = get_path(
+        &app,
+        &format!("/api/v1/auth/oidc/callback?code=c&state={state}"),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(cb.headers()[header::LOCATION], "/");
+
+    // Abschalten in der UI schaltet auch den Login ab.
+    let (status, _) = put(
+        json!({"enabled": false, "issuer": idp.base, "client_id": "pw-client",
+        "redirect_url": "https://pw.example/cb", "allowed_domains": ["example.org"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        get_path(&app, "/api/v1/auth/oidc/login", None)
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}

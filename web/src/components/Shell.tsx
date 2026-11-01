@@ -95,10 +95,10 @@ const rowState = (active: boolean) => (active ? "border-accent bg-sunk font-semi
 
 function NavLinks({ pathname }: { pathname: string }) {
   const subId = useId();
-  // Auf-/Zu-Zustand der Gruppe bleibt über Seitenwechsel und Neuladen erhalten; auf Unterseiten ist sie immer offen.
+  // Auf-/Zu-Zustand der Gruppe bleibt über Seitenwechsel und Neuladen erhalten; ohne gespeicherte Wahl ist sie auf Unterseiten offen.
   const [stored, setStored] = useStoredFlag("pw-nav:notifications");
   const onSub = pathname.startsWith("/notifications/");
-  const expanded = onSub || stored === true;
+  const expanded = typeof stored === "boolean" ? stored : onSub;
   const channels = useApi<NotificationsResponse>("/notifications", 60_000).data?.channels;
 
   return (
@@ -125,9 +125,8 @@ function NavLinks({ pathname }: { pathname: string }) {
                   aria-expanded={expanded}
                   aria-controls={subId}
                   aria-label={`${n.label}: Kanäle ${expanded ? "ausblenden" : "einblenden"}`}
-                  disabled={onSub}
-                  onClick={() => setStored(!(stored === true))}
-                  className="absolute inset-y-0 right-0 inline-flex min-w-9 items-center justify-center rounded-r-sm text-fg3 hover:text-fg disabled:cursor-default disabled:opacity-60 max-md:min-w-11 md:max-lg:hidden"
+                  onClick={() => setStored(!expanded)}
+                  className="absolute inset-y-0 right-0 inline-flex min-w-9 items-center justify-center rounded-r-sm text-fg3 hover:text-fg max-md:min-w-11 md:max-lg:hidden"
                 >
                   <span className={`transition-transform duration-(--dur-2) ease-(--ease-out) ${expanded ? "rotate-180" : ""}`}>
                     <NavIcon name="chevron" />

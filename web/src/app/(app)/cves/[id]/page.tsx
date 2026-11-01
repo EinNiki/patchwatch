@@ -1,5 +1,6 @@
 "use client";
 
+import { kernelVariant } from "@/lib/variant";
 import { use } from "react";
 import Link from "next/link";
 import { prefetchApi, useApi } from "@/lib/useApi";
@@ -125,12 +126,13 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
         ) : (
           <div className="max-xl:overflow-x-auto">
             <table className="tbl stack">
-              <caption>Status je Quelle, Release und Paket</caption>
+              <caption>Status je Quelle, Release und Paket (mit Variante: Standard-Kernel, Cloud-, HWE- oder Backport-Serie)</caption>
               <thead>
                 <tr>
                   <th scope="col"><span className="th-pad">Quelle</span></th>
                   <th scope="col"><span className="th-pad">Release</span></th>
                   <th scope="col"><span className="th-pad">Paket</span></th>
+                  <th scope="col"><span className="th-pad">Variante</span></th>
                   <th scope="col"><span className="th-pad">Status</span></th>
                   <th scope="col"><span className="th-pad">Fix-Version</span></th>
                   <th scope="col"><span className="th-pad">Geändert</span></th>
@@ -144,6 +146,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
                       <td className="cell-primary">{distroName(s.source)}</td>
                       <td data-label="Release"><Mono>{s.release}</Mono></td>
                       <td data-label="Paket"><Mono>{s.package}</Mono></td>
+                      <td data-label="Variante" className="text-fg2">{kernelVariant(s.package) ?? <span className="text-fg3">–</span>}</td>
                       <td className="cell-status lead"><StatusBadge info={info} /></td>
                       <td data-label="Fix-Version">{s.fix_version ? <Mono>{s.fix_version}</Mono> : <span className="text-fg3">–</span>}</td>
                       <td data-label="Geändert"><RelTime iso={s.updated_at} /></td>

@@ -201,6 +201,119 @@ function Schedules() {
   );
 }
 
+interface OidcView {
+  source: "ui" | "env" | "none";
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  redirect_url: string;
+  name: string;
+  scopes: string;
+  allowed_emails: string[];
+  allowed_domains: string[];
+  secret_set: boolean;
+  secret_storage: boolean;
+}
+
+/** Anmeldung per OpenID Connect; die Einstellung hier hat Vorrang vor PATCHWATCH_OIDC_* aus der Umgebung. */
+function OidcForm() {
+  const o = useApi<OidcView>("/settings/oidc");
+  const [edit, setEdit] = useState<Partial<Record<string, string | boolean>>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  if (o.error && !o.data) return <ErrorNote message={o.error} />;
+  if (!o.data) return <Loading what="Single Sign-On" />;
+  const d = o.data;
+  const text = (k: keyof OidcView) => (typeof edit[k] === "string" ? (edit[k] as string) : String(d[k] ?? ""));
+  const list = (k: "allowed_emails" | "allowed_domains") => (typeof edit[k] === "string" ? (edit[k] as string) : d[k].join(", "));
+  const enabled = typeof edit.enabled === "boolean" ? edit.enabled : d.enabled;
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDone(false);
+    setEdit({ ...edit, [k]: e.target.value });
+  };
+  const split = (v: string) => v.split(/[,\s]+/).filter(Boolean);
+  const redirectDefault = `${window.location.origin}/api/v1/auth/oidc/callback`;
+  const dirty = Object.keys(edit).length > 0;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.put("/settings/oidc", {
+        enabled,
+        issuer: text("issuer"),
+        client_id: text("client_id"),
+        redirect_url: text("redirect_url") || redirectDefault,
+        name: text("name"),
+        scopes: text("scopes"),
+        allowed_emails: split(list("allowed_emails")),
+        allowed_domains: split(list("allowed_domains")),
+        client_secret: typeof edit.client_secret === "string" && edit.client_secret ? edit.client_secret : undefined,
+      });
+      setEdit({});
+      setDone(true);
+      await o.reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Einstellungen konnten nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void save(e)} className="flex max-w-2xl flex-col gap-3">
+      {d.source === "env" ? (
+        <p className="text-sm text-fg2">Aktuell aus den Umgebungsvariablen <Mono>PATCHWATCH_OIDC_*</Mono>. Speichern hier übernimmt die Werte in die Datenbank und hat danach Vorrang.</p>
+      ) : null}
+      {!d.secret_storage ? (
+        <p className="border-l-4 border-warn bg-warn-soft px-3 py-2 text-sm text-warn">
+          <Mono>PATCHWATCH_SECRET_KEY</Mono> ist nicht gesetzt: Das Client-Secret lässt sich nicht speichern.
+        </p>
+      ) : null}
+      <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
+        <input type="checkbox" checked={enabled} onChange={(e) => { setDone(false); setEdit({ ...edit, enabled: e.target.checked }); }} className="size-4 accent-(--accent) max-md:size-5" />
+        Anmeldung per OpenID Connect aktivieren
+      </label>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Issuer-URL">
+          <TextInput value={text("issuer")} onChange={set("issuer")} placeholder="https://auth.example.org/application/o/patchwatch" maxLength={300} />
+        </Field>
+        <Field label="Name auf dem Button">
+          <TextInput value={text("name")} onChange={set("name")} placeholder="Authentik" maxLength={40} />
+        </Field>
+        <Field label="Client-ID">
+          <TextInput value={text("client_id")} onChange={set("client_id")} maxLength={300} autoComplete="off" />
+        </Field>
+        <Field label={d.source === "env" ? "Client-Secret (zum Übernehmen erneut eingeben)" : d.secret_set ? "Client-Secret (gespeichert, leer lassen = behalten)" : "Client-Secret"}>
+          <TextInput type="password" value={typeof edit.client_secret === "string" ? edit.client_secret : ""} onChange={set("client_secret")} autoComplete="new-password" maxLength={2048} />
+        </Field>
+        <Field label="Redirect-URL (beim Provider eintragen)">
+          <TextInput value={text("redirect_url") || redirectDefault} onChange={set("redirect_url")} maxLength={300} />
+        </Field>
+        <Field label="Scopes (leer = openid email profile)">
+          <TextInput value={text("scopes")} onChange={set("scopes")} maxLength={200} />
+        </Field>
+        <Field label="Erlaubte E-Mail-Adressen (Komma-getrennt)">
+          <TextInput value={list("allowed_emails")} onChange={set("allowed_emails")} placeholder="admin@example.org, ops@example.org" />
+        </Field>
+        <Field label="Erlaubte Domains (Komma-getrennt)">
+          <TextInput value={list("allowed_domains")} onChange={set("allowed_domains")} placeholder="example.org" />
+        </Field>
+      </div>
+      <p className="text-xs text-fg3">
+        Anmelden dürfen sich nur die hier genannten Adressen oder Domains, und nur mit beim Provider verifizierter E-Mail. Ohne Eintrag wird die Anmeldung nicht aktiviert. SSO-Benutzer erscheinen als <Mono>oidc:&lt;E-Mail&gt;</Mono>; die Passwort-Anmeldung bleibt bestehen.
+      </p>
+      {error ? <ErrorNote message={error} /> : null}
+      {done ? <p role="status" className="text-ok">Gespeichert.</p> : null}
+      <Button type="submit" variant="primary" busy={busy} disabled={!dirty} className="self-start">
+        Speichern
+      </Button>
+    </form>
+  );
+}
+
 export default function SettingsPage() {
   const { me } = useAuth();
   return (
@@ -213,6 +326,10 @@ export default function SettingsPage() {
 
       <SettingsSection id="look-h" title="Darstellung" description="„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.">
         <ThemeSelect />
+      </SettingsSection>
+
+      <SettingsSection id="sso-h" title="Single Sign-On" description="Anmeldung über einen OpenID-Connect-Provider (Authentik, Keycloak, Google, Entra …) zusätzlich zum Passwort.">
+        <OidcForm />
       </SettingsSection>
 
       <SettingsSection id="sched-h" title="Zeitpläne" description="Abruf der CVE-Feeds, Report-Anforderung und Schwellen. Änderungen gelten ohne Neustart.">

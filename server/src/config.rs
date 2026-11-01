@@ -55,17 +55,6 @@ impl Oidc {
     pub fn enabled(&self) -> bool {
         self.issuer.is_some()
     }
-
-    /// Darf sich diese (verifizierte) E-Mail-Adresse anmelden?
-    pub fn allows(&self, email: &str) -> bool {
-        let email = email.to_ascii_lowercase();
-        if self.allowed_emails.contains(&email) {
-            return true;
-        }
-        email
-            .rsplit_once('@')
-            .is_some_and(|(_, d)| self.allowed_domains.iter().any(|a| a == d))
-    }
 }
 
 /// 32-Byte-Schlüssel für die Verschlüsselung gespeicherter Geheimnisse (Base64 in der Konfiguration).

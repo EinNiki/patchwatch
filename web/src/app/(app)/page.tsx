@@ -65,6 +65,7 @@ function HostsView() {
   const q = params.get("q") ?? "";
   const status = (params.get("status") ?? "") as HostStatus | "";
   const rebootOnly = params.get("reboot") === "1";
+  const updatesOnly = params.get("updates") === "1";
   const unknownOnly = params.get("cve") === "unknown";
   const sort = (params.get("sort") ?? "status") as SortKey;
   const dir = params.get("dir") === "desc" ? "desc" : "asc";
@@ -88,12 +89,13 @@ function HostsView() {
         (!needle || haystack(h).includes(needle)) &&
         (!status || h.status === status) &&
         (!rebootOnly || h.reboot_needed) &&
+        (!updatesOnly || (h.updates_pending ?? 0) > 0) &&
         (!unknownOnly || h.is_proxmox || h.status === "cve_unknown" || h.cve_unknown > 0),
     );
     const cmp = SORTERS[sort] ?? SORTERS.status;
     const sorted = [...filtered].sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name, "de", { numeric: true }));
     return dir === "desc" ? sorted.reverse() : sorted;
-  }, [all, q, status, rebootOnly, unknownOnly, sort, dir]);
+  }, [all, q, status, rebootOnly, updatesOnly, unknownOnly, sort, dir]);
 
   const flashed = useFlash(
     all,
@@ -106,6 +108,7 @@ function HostsView() {
     const list: Kpi[] = [
       { id: "vuln", label: "Verwundbar (CVE)", icon: "crit", tone: "text-crit", count: n((h) => h.status === "cve_vulnerable"), param: { status: "cve_vulnerable" } },
       { id: "sec", label: "Sicherheitsupdates", icon: "crit", tone: "text-crit", count: n((h) => h.status === "security_updates"), param: { status: "security_updates" } },
+      { id: "updates", label: "Updates offen", icon: "warn", tone: "text-warn", count: n((h) => (h.updates_pending ?? 0) > 0), param: { updates: "1" } },
       { id: "reboot", label: "Neustart nötig", icon: "reboot", tone: "text-warn", count: n((h) => h.reboot_needed), param: { reboot: "1" } },
       { id: "unknown", label: "CVE-Lage unbekannt", icon: "unknown", tone: "text-unknown", count: n((h) => h.is_proxmox || h.status === "cve_unknown" || h.cve_unknown > 0), param: { cve: "unknown" } },
       { id: "stale", label: "Meldet sich nicht", icon: "clock", tone: "text-unknown", count: n((h) => h.status === "stale"), param: { status: "stale" } },
@@ -116,7 +119,7 @@ function HostsView() {
   const lastReport = useMemo(() => (all ?? []).reduce<string | null>((m, h) => (h.last_report_at && (!m || h.last_report_at > m) ? h.last_report_at : m), null), [all]);
 
   const feedOk = feedSummary(feeds.data)?.ok ?? false;
-  const activeFilters = [q.trim(), status, rebootOnly, unknownOnly].filter(Boolean).length;
+  const activeFilters = [q.trim(), status, rebootOnly, updatesOnly, unknownOnly].filter(Boolean).length;
   const filtering = activeFilters > 0;
 
   if (hosts.error && !all) return <ErrorNote message={hosts.error} />;
@@ -139,7 +142,7 @@ function HostsView() {
         </Empty>
       ) : (
         <>
-          <section aria-label="Kennzahlen" className="mb-3 grid grid-cols-2 border-y border-line md:grid-cols-3 xl:grid-cols-6">
+          <section aria-label="Kennzahlen" className="mb-3 grid grid-cols-2 border-y border-line md:grid-cols-3 xl:grid-cols-7">
             {kpis.map((k) => {
               const active = kpiActive(k);
               return (
@@ -265,7 +268,7 @@ function HostsView() {
                     </th>
                   </tr>
                 </thead>
-                <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${unknownOnly}|${q}`}>
+                <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${updatesOnly}|${unknownOnly}|${q}`}>
                   {rows.map((h) => (
                     <HostRow key={h.id} h={h} feedOk={feedOk} flash={flashed.has(h.id)} />
                   ))}

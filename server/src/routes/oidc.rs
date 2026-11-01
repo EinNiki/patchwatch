@@ -4,7 +4,7 @@
 //! Punkt 6), wohl aber Aussteller, Zielgruppe, Ablauf und nonce. Angemeldet wird nur, wer in `OIDC_ALLOWED_EMAILS`
 //! oder `OIDC_ALLOWED_DOMAINS` steht und dessen E-Mail-Adresse nicht als unverifiziert gemeldet wird.
 use crate::error::{ApiError, ApiResult};
-use crate::extract::ClientIp;
+use crate::extract::{Admin, ClientIp, CsrfAdmin};
 use crate::security;
 use crate::state::AppState;
 use axum::extract::{Query, State};
@@ -13,19 +13,254 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
 
 const STATE_COOKIE: &str = "pw_oidc";
 const COOKIE_PATH: &str = "/api/v1/auth/oidc";
 
+const SETTING_KEY: &str = "oidc";
+/// Zusatzdaten der Verschlüsselung des Client-Secrets in der Datenbank.
+const SECRET_AAD: &str = "oidc-client-secret";
+
+/// In der UI gepflegte Einstellung (Tabelle `settings`); hat Vorrang vor den Umgebungsvariablen.
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
+struct Stored {
+    enabled: bool,
+    issuer: String,
+    client_id: String,
+    redirect_url: String,
+    name: String,
+    scopes: String,
+    allowed_emails: Vec<String>,
+    allowed_domains: Vec<String>,
+    /// Client-Secret, verschlüsselt (XChaCha20-Poly1305, Base64).
+    secret: Option<String>,
+}
+
+/// Wirksame Konfiguration (UI oder Umgebung).
+pub struct Resolved {
+    issuer: String,
+    client_id: String,
+    client_secret: String,
+    redirect_url: String,
+    name: String,
+    scopes: String,
+    allowed_emails: Vec<String>,
+    allowed_domains: Vec<String>,
+}
+
+impl Resolved {
+    /// Darf sich diese (verifizierte) E-Mail-Adresse anmelden?
+    fn allows(&self, email: &str) -> bool {
+        let email = email.to_ascii_lowercase();
+        self.allowed_emails.contains(&email)
+            || email
+                .rsplit_once('@')
+                .is_some_and(|(_, d)| self.allowed_domains.iter().any(|a| a == d))
+    }
+}
+
+async fn load_stored(st: &AppState) -> Option<Stored> {
+    let v: Option<Value> = sqlx::query_scalar("SELECT value FROM settings WHERE key = $1")
+        .bind(SETTING_KEY)
+        .fetch_optional(&st.pool)
+        .await
+        .ok()
+        .flatten();
+    v.and_then(|v| serde_json::from_value(v).ok())
+}
+
+fn decrypt_secret(st: &AppState, stored: &Stored) -> Option<String> {
+    let key = st.cfg.secret_key.as_ref()?;
+    let blob = URL_SAFE_NO_PAD.decode(stored.secret.as_deref()?).ok()?;
+    crate::notify::crypto::decrypt(key.bytes(), SECRET_AAD, &blob).ok()
+}
+
+/// UI-Einstellung vor Umgebungsvariablen; `None` = Anmeldung per OIDC ist aus.
+pub async fn resolve(st: &AppState) -> Option<Resolved> {
+    if let Some(s) = load_stored(st).await {
+        if !s.enabled {
+            return None;
+        }
+        let client_secret = decrypt_secret(st, &s)?;
+        return Some(Resolved {
+            issuer: s.issuer,
+            client_id: s.client_id,
+            client_secret,
+            redirect_url: s.redirect_url,
+            name: s.name,
+            scopes: s.scopes,
+            allowed_emails: s.allowed_emails,
+            allowed_domains: s.allowed_domains,
+        });
+    }
+    let o = &st.cfg.oidc;
+    if !o.enabled() {
+        return None;
+    }
+    Some(Resolved {
+        issuer: o.issuer.clone()?,
+        client_id: o.client_id.clone()?,
+        client_secret: o.client_secret.as_ref()?.expose().to_owned(),
+        redirect_url: o.redirect_url.clone()?,
+        name: o.name.clone().unwrap_or_default(),
+        scopes: o.scopes.clone().unwrap_or_default(),
+        allowed_emails: o.allowed_emails.clone(),
+        allowed_domains: o.allowed_domains.clone(),
+    })
+}
+
+fn label(o: &Resolved) -> &str {
+    if o.name.is_empty() {
+        "Single Sign-On"
+    } else {
+        &o.name
+    }
+}
+
 /// Öffentlich: welche Anmeldearten gibt es (für die Anmeldeseite)?
 pub async fn providers(State(st): State<AppState>) -> Json<Value> {
-    let o = &st.cfg.oidc;
+    let o = resolve(&st).await;
     Json(
-        json!({ "oidc": { "enabled": o.enabled(), "name": o.name.as_deref().unwrap_or("Single Sign-On") } }),
+        json!({ "oidc": { "enabled": o.is_some(), "name": o.as_ref().map(label).unwrap_or("Single Sign-On") } }),
     )
+}
+
+/// Einstellungen für die UI; das Client-Secret wird nie ausgegeben.
+pub async fn settings_get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>> {
+    Ok(Json(settings_view(&st).await))
+}
+
+async fn settings_view(st: &AppState) -> Value {
+    let stored = load_stored(st).await;
+    let (source, s) = match stored {
+        Some(s) => ("ui", s),
+        None if st.cfg.oidc.enabled() => {
+            let o = &st.cfg.oidc;
+            (
+                "env",
+                Stored {
+                    enabled: true,
+                    issuer: o.issuer.clone().unwrap_or_default(),
+                    client_id: o.client_id.clone().unwrap_or_default(),
+                    redirect_url: o.redirect_url.clone().unwrap_or_default(),
+                    name: o.name.clone().unwrap_or_default(),
+                    scopes: o.scopes.clone().unwrap_or_default(),
+                    allowed_emails: o.allowed_emails.clone(),
+                    allowed_domains: o.allowed_domains.clone(),
+                    secret: Some(String::new()),
+                },
+            )
+        }
+        None => ("none", Stored::default()),
+    };
+    json!({
+        "source": source,
+        "enabled": s.enabled,
+        "issuer": s.issuer,
+        "client_id": s.client_id,
+        "redirect_url": s.redirect_url,
+        "name": s.name,
+        "scopes": s.scopes,
+        "allowed_emails": s.allowed_emails,
+        "allowed_domains": s.allowed_domains,
+        "secret_set": s.secret.is_some(),
+        "secret_storage": st.cfg.secret_key.is_some(),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct SettingsBody {
+    enabled: bool,
+    issuer: String,
+    client_id: String,
+    redirect_url: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    scopes: String,
+    #[serde(default)]
+    allowed_emails: Vec<String>,
+    #[serde(default)]
+    allowed_domains: Vec<String>,
+    /// Neues Client-Secret; fehlt es, bleibt das gespeicherte.
+    client_secret: Option<String>,
+}
+
+fn clean_list(v: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for x in v {
+        let x = x.trim().to_ascii_lowercase();
+        if !x.is_empty() && !out.contains(&x) {
+            out.push(x);
+        }
+    }
+    out
+}
+
+/// Speichert die OIDC-Einstellungen. Wer sich anmelden darf, muss festgelegt sein (E-Mails oder Domains).
+pub async fn settings_put(
+    CsrfAdmin(_): CsrfAdmin,
+    State(st): State<AppState>,
+    Json(b): Json<SettingsBody>,
+) -> ApiResult<Json<Value>> {
+    let bad = |m: &str| ApiError::BadRequest(m.to_owned());
+    let issuer = b.issuer.trim().trim_end_matches('/').to_owned();
+    let allowed_emails = clean_list(&b.allowed_emails);
+    let allowed_domains = clean_list(&b.allowed_domains);
+    let existing = load_stored(&st).await;
+    let mut secret = existing.as_ref().and_then(|e| e.secret.clone());
+    if let Some(cs) = b.client_secret.as_deref().filter(|s| !s.is_empty()) {
+        if cs.len() > 2048 || cs.chars().any(char::is_control) {
+            return Err(bad("Client-Secret: 1–2048 Zeichen ohne Steuerzeichen"));
+        }
+        let key = st.cfg.secret_key.as_ref().ok_or_else(|| {
+            bad("PATCHWATCH_SECRET_KEY ist nicht gesetzt: das Client-Secret kann nicht gespeichert werden")
+        })?;
+        let blob = crate::notify::crypto::encrypt(key.bytes(), SECRET_AAD, cs)?;
+        secret = Some(URL_SAFE_NO_PAD.encode(blob));
+    }
+    if b.enabled {
+        let local =
+            issuer.starts_with("http://localhost") || issuer.starts_with("http://127.0.0.1");
+        if !(issuer.starts_with("https://") || local) {
+            return Err(bad("Issuer muss mit https:// beginnen"));
+        }
+        if b.client_id.trim().is_empty() || secret.is_none() {
+            return Err(bad("Client-ID und Client-Secret sind nötig"));
+        }
+        if !(b.redirect_url.starts_with("https://") || b.redirect_url.starts_with("http://")) {
+            return Err(bad("Redirect-URL muss mit http(s):// beginnen"));
+        }
+        if allowed_emails.is_empty() && allowed_domains.is_empty() {
+            return Err(bad(
+                "Lege fest, wer sich anmelden darf (E-Mail-Adressen oder Domains)",
+            ));
+        }
+    }
+    let stored = Stored {
+        enabled: b.enabled,
+        issuer,
+        client_id: b.client_id.trim().to_owned(),
+        redirect_url: b.redirect_url.trim().to_owned(),
+        name: b.name.trim().chars().take(40).collect(),
+        scopes: b.scopes.trim().to_owned(),
+        allowed_emails,
+        allowed_domains,
+        secret,
+    };
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ($1, $2) \
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+    )
+    .bind(SETTING_KEY)
+    .bind(serde_json::to_value(&stored).map_err(anyhow::Error::from)?)
+    .execute(&st.pool)
+    .await?;
+    Ok(Json(settings_view(&st).await))
 }
 
 #[derive(Deserialize)]
@@ -37,8 +272,7 @@ struct Discovery {
     token_endpoint_auth_methods_supported: Option<Vec<String>>,
 }
 
-async fn discover(st: &AppState) -> ApiResult<Discovery> {
-    let issuer = st.cfg.oidc.issuer.as_deref().ok_or(ApiError::NotFound)?;
+async fn discover(st: &AppState, issuer: &str) -> ApiResult<Discovery> {
     let d: Discovery = st
         .http
         .get(format!("{issuer}/.well-known/openid-configuration"))
@@ -73,16 +307,13 @@ fn state_cookie(st: &AppState, value: &str, max_age: i64) -> String {
 
 /// Startet die Anmeldung: legt state/nonce/PKCE an und leitet zum Provider.
 pub async fn login(State(st): State<AppState>, ClientIp(ip): ClientIp) -> ApiResult<Response> {
-    let o = &st.cfg.oidc;
-    if !o.enabled() {
-        return Err(ApiError::NotFound);
-    }
+    let o = resolve(&st).await.ok_or(ApiError::NotFound)?;
     st.limiter
         .check(&format!("oidc-start:{ip}"), 20, Duration::from_secs(600))
         .map_err(|w| ApiError::TooManyRequests {
             retry_after_secs: w.as_secs().max(1),
         })?;
-    let d = discover(&st).await?;
+    let d = discover(&st, &o.issuer).await?;
     let state = security::new_session_id();
     let nonce = security::new_session_id();
     let verifier = security::new_session_id();
@@ -99,14 +330,15 @@ pub async fn login(State(st): State<AppState>, ClientIp(ip): ClientIp) -> ApiRes
     let mut url = reqwest::Url::parse(&d.authorization_endpoint).map_err(anyhow::Error::from)?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
-        .append_pair("client_id", o.client_id.as_deref().unwrap_or_default())
-        .append_pair(
-            "redirect_uri",
-            o.redirect_url.as_deref().unwrap_or_default(),
-        )
+        .append_pair("client_id", &o.client_id)
+        .append_pair("redirect_uri", &o.redirect_url)
         .append_pair(
             "scope",
-            o.scopes.as_deref().unwrap_or("openid email profile"),
+            if o.scopes.is_empty() {
+                "openid email profile"
+            } else {
+                &o.scopes
+            },
         )
         .append_pair("state", &state)
         .append_pair("nonce", &nonce)
@@ -143,9 +375,7 @@ pub async fn callback(
     headers: HeaderMap,
     Query(q): Query<CallbackQuery>,
 ) -> ApiResult<Response> {
-    if !st.cfg.oidc.enabled() {
-        return Err(ApiError::NotFound);
-    }
+    let o = resolve(&st).await.ok_or(ApiError::NotFound)?;
     st.limiter
         .check(&format!("oidc-cb:{ip}"), 20, Duration::from_secs(600))
         .map_err(|w| ApiError::TooManyRequests {
@@ -175,9 +405,9 @@ pub async fn callback(
         return Ok(fail(&st, "state unbekannt oder abgelaufen"));
     };
 
-    match exchange(&st, &code, &nonce, &verifier).await {
+    match exchange(&st, &o, &code, &nonce, &verifier).await {
         Ok(email) => {
-            if !st.cfg.oidc.allows(&email) {
+            if !o.allows(&email) {
                 return Ok(fail(&st, &format!("{email} ist nicht freigegeben")));
             }
             let admin_id = upsert_admin(&st, &email).await?;
@@ -219,19 +449,13 @@ fn claims(jwt: &str) -> anyhow::Result<Value> {
 /// Tauscht den Code, prüft den ID-Token und liefert die verifizierte E-Mail-Adresse (klein geschrieben).
 async fn exchange(
     st: &AppState,
+    o: &Resolved,
     code: &str,
     nonce: &str,
     verifier: &str,
 ) -> anyhow::Result<String> {
-    let o = &st.cfg.oidc;
-    let (client_id, secret) = (
-        o.client_id.as_deref().unwrap_or_default(),
-        o.client_secret
-            .as_ref()
-            .map(|s| s.expose())
-            .unwrap_or_default(),
-    );
-    let d = discover(st)
+    let (client_id, secret) = (o.client_id.as_str(), o.client_secret.as_str());
+    let d = discover(st, &o.issuer)
         .await
         .map_err(|_| anyhow::anyhow!("Discovery fehlgeschlagen"))?;
     let basic = d
@@ -244,10 +468,7 @@ async fn exchange(
     let mut form = vec![
         ("grant_type", "authorization_code"),
         ("code", code),
-        (
-            "redirect_uri",
-            o.redirect_url.as_deref().unwrap_or_default(),
-        ),
+        ("redirect_uri", o.redirect_url.as_str()),
         ("code_verifier", verifier),
     ];
     let mut req = st.http.post(&d.token_endpoint);
@@ -267,7 +488,7 @@ async fn exchange(
         .ok_or_else(|| anyhow::anyhow!("kein id_token"))?;
     let c = claims(id_token)?;
 
-    let issuer = o.issuer.as_deref().unwrap_or_default();
+    let issuer = o.issuer.as_str();
     if c["iss"].as_str().map(|i| i.trim_end_matches('/')) != Some(issuer) {
         anyhow::bail!("iss stimmt nicht");
     }

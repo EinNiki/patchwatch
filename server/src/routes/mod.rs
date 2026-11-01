@@ -77,6 +77,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/notifications/{kind}/test", post(notifications::test))
         .route("/settings", get(settings::get).put(settings::put))
+        .route(
+            "/settings/oidc",
+            get(oidc::settings_get).put(oidc::settings_put),
+        )
         .route("/live", get(live::live))
         .route("/feeds", get(feeds::list).post(feeds::create))
         .route("/feeds/refresh", post(feeds::refresh))

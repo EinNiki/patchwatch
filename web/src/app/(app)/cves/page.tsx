@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -97,6 +97,16 @@ function CveView() {
   const updating = cves.stale || qInput !== q;
   // Beim ersten Aufbau erscheinen zuerst 30 Zeilen, der Rest folgt in kleinen Schritten: kein langer Task, die Seite
   // reagiert sofort (100 Zeilen auf einmal waren ~100 ms Hauptthread).
+  // Sofortige Reaktion auf einen Klick in der Kopfzeile: Solange die neu sortierte Liste vom Server noch unterwegs ist,
+  // wird die vorhandene Liste lokal umsortiert (beobachtete CVEs bleiben oben). Die Serverantwort ersetzt sie danach.
+  const sortedRows = useMemo(() => {
+    const rows = cves.data ?? [];
+    if (!cves.stale) return rows;
+    const val = (c: CveListItem) =>
+      sort === "level" ? c.level : Date.parse((sort === "updated" ? c.updated_at : c.published_at) ?? "") || 0;
+    const sign = dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => Number(b.watched) - Number(a.watched) || sign * (val(a) - val(b)) || b.id.localeCompare(a.id));
+  }, [cves.data, cves.stale, sort, dir]);
   const total = cves.data?.length ?? 0;
   const [rendered, setRendered] = useState(30);
   useEffect(() => {
@@ -395,7 +405,7 @@ function CveView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cves.data.slice(0, rendered).map((c) => (
+                  {sortedRows.slice(0, rendered).map((c) => (
                     <CveRow
                       key={c.id}
                       c={c}
@@ -550,8 +560,8 @@ function SortTh({ label, hint, active, dir, onClick, className }: { label: strin
       <span className="th-pad">
         <button type="button" onClick={onClick} className="inline-flex min-h-7 items-center gap-1 font-semibold max-md:min-h-11">
           {label}
-          {/* ↑ = höchster Wert / neuestes zuerst, ↓ = niedrigster / ältestes zuerst; inaktive Spalten zeigen keinen Pfeil */}
-          {active ? <span aria-hidden="true">{dir === "desc" ? "↑" : "↓"}</span> : null}
+          {/* ↑ = höchster Wert / neuestes zuerst, ↓ = niedrigster / ältestes zuerst; inaktive Spalten zeigen den Pfeil blass */}
+          <span aria-hidden="true" className={`inline-block w-3 text-center ${active ? "" : "text-fg3"}`}>{active && dir === "asc" ? "↓" : "↑"}</span>
           {hint ? <span className="sr-only">{hint}</span> : null}
         </button>
       </span>
