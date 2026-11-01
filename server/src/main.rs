@@ -86,6 +86,16 @@ async fn main() -> Result<()> {
         "serve" => {
             let pool = connect(&cfg).await?;
             MIGRATOR.run(&pool).await?;
+            // Start password for the very first login (docker compose): only used while no admin exists.
+            if let Ok(pw) = std::env::var("PATCHWATCH_INITIAL_ADMIN_PASSWORD") {
+                let any: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM admin_users)")
+                    .fetch_one(&pool)
+                    .await?;
+                if !pw.is_empty() && !any {
+                    admin::upsert_admin(&pool, "admin", &pw).await?;
+                    tracing::warn!("Admin 'admin' mit PATCHWATCH_INITIAL_ADMIN_PASSWORD angelegt, bitte Passwort ändern");
+                }
+            }
             let listen = cfg.listen.clone();
             let state = AppState::new(pool, cfg)?;
             tokio::spawn(patchwatch_server::live::run(state.clone()));
