@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
+import { patchHostRows } from "@/lib/hostsLive";
 import { useNow } from "@/lib/useNow";
 import type { Host, NewHost } from "@/lib/types";
 import { Button, Field, TextInput } from "@/components/Controls";
@@ -136,7 +137,7 @@ function RequestState({ h, now }: { h: Host; now: number }) {
 }
 
 export default function AgentsPage() {
-  const hosts = useApi<Host[]>("/hosts", 60_000, LIVE_TYPES);
+  const hosts = useApi<Host[]>("/hosts", 60_000, LIVE_TYPES, patchHostRows);
   const now = useNow();
   const [adding, setAdding] = useState(false);
   const [shown, setShown] = useState<{ name: string; token: string } | null>(null);

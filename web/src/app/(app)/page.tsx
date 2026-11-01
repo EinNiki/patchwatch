@@ -4,6 +4,7 @@ import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { prefetchApi, useApi } from "@/lib/useApi";
+import { patchHostRows } from "@/lib/hostsLive";
 import type { Feed, Host, HostStatus } from "@/lib/types";
 import { HOST_STATUS, HOST_STATUS_ORDER } from "@/lib/status";
 import { kernelBase, uptime } from "@/lib/format";
@@ -57,7 +58,7 @@ function HostsView() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const hosts = useApi<Host[]>("/hosts", 30_000, ["report_received", "host_status", "host_cve_status"]);
+  const hosts = useApi<Host[]>("/hosts", 30_000, ["report_received", "host_status", "host_cve_status"], patchHostRows);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -264,7 +265,7 @@ function HostsView() {
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${unknownOnly}|${q}`}>
                   {rows.map((h) => (
                     <HostRow key={h.id} h={h} feedOk={feedOk} flash={flashed.has(h.id)} />
                   ))}

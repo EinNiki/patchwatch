@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -58,7 +58,7 @@ function CveView() {
   const debianFix = fixParam(params.get("debian")) || legacy?.debian || "";
   const ubuntuFix = fixParam(params.get("ubuntu")) || legacy?.ubuntu || "";
   const [qInput, setQInput] = useState(urlQ);
-  const q = useDebounced(qInput, 300);
+  const q = useDebounced(qInput, 150);
   const [limit, setLimit] = useState(PAGE);
   const [newId, setNewId] = useState("");
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
@@ -75,7 +75,18 @@ function CveView() {
   if (debianFix) qs.set("debian", debianFix);
   if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
   const listPath = `/cves?${qs}`;
-  const cves = useApi<CveListItem[]>(listPath, 60_000, ["host_cve_status", "report_received"]);
+  const cves = useApi<CveListItem[]>(listPath, 60_000, ["host_cve_status", "report_received"], undefined, { keepPrevious: true });
+  // Sofortige Rückmeldung beim Filtern: die bisherige Liste bleibt stehen und wird abgedunkelt, bis die neue da ist.
+  const updating = cves.stale || qInput !== q;
+  // Beim ersten Aufbau erscheinen zuerst 30 Zeilen, der Rest folgt in kleinen Schritten: kein langer Task, die Seite
+  // reagiert sofort (100 Zeilen auf einmal waren ~100 ms Hauptthread).
+  const total = cves.data?.length ?? 0;
+  const [rendered, setRendered] = useState(30);
+  useEffect(() => {
+    if (rendered >= total) return;
+    const t = setTimeout(() => setRendered((n) => n + 35), 0);
+    return () => clearTimeout(t);
+  }, [rendered, total]);
 
   // Zeilen, die in der Watchlist-Ansicht gerade entfernt wurden: "wait" = Hinweis sichtbar, "fade" = blendet aus.
   // Je Zeile ein eigener Timer; der Server speichert sofort, nur das Ausblenden ist verzögert.
@@ -192,6 +203,13 @@ function CveView() {
       });
     }
   }
+
+  // Stabile Referenz für die memoisierten Zeilen; ruft immer die aktuelle toggle-Version auf.
+  const toggleRef = useRef(toggle);
+  useEffect(() => {
+    toggleRef.current = toggle;
+  });
+  const onToggle = useCallback((c: CveListItem) => void toggleRef.current(c), []);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -331,7 +349,7 @@ function CveView() {
           </Empty>
         ) : (
           <>
-            <div className="max-lg:overflow-x-auto">
+            <div className="updatable max-lg:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
               <table className="tbl stack">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
@@ -346,50 +364,15 @@ function CveView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cves.data.map((c) => (
-                    <tr key={c.id} data-flash={flashed.has(c.id) ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hiding.get(c.id) === "fade" ? "" : undefined}>
-                      <td className="cell-star">
-                        <button
-                          type="button"
-                          className="star-btn"
-                          data-on={c.watched ? "" : undefined}
-                          onClick={() => void toggle(c)}
-                          aria-label={c.watched ? "Nicht mehr beobachten" : "Beobachten"}
-                          title={c.watched ? "Nicht mehr beobachten" : "Beobachten"}
-                        >
-                          <NavIcon name={c.watched ? "star-fill" : "star"} />
-                        </button>
-                      </td>
-                      <td className="cell-primary">
-                        <Link href={`/cves/${c.id}`} className="mono whitespace-nowrap font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.id}`)} onFocus={() => prefetchApi(`/cves/${c.id}`)}>
-                          {c.id}
-                        </Link>
-                        {hiding.has(c.id) ? (
-                          <div className="text-xs text-fg2">
-                            Entfernt.{" "}
-                            <button type="button" className="underline" onClick={() => void toggle(c)}>
-                              Rückgängig
-                            </button>
-                          </div>
-                        ) : null}
-                        {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
-                        {c.priority ? <div className="text-xs text-fg3 wide:hidden">Priorität {c.priority}</div> : null}
-                      </td>
-                      <td className="w-full min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
-                        {c.description ? <span className="line-clamp-2 max-w-[44rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
-                        {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
-                      </td>
-                      <td className="cell-status min-w-[12rem] max-md:min-w-0 max-md:flex-[1_0_100%]">
-                        <Distros c={c} allReleases={allReleases} />
-                      </td>
-                      <td data-label="Hosts">
-                        <HostCounts c={c} />
-                      </td>
-                      <td className="mono max-wide:hidden">{c.priority ?? "–"}</td>
-                      <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
-                        <RelTime iso={c.updated_at} />
-                      </td>
-                    </tr>
+                  {cves.data.slice(0, rendered).map((c) => (
+                    <CveRow
+                      key={c.id}
+                      c={c}
+                      flash={flashed.has(c.id)}
+                      hide={hiding.get(c.id)}
+                      allReleases={allReleases}
+                      onToggle={onToggle}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -409,11 +392,76 @@ function CveView() {
   );
 }
 
+/** Eine Tabellenzeile. `memo`: Ein Stern-Klick oder ein Live-Update rendert nur die betroffene Zeile neu, nicht alle 100. */
+const CveRow = memo(function CveRow({
+  c,
+  flash,
+  hide,
+  allReleases,
+  onToggle,
+}: {
+  c: CveListItem;
+  flash: boolean;
+  hide: "wait" | "fade" | undefined;
+  allReleases: boolean;
+  onToggle: (c: CveListItem) => void;
+}) {
+  const [pop, setPop] = useState(false);
+  return (
+      <tr data-flash={flash ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hide === "fade" ? "" : undefined}>
+        <td className="cell-star">
+          <button
+            type="button"
+            className="star-btn"
+            data-on={c.watched ? "" : undefined}
+            data-pop={pop ? "" : undefined}
+            onClick={() => {
+              setPop(true);
+              onToggle(c);
+            }}
+            onAnimationEnd={() => setPop(false)}
+            aria-label={c.watched ? "Nicht mehr beobachten" : "Beobachten"}
+            title={c.watched ? "Nicht mehr beobachten" : "Beobachten"}
+          >
+            <NavIcon name={c.watched ? "star-fill" : "star"} />
+          </button>
+        </td>
+        <td className="cell-primary">
+          <Link href={`/cves/${c.id}`} className="mono whitespace-nowrap font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.id}`)} onFocus={() => prefetchApi(`/cves/${c.id}`)}>
+            {c.id}
+          </Link>
+          {hide !== undefined ? (
+            <div className="text-xs text-fg2">
+              Entfernt.{" "}
+              <button type="button" className="underline" onClick={() => onToggle(c)}>
+                Rückgängig
+              </button>
+            </div>
+          ) : null}
+          {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
+          {c.priority ? <div className="text-xs text-fg3 wide:hidden">Priorität {c.priority}</div> : null}
+        </td>
+        <td className="w-full min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
+          {c.description ? <span className="line-clamp-2 max-w-[44rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
+          {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
+        </td>
+        <td className="cell-status min-w-[12rem] max-md:min-w-0 max-md:flex-[1_0_100%]">
+          <Distros c={c} allReleases={allReleases} />
+        </td>
+        <td data-label="Hosts">
+          <HostCounts c={c} />
+        </td>
+        <td className="mono max-wide:hidden">{c.priority ?? "–"}</td>
+        <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
+          <RelTime iso={c.updated_at} />
+        </td>
+      </tr>
+  );
+});
+
 /** Chips der Releases, die auf Hosts laufen; weitere Releases lädt „+ n weitere“ bei Bedarf nach. */
 function Distros({ c, allReleases }: { c: CveListItem; allReleases: boolean }) {
   const [more, setMore] = useState(false);
-  const detail = useApi<CveDetail>(more ? `/cves/${c.id}` : null);
-  const others = detail.data?.distros.filter((d) => !d.mine) ?? [];
   if (c.distros.length === 0 && c.hidden_releases === 0) return <span className="text-fg3">keine Quellendaten</span>;
   return (
     <div className="flex flex-col items-start gap-1 max-md:flex-row max-md:flex-wrap wide:flex-row wide:flex-wrap">
@@ -421,15 +469,28 @@ function Distros({ c, allReleases }: { c: CveListItem; allReleases: boolean }) {
       {c.distros.map((d) => (
         <DistroChip key={`${d.source}/${d.release}`} d={d} />
       ))}
-      {more ? others.map((d) => <DistroChip key={`${d.source}/${d.release}`} d={d} />) : null}
+      {more ? <OtherReleases id={c.id} /> : null}
       {!allReleases && c.hidden_releases > 0 ? (
         <Button aria-expanded={more} onClick={() => setMore(!more)} className="!h-(--chip-h) !min-h-(--chip-h) !rounded-xs !border-line !px-1.5 !py-0 !text-xs !font-normal !text-fg2 max-md:!min-h-11">
           {more ? "Weniger anzeigen" : `+ ${c.hidden_releases} weitere Releases`}
           <span className="sr-only"> für {c.id}</span>
         </Button>
       ) : null}
-      {more && detail.error ? <span className="text-crit">{detail.error}</span> : null}
     </div>
+  );
+}
+
+/** Lädt erst beim Aufklappen die Detaildaten, damit nicht jede der 100 Zeilen einen eigenen Abruf-Hook trägt. */
+function OtherReleases({ id }: { id: string }) {
+  const detail = useApi<CveDetail>(`/cves/${id}`);
+  const others = detail.data?.distros.filter((d) => !d.mine) ?? [];
+  return (
+    <>
+      {others.map((d) => (
+        <DistroChip key={`${d.source}/${d.release}`} d={d} />
+      ))}
+      {detail.error ? <span className="text-crit">{detail.error}</span> : null}
+    </>
   );
 }
 
