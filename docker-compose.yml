@@ -37,8 +37,10 @@ services:
       PATCHWATCH_NTFY_URL: ${PATCHWATCH_NTFY_URL:-}
       PATCHWATCH_NTFY_TOPIC: ${PATCHWATCH_NTFY_TOPIC:-}
       PATCHWATCH_NTFY_TOKEN: ${PATCHWATCH_NTFY_TOKEN:-}
-      # Erster Login: Benutzer "admin" mit diesem Passwort (mind. 12 Zeichen), nur solange noch kein Admin existiert.
-      PATCHWATCH_INITIAL_ADMIN_PASSWORD: ${PATCHWATCH_INITIAL_ADMIN_PASSWORD:-patchwatch-change-me}
+      # Erster Start: Benutzer "admin" mit diesem Passwort (mind. 12 Zeichen), nur solange noch kein Admin existiert.
+      # Leer = der Server erzeugt ein Zufallspasswort und gibt es einmal im Log aus (docker compose logs server);
+      # beim ersten Login muss es geändert werden. Es gibt keinen festen Standardwert.
+      PATCHWATCH_ADMIN_PASSWORD: ${PATCHWATCH_ADMIN_PASSWORD:-}
       PATCHWATCH_SECRET_KEY: ${PATCHWATCH_SECRET_KEY:-}
       PATCHWATCH_NOTIFY_ALLOWED_HOSTS: ${PATCHWATCH_NOTIFY_ALLOWED_HOSTS:-}
       PATCHWATCH_ALLOWED_ORIGINS: ${PATCHWATCH_ALLOWED_ORIGINS:-}
@@ -76,9 +78,11 @@ services:
     depends_on: [server, web]
     environment:
       PATCHWATCH_DOMAIN: ${PATCHWATCH_DOMAIN:-localhost}
+    # PATCHWATCH_BIND begrenzt die Veröffentlichung auf eine Adresse (z. B. die LAN- oder VPN-Adresse des Hosts).
+    # Standard 0.0.0.0 = alle Schnittstellen, wie bisher.
     ports:
-      - "${PATCHWATCH_HTTP_PORT:-80}:80"
-      - "${PATCHWATCH_HTTPS_PORT:-443}:443"
+      - "${PATCHWATCH_BIND:-0.0.0.0}:${PATCHWATCH_HTTP_PORT:-80}:80"
+      - "${PATCHWATCH_BIND:-0.0.0.0}:${PATCHWATCH_HTTPS_PORT:-443}:443"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -11,12 +11,19 @@ pub struct Admin {
     pub username: String,
     pub csrf_token: String,
     pub session_hash: Vec<u8>,
+    /// Bekanntes oder erzeugtes Start-Passwort: nur Passwortwechsel und Abmelden erlaubt.
+    pub must_change_password: bool,
 }
 
-impl FromRequestParts<AppState> for Admin {
-    type Rejection = ApiError;
+/// Wie [`Admin`], aber auch für Konten, die ihr Passwort noch ändern müssen. Nur für `me`, Abmelden und den
+/// Passwortwechsel selbst; alle anderen Endpunkte nehmen `Admin` und lehnen solche Konten ab.
+pub struct PendingAdmin(pub Admin);
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
+/// [`PendingAdmin`] mit CSRF-Prüfung.
+pub struct PendingCsrfAdmin(pub Admin);
+
+async fn load_admin(parts: &Parts, state: &AppState) -> Result<Admin, ApiError> {
+    {
         let cookie = parts
             .headers
             .get(header::COOKIE)
@@ -24,19 +31,64 @@ impl FromRequestParts<AppState> for Admin {
             .and_then(|c| security::cookie_value(c, SESSION_COOKIE))
             .ok_or(ApiError::Unauthorized)?;
         let hash = security::sha256(cookie);
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT a.username, s.csrf_token FROM sessions s JOIN admin_users a ON a.id = s.admin_id \
+        let row: Option<(String, String, bool)> = sqlx::query_as(
+            "SELECT a.username, s.csrf_token, a.must_change_password FROM sessions s JOIN admin_users a ON a.id = s.admin_id \
              WHERE s.id_hash = $1 AND s.expires_at > now()",
         )
         .bind(&hash)
         .fetch_optional(&state.pool)
         .await?;
-        let (username, csrf_token) = row.ok_or(ApiError::Unauthorized)?;
+        let (username, csrf_token, must_change_password) = row.ok_or(ApiError::Unauthorized)?;
         Ok(Admin {
             username,
             csrf_token,
             session_hash: hash,
+            must_change_password,
         })
+    }
+}
+
+impl FromRequestParts<AppState> for Admin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
+        let admin = load_admin(parts, state).await?;
+        if admin.must_change_password {
+            return Err(ApiError::PasswordChangeRequired);
+        }
+        Ok(admin)
+    }
+}
+
+impl FromRequestParts<AppState> for PendingAdmin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
+        Ok(PendingAdmin(load_admin(parts, state).await?))
+    }
+}
+
+fn check_csrf(parts: &Parts, admin: &Admin) -> Result<(), ApiError> {
+    if !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        let sent = parts
+            .headers
+            .get("x-csrf-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !security::ct_eq(sent, &admin.csrf_token) {
+            return Err(ApiError::Forbidden("CSRF-Token fehlt oder ist ungültig"));
+        }
+    }
+    Ok(())
+}
+
+impl FromRequestParts<AppState> for PendingCsrfAdmin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
+        let admin = load_admin(parts, state).await?;
+        check_csrf(parts, &admin)?;
+        Ok(PendingCsrfAdmin(admin))
     }
 }
 
@@ -48,16 +100,7 @@ impl FromRequestParts<AppState> for CsrfAdmin {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
         let admin = Admin::from_request_parts(parts, state).await?;
-        if !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
-            let sent = parts
-                .headers
-                .get("x-csrf-token")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            if !security::ct_eq(sent, &admin.csrf_token) {
-                return Err(ApiError::Forbidden("CSRF-Token fehlt oder ist ungültig"));
-            }
-        }
+        check_csrf(parts, &admin)?;
         Ok(CsrfAdmin(admin))
     }
 }

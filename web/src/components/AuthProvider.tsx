@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, setCsrf } from "@/lib/api";
 import { clearApiCache } from "@/lib/apiCache";
 import type { Me } from "@/lib/types";
+import { ForcedPasswordChange } from "@/components/ForcedPasswordChange";
 
 interface AuthValue {
   me: Me;
@@ -66,5 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.replace("/login");
     }
   };
+  // Start-Passwort: nur der Passwortwechsel ist erlaubt (der Server sperrt alles andere mit 403).
+  if (me.must_change_password) {
+    return <ForcedPasswordChange username={me.username} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={() => void logout()} />;
+  }
   return <Ctx.Provider value={{ me, logout }}>{children}</Ctx.Provider>;
 }

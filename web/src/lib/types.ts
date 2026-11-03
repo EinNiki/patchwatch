@@ -212,6 +212,8 @@ export interface Feed {
 export interface Me {
   username: string;
   csrf_token: string;
+  /** Start-Passwort (erzeugt oder früherer Standardwert): bis zum Wechsel ist nur der Passwortwechsel möglich. */
+  must_change_password?: boolean;
 }
 
 export interface NewHost {

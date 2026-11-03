@@ -64,7 +64,8 @@ pub async fn live(
 
 async fn session_valid(st: &AppState, hash: &[u8]) -> bool {
     sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM sessions WHERE id_hash = $1 AND expires_at > now())",
+        "SELECT EXISTS (SELECT 1 FROM sessions s JOIN admin_users a ON a.id = s.admin_id \
+         WHERE s.id_hash = $1 AND s.expires_at > now() AND NOT a.must_change_password)",
     )
     .bind(hash)
     .fetch_one(&st.pool)

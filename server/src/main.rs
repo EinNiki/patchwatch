@@ -86,15 +86,38 @@ async fn main() -> Result<()> {
         "serve" => {
             let pool = connect(&cfg).await?;
             MIGRATOR.run(&pool).await?;
-            // Start password for the very first login (docker compose): only used while no admin exists.
-            if let Ok(pw) = std::env::var("PATCHWATCH_INITIAL_ADMIN_PASSWORD") {
-                let any: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM admin_users)")
-                    .fetch_one(&pool)
-                    .await?;
-                if !pw.is_empty() && !any {
-                    admin::upsert_admin(&pool, "admin", &pw).await?;
-                    tracing::warn!("Admin 'admin' mit PATCHWATCH_INITIAL_ADMIN_PASSWORD angelegt, bitte Passwort ändern");
+            // Erster Start: Admin nur anlegen, solange noch keiner existiert -- nie mit einem festen, bekannten Wert.
+            // Explizit per PATCHWATCH_ADMIN_PASSWORD (mind. 12 Zeichen); sonst Zufallspasswort, das genau einmal
+            // auf stderr erscheint. (PATCHWATCH_INITIAL_ADMIN_PASSWORD gilt weiter als alter Name.)
+            let env_pw = std::env::var("PATCHWATCH_ADMIN_PASSWORD")
+                .ok()
+                .filter(|p| !p.is_empty())
+                .or_else(|| std::env::var("PATCHWATCH_INITIAL_ADMIN_PASSWORD").ok());
+            match admin::bootstrap_admin(&pool, env_pw.as_deref()).await? {
+                admin::Bootstrap::Existing => {}
+                admin::Bootstrap::FromEnv => {
+                    tracing::info!("Admin 'admin' mit PATCHWATCH_ADMIN_PASSWORD angelegt");
                 }
+                admin::Bootstrap::Random(pw) => {
+                    // Absichtlich eprintln statt tracing: genau einmal, nicht in strukturierte Logs, nie gespeichert.
+                    eprintln!(
+                        "\n================================================================\n\
+                         patchwatch: Erster Start, Benutzer 'admin' wurde angelegt.\n\
+                         Einmaliges Start-Passwort: {pw}\n\
+                         Es wird nicht gespeichert und nicht noch einmal angezeigt. Beim ersten\n\
+                         Login muss es sofort geändert werden (mindestens 12 Zeichen).\n\
+                         ================================================================\n"
+                    );
+                    tracing::warn!("Admin 'admin' mit Zufallspasswort angelegt (auf stderr ausgegeben), Passwortwechsel beim ersten Login erforderlich");
+                }
+            }
+            // Bestehende Installationen: Konten, die noch das frühere Standardpasswort haben, müssen es ändern.
+            let weak = admin::flag_default_passwords(&pool).await?;
+            if !weak.is_empty() {
+                tracing::warn!(
+                    users = ?weak,
+                    "WARNUNG: Diese Admin-Konten nutzen noch das frühere, öffentlich bekannte Standardpasswort. Sie können sich nur noch anmelden, um das Passwort zu ändern."
+                );
             }
             let listen = cfg.listen.clone();
             let state = AppState::new(pool, cfg)?;

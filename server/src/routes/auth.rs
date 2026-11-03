@@ -1,5 +1,5 @@
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, ClientIp, CsrfAdmin};
+use crate::extract::{ClientIp, PendingAdmin, PendingCsrfAdmin};
 use crate::security;
 use crate::state::AppState;
 use axum::extract::State;
@@ -37,13 +37,15 @@ pub async fn login(
             })?;
     }
 
-    let user: Option<(i64, String)> =
-        sqlx::query_as("SELECT id, password_hash FROM admin_users WHERE username = $1")
-            .bind(&body.username)
-            .fetch_optional(&st.pool)
-            .await?;
+    let user: Option<(i64, String, bool)> = sqlx::query_as(
+        "SELECT id, password_hash, must_change_password FROM admin_users WHERE username = $1",
+    )
+    .bind(&body.username)
+    .fetch_optional(&st.pool)
+    .await?;
+    let must_change = user.as_ref().is_some_and(|u| u.2);
     let (admin_id, hash) = match &user {
-        Some((id, h)) => (Some(*id), h.clone()),
+        Some((id, h, _)) => (Some(*id), h.clone()),
         None => (None, security::dummy_hash().to_owned()),
     };
     let password = body.password;
@@ -68,7 +70,12 @@ pub async fn login(
     .await?;
 
     let cookie = security::session_cookie(&session_id, ttl, st.cfg.cookie_secure);
-    let mut resp = Json(json!({ "username": body.username, "csrf_token": csrf })).into_response();
+    let mut resp = Json(json!({
+        "username": body.username,
+        "csrf_token": csrf,
+        "must_change_password": must_change,
+    }))
+    .into_response();
     resp.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_str(&cookie).map_err(anyhow::Error::from)?,
@@ -78,7 +85,7 @@ pub async fn login(
 
 pub async fn logout(
     State(st): State<AppState>,
-    CsrfAdmin(admin): CsrfAdmin,
+    PendingCsrfAdmin(admin): PendingCsrfAdmin,
 ) -> ApiResult<Response> {
     sqlx::query("DELETE FROM sessions WHERE id_hash = $1")
         .bind(&admin.session_hash)
@@ -102,7 +109,7 @@ pub struct ChangePassword {
 /// Ändert das eigene Passwort. Alle anderen Sessions des Benutzers werden beendet.
 pub async fn change_password(
     State(st): State<AppState>,
-    CsrfAdmin(admin): CsrfAdmin,
+    PendingCsrfAdmin(admin): PendingCsrfAdmin,
     Json(body): Json<ChangePassword>,
 ) -> ApiResult<StatusCode> {
     st.limiter
@@ -117,9 +124,15 @@ pub async fn change_password(
     if body.current_password.len() > 256 || body.new_password.len() > 256 {
         return Err(ApiError::BadRequest("ungültige Eingabe".into()));
     }
-    if body.new_password.chars().count() < 12 {
+    if body.new_password.chars().count() < crate::admin::MIN_PASSWORD_CHARS {
         return Err(ApiError::BadRequest(
             "Neues Passwort: mindestens 12 Zeichen".into(),
+        ));
+    }
+    // Bekannte Standardpasswörter sind nie erlaubt (auch nicht als neues Passwort).
+    if crate::admin::KNOWN_DEFAULT_PASSWORDS.contains(&body.new_password.as_str()) {
+        return Err(ApiError::BadRequest(
+            "Neues Passwort: dieser Wert ist ein bekanntes Standardpasswort".into(),
         ));
     }
     if body.new_password == body.current_password {
@@ -144,11 +157,13 @@ pub async fn change_password(
         .await
         .map_err(anyhow::Error::from)??;
     let mut tx = st.pool.begin().await?;
-    sqlx::query("UPDATE admin_users SET password_hash = $2 WHERE id = $1")
-        .bind(id)
-        .bind(new_hash)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE admin_users SET password_hash = $2, must_change_password = false WHERE id = $1",
+    )
+    .bind(id)
+    .bind(new_hash)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("DELETE FROM sessions WHERE admin_id = $1 AND id_hash <> $2")
         .bind(id)
         .bind(&admin.session_hash)
@@ -158,6 +173,10 @@ pub async fn change_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn me(admin: Admin) -> Json<serde_json::Value> {
-    Json(json!({ "username": admin.username, "csrf_token": admin.csrf_token }))
+pub async fn me(PendingAdmin(admin): PendingAdmin) -> Json<serde_json::Value> {
+    Json(json!({
+        "username": admin.username,
+        "csrf_token": admin.csrf_token,
+        "must_change_password": admin.must_change_password,
+    }))
 }

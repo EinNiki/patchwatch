@@ -8,9 +8,13 @@ pub enum ApiError {
     BadRequest(String),
     Unauthorized,
     Forbidden(&'static str),
+    /// Das Konto muss zuerst sein Passwort ändern (bekanntes oder erzeugtes Start-Passwort).
+    PasswordChangeRequired,
     NotFound,
     Conflict(String),
-    TooManyRequests { retry_after_secs: u64 },
+    TooManyRequests {
+        retry_after_secs: u64,
+    },
     Internal(anyhow::Error),
 }
 
@@ -28,6 +32,10 @@ impl IntoResponse for ApiError {
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "nicht angemeldet".to_owned()),
             Self::Forbidden(m) => (StatusCode::FORBIDDEN, (*m).to_owned()),
+            Self::PasswordChangeRequired => (
+                StatusCode::FORBIDDEN,
+                "Das Passwort muss zuerst geändert werden".to_owned(),
+            ),
             Self::NotFound => (StatusCode::NOT_FOUND, "nicht gefunden".to_owned()),
             Self::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             Self::TooManyRequests { .. } => (
@@ -43,7 +51,12 @@ impl IntoResponse for ApiError {
                 )
             }
         };
-        let mut resp = (status, Json(json!({ "error": msg }))).into_response();
+        let body = if matches!(self, Self::PasswordChangeRequired) {
+            json!({ "error": msg, "code": "password_change_required" })
+        } else {
+            json!({ "error": msg })
+        };
+        let mut resp = (status, Json(body)).into_response();
         if let Self::TooManyRequests { retry_after_secs } = self {
             if let Ok(v) = retry_after_secs.to_string().parse() {
                 resp.headers_mut().insert(header::RETRY_AFTER, v);

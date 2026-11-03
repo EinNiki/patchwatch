@@ -51,8 +51,23 @@ Rust (axum, tokio, sqlx) mit PostgreSQL. Migrationen laufen beim Start (`server/
 ```sh
 cp .env.example .env            # POSTGRES_PASSWORD setzen (openssl rand -hex 24)
 docker compose up -d
-docker compose exec -T -e PATCHWATCH_ADMIN_PASSWORD='…mind. 12 Zeichen…' server patchwatch-server create-admin admin
+docker compose logs server      # beim ersten Start: einmaliges Start-Passwort für "admin"
 ```
+
+> **Netzwerk: patchwatch gehört nur ins Heimnetz oder hinter ein VPN.** Es ist ein Verwaltungswerkzeug mit
+> Admin-Oberfläche und kein öffentlicher Dienst. Der mitgelieferte Caddy lauscht standardmäßig auf allen
+> Schnittstellen (80/443); mit `PATCHWATCH_BIND=<LAN- oder VPN-Adresse>` in der `.env` wird er auf eine
+> Adresse begrenzt. Nicht ohne weiteren Schutz (VPN, IP-Filter, Zugangsschutz am Proxy) ins Internet stellen.
+
+**Erster Start und Admin-Passwort:** Es gibt kein festes Standardpasswort. Existiert noch kein Admin, legt der
+Server `admin` an: entweder mit `PATCHWATCH_ADMIN_PASSWORD` (mind. 12 Zeichen, der frühere Standardwert wird
+abgelehnt) oder, wenn nichts gesetzt ist, mit einem Zufallspasswort (32 Zeichen, CSPRNG), das **genau einmal auf
+stderr** erscheint (`docker compose logs server`) und nie gespeichert wird. Ein erzeugtes Passwort muss beim ersten
+Login geändert werden; bis dahin sind nur Passwortwechsel und Abmelden möglich. Bestehende Installationen, deren
+Admin noch das frühere Standardpasswort hat, werden beim Start erkannt und müssen es beim nächsten Login ändern.
+Anmeldeversuche sind je IP und je Konto auf 10 pro 10 Minuten begrenzt (danach `429` mit `Retry-After`). Weitere
+Konten oder ein neues Passwort per Kommandozeile:
+`docker compose exec -T -e PATCHWATCH_ADMIN_PASSWORD='…mind. 12 Zeichen…' server patchwatch-server create-admin ops`.
 
 Host und Agent-Token anlegen (Web-UI folgt; bis dahin per API, Token wird nur einmal angezeigt
 und serverseitig nur als SHA-256-Hash gespeichert):
