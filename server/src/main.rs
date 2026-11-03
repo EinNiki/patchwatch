@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+    patchwatch_server::routes::install_panic_hook();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cfg = Config::load()?;

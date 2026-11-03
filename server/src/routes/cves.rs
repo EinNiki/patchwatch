@@ -293,6 +293,13 @@ pub async fn list(
     let outer_order = order.replace("c.", "p.");
     let debian_fix = fix_state(&q.debian, split_debian, "debian")?;
     let ubuntu_fix = fix_state(&q.ubuntu, split_ubuntu, "ubuntu")?;
+    // Postgres kann kein NUL in Text speichern oder vergleichen (sonst 500); Steuerzeichen sind in einer Suche sinnlos.
+    if q.q
+        .as_deref()
+        .is_some_and(|s| s.chars().any(char::is_control))
+    {
+        return Err(ApiError::BadRequest("q: ungültige Zeichen".into()));
+    }
     // LIKE-Metazeichen im Suchtext entschärfen.
     let pattern = q.q.as_deref().map(|s| {
         format!(
@@ -318,8 +325,10 @@ pub async fn list(
         // Sieht die Eingabe wie (der Anfang) einer CVE-ID aus, genügt die ID; die Volltextsuche in den Beschreibungen
         // liest alle Texte (~0,4 s bei 20 000 CVEs).
         let id_like = q.q.as_deref().is_some_and(|t| {
-            t.len() >= 4
-                && t[..4].eq_ignore_ascii_case("cve-")
+            // Bytes statt `t[..4]`: ein Zeichen (z. B. "é") über der Byte-Grenze 4 ließ den String-Slice paniken.
+            t.as_bytes()
+                .get(..4)
+                .is_some_and(|p| p.eq_ignore_ascii_case(b"cve-"))
                 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         });
         conds.push(if id_like {

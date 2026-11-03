@@ -323,3 +323,195 @@ async fn fund1_login_is_limited_per_account_and_per_ip(pool: PgPool) {
         StatusCode::TOO_MANY_REQUESTS
     );
 }
+
+// ---------- Fund 4: Panic bei Nicht-ASCII-Eingabe ----------
+
+/// Prozentkodierung für Test-URIs (alles außer unreservierten Zeichen).
+fn enc(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Eingaben, die Byte-Slices auf Zeichengrenzen brechen oder Parser überraschen: Umlaute und Akzente an jeder
+/// Byte-Position, CJK, Emoji, sehr lang, Steuerzeichen, leer.
+fn nasty_inputs() -> Vec<String> {
+    vec![
+        "café".into(),
+        "cve-é".into(),
+        "CVE-2024-é".into(),
+        "cvé-2024".into(),
+        "ééééééééé".into(),
+        "日本語".into(),
+        "CVE-日本語".into(),
+        "😀😀😀😀".into(),
+        "cve-😀".into(),
+        "a".repeat(20_000),
+        "é".repeat(4_000),
+        "\u{0}\u{1}\u{7}\u{1b}[31m\r\n\t".into(),
+        "cve-\u{0}".into(),
+        "\u{202e}cve-2024-0001".into(),
+        String::new(),
+        " ".into(),
+        "%".into(),
+        "'; DROP TABLE cves; --".into(),
+    ]
+}
+
+/// Jede Route mit Text-Parametern übersteht jede dieser Eingaben ohne 5xx, und der Server antwortet danach weiter.
+#[sqlx::test(migrations = "./migrations")]
+async fn fund4_text_parameters_never_panic_and_server_keeps_running(pool: PgPool) {
+    let app = router(state(
+        pool.clone(),
+        &[(
+            "PATCHWATCH_SECRET_KEY",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        )],
+    ));
+    admin::upsert_admin(&pool, "admin", "ein-langes-passwort-123")
+        .await
+        .unwrap();
+    let (cookie, csrf, _) = login_as(&app, "admin", "ein-langes-passwort-123").await;
+    let h = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
+
+    let mut uris: Vec<(Method, String)> = Vec::new();
+    for v in nasty_inputs() {
+        let e = enc(&v);
+        for key in ["q", "releases", "distro", "split", "debian", "ubuntu"] {
+            uris.push((Method::GET, format!("/api/v1/cves?{key}={e}")));
+        }
+        uris.push((Method::GET, format!("/api/v1/cves?q={e}&watchlist=true")));
+        uris.push((Method::GET, format!("/api/v1/cves/{e}")));
+        uris.push((Method::GET, format!("/api/v1/matrix?cves={e}&hosts={e}")));
+        uris.push((Method::PUT, format!("/api/v1/watchlist/{e}")));
+        uris.push((Method::DELETE, format!("/api/v1/watchlist/{e}")));
+        uris.push((Method::GET, format!("/api/v1/notifications/{e}")));
+        uris.push((Method::PUT, format!("/api/v1/hosts/1/cves/{e}/review")));
+        uris.push((Method::DELETE, format!("/api/v1/hosts/1/cves/{e}/review")));
+        uris.push((Method::PUT, format!("/api/v1/feeds/{e}")));
+        uris.push((Method::DELETE, format!("/api/v1/feeds/{e}")));
+        uris.push((Method::GET, format!("/api/v1/hosts/1/history?limit={e}")));
+        uris.push((Method::GET, format!("/api/v1/feeds/refresh?wait={e}")));
+        uris.push((
+            Method::GET,
+            format!("/api/v1/auth/oidc/callback?code={e}&state={e}"),
+        ));
+    }
+    for (m, uri) in &uris {
+        let body = (*m == Method::PUT).then(|| json!({}));
+        let r = call(&app, m.clone(), uri, &h, body).await;
+        assert!(
+            !r.status.is_server_error(),
+            "{m} {} -> {}",
+            uri.chars().take(80).collect::<String>(),
+            r.status
+        );
+    }
+    // JSON-Körper mit denselben Texten (Login, Hosts, Feeds, Einstellungen, Report).
+    for v in nasty_inputs() {
+        for (m, uri, body) in [
+            (
+                Method::POST,
+                "/api/v1/auth/login",
+                json!({"username": v, "password": v}),
+            ),
+            (Method::POST, "/api/v1/hosts", json!({"name": v})),
+            (
+                Method::POST,
+                "/api/v1/feeds",
+                json!({"type": v, "label": v, "base_url": v}),
+            ),
+            (
+                Method::PUT,
+                "/api/v1/settings",
+                json!({"stale_hours": v, "timezone": v}),
+            ),
+            (
+                Method::POST,
+                "/api/v1/agent/checkin?token=x",
+                json!({"token": v}),
+            ),
+        ] {
+            let r = call(&app, m.clone(), uri, &h, Some(body)).await;
+            assert!(!r.status.is_server_error(), "{m} {uri} -> {}", r.status);
+        }
+    }
+    // Der Server läuft weiter und liefert echte Treffer.
+    let r = call(&app, Method::GET, "/healthz", &[], None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = call(&app, Method::GET, "/api/v1/cves?q=caf%C3%A9", &h, None).await;
+    assert_eq!(r.status, StatusCode::OK, "q=café");
+}
+
+/// Die Regression selbst: `q=café` (das "é" überspannt die Byte-Grenze 4) darf nicht paniken und findet
+/// "café" in einer Beschreibung.
+#[sqlx::test(migrations = "./migrations")]
+async fn fund4_cve_search_with_accent_at_byte_boundary_works(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    admin::upsert_admin(&pool, "admin", "ein-langes-passwort-123")
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO cves (id, description, updated_at) VALUES ('CVE-2024-0001', 'Das Café-Problem', now())")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO cve_source_status (cve_id, source, release, package, status, source_id) VALUES ('CVE-2024-0001', 'ubuntu', 'noble', 'linux', 'needed', 'ubuntu')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (cookie, _, _) = login_as(&app, "admin", "ein-langes-passwort-123").await;
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?q=caf%C3%A9&releases=all",
+        &[("cookie", &cookie)],
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    let text = r.json.to_string();
+    assert!(text.contains("CVE-2024-0001"), "{text}");
+}
+
+/// Auch ein unerwarteter Panic in einem Handler beendet nur diese Anfrage: 500 ohne Eingabe oder Panic-Meldung im
+/// Body, der Server antwortet weiter. (Das Profil nutzt unwind, nicht abort.)
+#[tokio::test]
+async fn fund4_panic_in_handler_becomes_500_and_server_survives() {
+    use tower_http::catch_panic::CatchPanicLayer;
+    async fn boom(axum::extract::Path(s): axum::extract::Path<String>) -> String {
+        panic!("geheime Eingabe {s}");
+    }
+    let app = Router::new()
+        .route("/boom/{s}", axum::routing::get(boom))
+        .route("/ok", axum::routing::get(|| async { "ok" }))
+        .layer(CatchPanicLayer::custom(
+            patchwatch_server::routes::panic_response,
+        ));
+    for _ in 0..3 {
+        let r = call(&app, Method::GET, "/boom/caf%C3%A9", &[], None).await;
+        assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            !r.json.to_string().contains("caf"),
+            "keine Eingabe in der Antwort"
+        );
+        assert!(!r.json.to_string().contains("geheim"));
+        let r = call(&app, Method::GET, "/ok", &[], None).await;
+        assert_eq!(r.status, StatusCode::OK);
+    }
+}
+
+/// Das Release-Profil muss unwinden, sonst beendet jeder Panic den Prozess trotz CatchPanicLayer.
+#[test]
+fn fund4_release_profile_unwinds() {
+    let toml =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml")).unwrap();
+    assert!(
+        !toml.contains("panic = \"abort\""),
+        "panic = abort würde CatchPanicLayer wirkungslos machen"
+    );
+}

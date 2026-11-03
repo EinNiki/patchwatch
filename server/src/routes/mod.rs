@@ -19,6 +19,7 @@ use axum::response::Response;
 use axum::routing::{get, post, put};
 use axum::Router;
 use std::time::Duration;
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
@@ -97,6 +98,42 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .nest("/api/v1", api)
+        .layer(middleware::from_fn(reject_nul_in_uri))
         .layer(TraceLayer::new_for_http())
+        // Äußerste Schicht: ein Panic in irgendeinem Handler oder einer Middleware wird zu einem 500.
+        .layer(CatchPanicLayer::custom(panic_response))
         .with_state(state)
+}
+
+/// Antwort auf einen abgefangenen Panic. Weder Meldung noch Eingabe werden ausgegeben oder protokolliert (die
+/// Panic-Meldung kann Nutzereingaben enthalten); der Ort steht im Panic-Hook (`install_panic_hook`).
+pub fn panic_response(_payload: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    use axum::response::IntoResponse;
+    ApiError::Internal(anyhow::anyhow!("Panic abgefangen")).into_response()
+}
+
+/// Panic-Hook ohne Nutzereingaben: protokolliert nur Datei und Zeile, nie die Panic-Meldung.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let loc = info.location().map_or_else(
+            || "unbekannt".to_owned(),
+            |l| format!("{}:{}", l.file(), l.line()),
+        );
+        tracing::error!(location = %loc, "Panic in einer Anfrage abgefangen oder aufgetreten");
+    }));
+}
+
+/// Pfad oder Query mit kodiertem NUL (`%00`) ist immer ungültig: Postgres-Text kann kein NUL enthalten, die Abfrage
+/// würde mit einem Datenbankfehler (500) scheitern. Gilt für alle Routen, auch künftige.
+async fn reject_nul_in_uri(req: Request, next: Next) -> Result<Response, ApiError> {
+    let has_nul = req
+        .uri()
+        .path_and_query()
+        .is_some_and(|pq| pq.as_str().to_ascii_lowercase().contains("%00"));
+    if has_nul {
+        return Err(ApiError::BadRequest(
+            "ungültige Zeichen in der Adresse".into(),
+        ));
+    }
+    Ok(next.run(req).await)
 }
