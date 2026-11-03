@@ -33,7 +33,26 @@ export function cacheSet<T>(path: string, data: T) {
   emit();
 }
 
+/**
+ * Laufnummer der Sitzung. Jede Leerung (Logout, 401) erhöht sie. Eine Antwort, die vor der Leerung angefragt wurde
+ * (Anfrage noch unterwegs), trägt die alte Nummer und darf den Cache nicht mehr füllen: sonst stünden die Daten der
+ * beendeten Sitzung nach dem Abmelden wieder im Cache und wären für den nächsten Benutzer sichtbar.
+ */
+let generation = 0;
+
+export function cacheGeneration(): number {
+  return generation;
+}
+
+/** Wie `cacheSet`, aber nur, wenn die Anfrage in der aktuellen Sitzung gestartet wurde. */
+export function cacheSetIfCurrent<T>(path: string, data: T, requestedIn: number): boolean {
+  if (requestedIn !== generation) return false;
+  cacheSet(path, data);
+  return true;
+}
+
 export function clearApiCache() {
+  generation += 1;
   if (entries.size === 0) return;
   entries.clear();
   stamps.clear();

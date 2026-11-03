@@ -77,4 +77,6 @@ jobs:
       - if: steps.has_web.outputs.present == 'true'
         run: npm run typecheck
       - if: steps.has_web.outputs.present == 'true'
+        run: npm test
+      - if: steps.has_web.outputs.present == 'true'
         run: npm run build

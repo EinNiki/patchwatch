@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api, ApiError } from "./api";
-import { cacheAge, cacheGet, cacheSet, cacheSubscribe } from "./apiCache";
+import { cacheAge, cacheGeneration, cacheGet, cacheSet, cacheSetIfCurrent, cacheSubscribe } from "./apiCache";
 import { useLiveEvents, type LiveEvent } from "./live";
 
 export interface ApiState<T> {
@@ -17,20 +17,24 @@ export interface ApiState<T> {
   mutate: (updater: (current: T) => T) => void;
 }
 
-type Result<T> = { data: T } | { error: string };
+/** `gen`: Sitzungsnummer des Cache beim Start der Anfrage (siehe `cacheGeneration`). */
+type Result<T> = ({ data: T } | { error: string }) & { gen: number };
 
 /** Läuft für einen Pfad schon eine Anfrage, hängen sich weitere Aufrufer daran (Shell und Seite fragen oft dasselbe). */
 const inflight = new Map<string, Promise<Result<unknown>>>();
 
 function fetchResult<T>(path: string): Promise<Result<T>> {
-  const running = inflight.get(path);
+  // Nummer VOR dem Abruf merken; Anfragen aus einer früheren Sitzung werden nie mit neuen zusammengelegt.
+  const gen = cacheGeneration();
+  const key = `${gen}:${path}`;
+  const running = inflight.get(key);
   if (running) return running as Promise<Result<T>>;
   const p = api.get<T>(path).then(
-    (data): Result<T> => ({ data }),
-    (e: unknown): Result<T> => ({ error: e instanceof ApiError ? e.message : "Server nicht erreichbar" }),
+    (data): Result<T> => ({ data, gen }),
+    (e: unknown): Result<T> => ({ error: e instanceof ApiError ? e.message : "Server nicht erreichbar", gen }),
   );
-  inflight.set(path, p);
-  void p.finally(() => inflight.delete(path));
+  inflight.set(key, p);
+  void p.finally(() => inflight.delete(key));
   return p;
 }
 
@@ -75,8 +79,10 @@ export function useApi<T>(
   const apply = useCallback(
     (p: string, r: Result<T>) => {
       if (!mounted.current) return;
+      // Antwort aus einer beendeten Sitzung (Logout während der Anfrage): verwerfen, nichts cachen, nichts anzeigen.
+      if (r.gen !== cacheGeneration()) return;
       if ("data" in r) {
-        cacheSet(p, r.data);
+        cacheSetIfCurrent(p, r.data, r.gen);
         setErrorFor(null);
       } else {
         setErrorFor({ path: p, message: r.error });
@@ -134,6 +140,9 @@ export function useApi<T>(
 /** Wärmt den Cache vor (Hover/Fokus auf einem Link); vorhandene Daten bleiben, Fehler werden still ignoriert. */
 export function prefetchApi(...paths: string[]) {
   for (const path of paths) {
-    if (cacheGet(path) === undefined) void api.get<unknown>(path).then((d) => cacheSet(path, d), () => undefined);
+    if (cacheGet(path) === undefined) {
+      const gen = cacheGeneration();
+      void api.get<unknown>(path).then((d) => cacheSetIfCurrent(path, d, gen), () => undefined);
+    }
   }
 }

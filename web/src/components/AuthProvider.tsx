@@ -59,6 +59,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   const logout = async () => {
+    // Schon vor der Abmeldung leeren und die Sitzungsnummer erhöhen: Anfragen, die jetzt noch laufen, füllen den Cache nicht mehr.
+    clearApiCache();
     try {
       await api.post("/auth/logout");
     } finally {
