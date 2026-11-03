@@ -113,8 +113,10 @@ pub struct CveConfig {
     pub osv_url: String,
     pub nvd_url: String,
     pub kev_url: String,
-    /// Seiten (je 20 CVEs, ca. 3,7 MB) beim allerersten Ubuntu-Abruf.
-    pub ubuntu_backfill_pages: u32,
+    /// Horizont des Ubuntu-Erstabrufs in Tagen (nach `updated`; Umgebungsvariable
+    /// `PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS`). Der Erstabruf lädt in mehreren Läufen alles, was seitdem geändert
+    /// wurde, und gilt erst danach als vollständig. 0 = gesamte Liste.
+    pub ubuntu_horizon_days: u32,
     /// Obergrenze an Seiten pro Lauf (Umgebungsvariable `PATCHWATCH_CVE_UBUNTU_MAX_PAGES`). Wird sie vor dem
     /// Cursor erreicht, speichert der Lauf seinen Fortschritt und der nächste setzt dort fort; die Quelle gilt
     /// bis zum Ende dieses Rückstandsabbaus als unvollständig.
@@ -137,7 +139,7 @@ impl Default for CveConfig {
             osv_url: "https://api.osv.dev".into(),
             nvd_url: "https://services.nvd.nist.gov/rest/json/cves/2.0".into(),
             kev_url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json".into(),
-            ubuntu_backfill_pages: 5,
+            ubuntu_horizon_days: 365,
             ubuntu_max_pages: 100,
             ubuntu_max_page_bytes: 32 * 1024 * 1024,
             debian_max_bytes: 200 * 1024 * 1024,
@@ -334,6 +336,9 @@ impl Config {
         if let Some(v) = s("CVE_UBUNTU_MAX_PAGES") {
             c.cve.ubuntu_max_pages = v.parse().context("CVE_UBUNTU_MAX_PAGES")?;
         }
+        if let Some(v) = s("CVE_UBUNTU_HORIZON_DAYS") {
+            c.cve.ubuntu_horizon_days = v.parse().context("CVE_UBUNTU_HORIZON_DAYS")?;
+        }
         if let Some(v) = s("CVE_UBUNTU_URL") {
             c.cve.ubuntu_url = v;
         }
@@ -379,6 +384,9 @@ impl Config {
         }
         if self.cve.interval_minutes < 5 {
             bail!("cve.interval_minutes muss >= 5 sein");
+        }
+        if self.cve.ubuntu_horizon_days > 36_500 {
+            bail!("cve.ubuntu_horizon_days (PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS) darf höchstens 36500 sein");
         }
         if !(1..=2000).contains(&self.cve.ubuntu_max_pages) {
             bail!("cve.ubuntu_max_pages (PATCHWATCH_CVE_UBUNTU_MAX_PAGES) muss zwischen 1 und 2000 liegen");
@@ -485,6 +493,13 @@ mod tests {
         assert!(c.cve.enabled && c.cve.interval_minutes == 60);
         assert_eq!(c.cve.sources, ["ubuntu", "debian"]);
         assert_eq!(c.cve.ubuntu_max_pages, 100);
+        assert_eq!(c.cve.ubuntu_horizon_days, 365);
+        let c = Config::from_sources(
+            None,
+            &env_of(&[("PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS", "0")]),
+        )
+        .unwrap();
+        assert_eq!(c.cve.ubuntu_horizon_days, 0);
         let c = Config::from_sources(None, &env_of(&[("PATCHWATCH_CVE_UBUNTU_MAX_PAGES", "250")]))
             .unwrap();
         assert_eq!(c.cve.ubuntu_max_pages, 250);

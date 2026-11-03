@@ -19,6 +19,8 @@ export type CveStatus =
   | "unknown";
 
 export interface Host {
+  /** Begründung für „CVE-Lage unbekannt“ wegen unvollständiger/veralteter/fehlerhafter Quelle. */
+  cve_source_issue?: string | null;
   id: number;
   name: string;
   hostname: string | null;
@@ -206,7 +208,7 @@ export interface Feed {
   last_error_at: string | null;
   consecutive_failures: number;
   /** Nur bei state "incomplete": Fortschritt des Rückstandsabbaus. */
-  backfill: { pages_done: number; runs: number; next_offset: number; pages_per_run: number | null; since: string; progress: string } | null;
+  backfill: { pages_done: number; runs: number; next_offset: number; pages_per_run: number | null; since: string; progress: string; initial?: boolean; position_pages?: number; est_pages?: number | null; target?: string } | null;
 }
 
 export interface Me {

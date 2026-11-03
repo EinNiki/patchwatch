@@ -86,10 +86,12 @@ pub struct FeedState {
     pub cursor: Option<String>,
     /// Offener Rückstandsabbau (nur Quellen mit Cursor-Paginierung).
     pub backfill: Option<Backfill>,
+    /// Horizont, bis zu dem der Erstabruf die Quelle vollständig geladen hat (nur Quellen mit Erstabruf-Abbau).
+    pub covered_since: Option<String>,
 }
 
-/// Fortschritt eines Rückstandsabbaus. Die Lücke liegt zwischen `target` (alter bestätigter Cursor) und dem
-/// Kopf der Liste. Fortschritt und bestätigter Cursor sind bewusst getrennt: `FeedState::cursor` bleibt
+/// Fortschritt eines Rückstandsabbaus (Catch-up nach einem Cursor oder Erstabruf bis zum Horizont). Die Lücke
+/// liegt zwischen `target` (alter bestätigter Cursor bzw. Horizont) und dem Kopf der Liste. Fortschritt und bestätigter Cursor sind bewusst getrennt: `FeedState::cursor` bleibt
 /// `target`, bis die Lücke geschlossen ist; erst dann wird er auf `pending` gesetzt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Backfill {
@@ -103,6 +105,12 @@ pub struct Backfill {
     pub pages_done: u32,
     pub runs: u32,
     pub started_at: DateTime<Utc>,
+    /// Erstabruf (noch nie ein bestätigter Cursor): `target` ist dann der Horizont, nicht ein alter Cursor.
+    #[serde(default)]
+    pub initial: bool,
+    /// Geschätzte Gesamtzahl der Seiten bis zum Ziel (nur Erstabruf; Schätzung, die Liste ändert sich laufend).
+    #[serde(default)]
+    pub est_pages: Option<u32>,
 }
 
 pub enum FetchOutcome {

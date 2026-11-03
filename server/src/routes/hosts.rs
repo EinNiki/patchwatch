@@ -71,13 +71,27 @@ pub struct HostRow {
     cve_vulnerable: i64,
     cve_fix_pending: i64,
     cve_unknown: i64,
+    /// Warum die CVE-Lage unbekannt ist ("Quelle Ubuntu unvollständig / veraltet / fehlerhaft"); sonst `null`.
+    #[sqlx(skip)]
+    cve_source_issue: Option<String>,
+}
+
+/// Trägt die Begründung "keine nutzbare CVE-Quelle" ein (nur Debian/Ubuntu-Hosts außer Proxmox).
+async fn with_source_issues(st: &AppState, mut rows: Vec<HostRow>) -> ApiResult<Vec<HostRow>> {
+    let issues = crate::hostops::cve_source_issues(&st.pool).await?;
+    for r in &mut rows {
+        if !r.is_proxmox {
+            r.cve_source_issue = r.os_id.as_ref().and_then(|os| issues.get(os)).cloned();
+        }
+    }
+    Ok(rows)
 }
 
 pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<HostRow>>> {
     let rows = sqlx::query_as::<_, HostRow>(&format!("{HOST_SELECT} ORDER BY h.name"))
         .fetch_all(&st.pool)
         .await?;
-    Ok(Json(rows))
+    Ok(Json(with_source_issues(&st, rows).await?))
 }
 
 pub async fn detail(
@@ -85,12 +99,13 @@ pub async fn detail(
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<HostRow>> {
-    sqlx::query_as::<_, HostRow>(&format!("{HOST_SELECT} WHERE h.id = $1"))
+    let row = sqlx::query_as::<_, HostRow>(&format!("{HOST_SELECT} WHERE h.id = $1"))
         .bind(id)
         .fetch_optional(&st.pool)
         .await?
-        .map(Json)
-        .ok_or(ApiError::NotFound)
+        .ok_or(ApiError::NotFound)?;
+    let mut rows = with_source_issues(&st, vec![row]).await?;
+    Ok(Json(rows.remove(0)))
 }
 
 #[derive(Deserialize)]

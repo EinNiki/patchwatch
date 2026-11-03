@@ -367,6 +367,13 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
     );
   if (parts.length === 0) {
     if (h.status === "pending") return <span className="text-fg3">–</span>;
+    // Quelle unvollständig/veraltet/fehlerhaft: nie "keine offenen", sondern die Begründung zeigen.
+    if (h.cve_source_issue)
+      return (
+        <span className="inline-flex items-center gap-1 text-unknown">
+          <Icon name="unknown" /> {h.cve_source_issue}
+        </span>
+      );
     return feedOk ? (
       <span className="inline-flex items-center gap-1 text-fg2">
         <Icon name="ok" /> keine offenen

@@ -111,6 +111,19 @@ async fn main() -> Result<()> {
                     tracing::warn!("Admin 'admin' mit Zufallspasswort angelegt (auf stderr ausgegeben), Passwortwechsel beim ersten Login erforderlich");
                 }
             }
+            // Altbestand: Ubuntu-Quellen, deren Erstabruf nach 5 Seiten als vollständig galt, werden vollständig
+            // nachgeladen (bis dahin "unvollständig", Hosts nie grün).
+            let reopened = patchwatch_server::cve::ubuntu::reopen_legacy_imports(
+                &pool,
+                cfg.cve.ubuntu_horizon_days,
+            )
+            .await?;
+            if reopened > 0 {
+                tracing::warn!(
+                    sources = reopened,
+                    "Ubuntu-Erstabruf war unvollständig und wird nachgeholt"
+                );
+            }
             // Bestehende Installationen: Konten, die noch das frühere Standardpasswort haben, müssen es ändern.
             let weak = admin::flag_default_passwords(&pool).await?;
             if !weak.is_empty() {
@@ -121,6 +134,9 @@ async fn main() -> Result<()> {
             }
             let listen = cfg.listen.clone();
             let state = AppState::new(pool, cfg)?;
+            // Quellen sofort anlegen: ohne sie wüsste der Host-Status nicht, dass eine CVE-Quelle fehlt oder
+            // noch nicht geladen ist, und könnte direkt nach dem Start fälschlich "aktuell" melden.
+            patchwatch_server::cve::sources::ensure_seeded(&state).await?;
             // Statuswerte einmal neu berechnen (Bewertungsregeln können sich zwischen Versionen ändern).
             let re = state.clone();
             tokio::spawn(async move {

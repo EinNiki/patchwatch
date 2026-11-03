@@ -34,6 +34,8 @@ services:
       PATCHWATCH_CVE_INTERVAL_MINUTES: ${PATCHWATCH_CVE_INTERVAL_MINUTES:-60}
       # Ubuntu: höchstens so viele Seiten (je 20 CVEs) pro Lauf; ein größerer Rückstand wird über mehrere Läufe abgebaut.
       PATCHWATCH_CVE_UBUNTU_MAX_PAGES: ${PATCHWATCH_CVE_UBUNTU_MAX_PAGES:-100}
+      # Ubuntu-Erstabruf: Horizont in Tagen (0 = ganze Liste).
+      PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS: ${PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS:-365}
       PATCHWATCH_NTFY_URL: ${PATCHWATCH_NTFY_URL:-}
       PATCHWATCH_NTFY_TOPIC: ${PATCHWATCH_NTFY_TOPIC:-}
       PATCHWATCH_NTFY_TOKEN: ${PATCHWATCH_NTFY_TOKEN:-}

@@ -34,13 +34,15 @@ async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
         .bind(name)
         .execute(&state.pool)
         .await?;
-    let (etag, last_modified, cursor, backfill): (
+    #[allow(clippy::type_complexity)]
+    let (etag, last_modified, cursor, backfill, covered): (
         Option<String>,
         Option<String>,
         Option<String>,
         Option<serde_json::Value>,
+        Option<chrono::DateTime<chrono::Utc>>,
     ) = sqlx::query_as(
-        "SELECT etag, last_modified, cursor, backfill FROM feed_state WHERE source = $1",
+        "SELECT etag, last_modified, cursor, backfill, covered_since FROM feed_state WHERE source = $1",
     )
     .bind(name)
     .fetch_one(&state.pool)
@@ -51,6 +53,7 @@ async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
         cursor,
         // Ein unlesbarer Eintrag zählt als "kein Fortschritt": der Abruf beginnt dann wieder vorn.
         backfill: backfill.and_then(|v| serde_json::from_value(v).ok()),
+        covered_since: covered.map(|t| t.to_rfc3339()),
     })
 }
 
@@ -87,6 +90,27 @@ async fn context(state: &AppState, id: &str, kind: &str) -> Result<FetchCtx> {
     })
 }
 
+/// Bis wann ein vollständiger Abruf als frisch gilt: max(3 x Intervall, 6 Stunden).
+async fn usable_until(state: &AppState, name: &str) -> chrono::DateTime<chrono::Utc> {
+    let minutes = crate::schedule::feed_interval_minutes(
+        &state.pool,
+        name,
+        state.cfg.cve.interval_minutes as i64,
+    )
+    .await;
+    chrono::Utc::now() + chrono::Duration::minutes((3 * minutes).max(6 * 60))
+}
+
+/// Host-Status der Distribution neu berechnen, weil sich die Nutzbarkeit der Quelle geändert haben kann.
+/// Fehler werden nur protokolliert: der Abruf selbst ist davon unabhängig.
+async fn gate_hosts(state: &AppState, kind: Option<&str>) {
+    let stale_after = crate::schedule::stale_after(&state.pool, state.cfg.stale_after_hours).await;
+    if let Err(e) = crate::hostops::recompute_cve_gated_hosts(&state.pool, kind, stale_after).await
+    {
+        tracing::warn!(error = %e, "Host-Status nach Quellenänderung nicht aktualisiert");
+    }
+}
+
 async fn record_failure(state: &AppState, name: &str, error: &str) -> Result<()> {
     let msg: String = error.chars().take(500).collect();
     let failures: i32 = sqlx::query_scalar(
@@ -107,6 +131,8 @@ async fn record_failure(state: &AppState, name: &str, error: &str) -> Result<()>
             .execute(&state.pool)
             .await?;
     }
+    // Ab dem 3. Fehlschlag in Folge gilt die Quelle als dauerhaft fehlerhaft und ist nicht mehr nutzbar.
+    gate_hosts(state, None).await;
     Ok(())
 }
 
@@ -150,10 +176,15 @@ pub async fn refresh_source(state: &AppState, id: &str, src: &dyn CveSource) -> 
 
     match src.fetch(&state.http, &feed_state, &ctx).await {
         Ok(FetchOutcome::NotModified) => {
-            sqlx::query("UPDATE feed_state SET last_success_at = now(), last_error = NULL, consecutive_failures = 0 WHERE source = $1")
+            // Nichts Neues, aber ein vollständiger, erfolgreicher Abruf: die Quelle ist wieder frisch.
+            let until = usable_until(state, name).await;
+            sqlx::query("UPDATE feed_state SET last_success_at = now(), last_error = NULL, consecutive_failures = 0, usable_until = $2 WHERE source = $1")
                 .bind(name)
+                .bind(until)
                 .execute(&state.pool)
                 .await?;
+            // Ein offener Abbau bleibt offen (NotModified wird dann nie geliefert); nur den Host-Status auffrischen.
+            gate_hosts(state, Some(kind)).await;
             Ok(Outcome::NotModified)
         }
         Ok(FetchOutcome::Records {
@@ -209,15 +240,23 @@ async fn store(
         .transpose()?;
     match &partial {
         None => {
+            let until = usable_until(state, name).await;
+            let covered = new_state
+                .covered_since
+                .as_deref()
+                .and_then(|c| chrono::DateTime::parse_from_rfc3339(c).ok());
             sqlx::query(
                 "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
-                 last_success_at = now(), last_error = NULL, consecutive_failures = 0 WHERE source = $1",
+                 last_success_at = now(), last_error = NULL, consecutive_failures = 0, usable_until = $6, \
+                 covered_since = COALESCE($7, covered_since) WHERE source = $1",
             )
             .bind(name)
             .bind(&new_state.etag)
             .bind(&new_state.last_modified)
             .bind(&new_state.cursor)
             .bind(&backfill)
+            .bind(until)
+            .bind(covered)
             .execute(&mut *tx)
             .await?;
         }
@@ -240,6 +279,8 @@ async fn store(
     }
     tx.commit().await?;
     let hosts = reeval::reevaluate_affected(state, &stats.changed_pairs).await?;
+    // Ob die Quelle für die Bewertung nutzbar ist, kann sich geändert haben (Abbau fertig, Teilabruf, ...).
+    gate_hosts(state, Some(kind)).await;
     tracing::info!(
         source = name,
         records = records.len(),
@@ -355,6 +396,8 @@ pub async fn run(state: AppState) {
                 }
             }
         }
+        // Zeitabhängig: eine Quelle kann auch ohne neuen Abruf veralten; dann dürfen Hosts nicht grün bleiben.
+        gate_hosts(&state, None).await;
         tokio::time::sleep(Duration::from_secs(30) + jitter(2_000)).await;
     }
 }

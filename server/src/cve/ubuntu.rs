@@ -19,14 +19,15 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{json, Value};
 use std::time::Duration;
 
-/// Seitengröße; eine Seite ist ca. 3,7 MB groß (eingebettete `notices`), daher klein halten.
-const PAGE: usize = 20;
+/// Seitengröße; die API erlaubt höchstens 20. Eine Seite ist ca. 3,7 MB groß (169 Kernel-Pakete je CVE).
+pub const PAGE: usize = 20;
 /// Höchstens so viele Watchlist-CVEs pro Lauf einzeln nachladen.
 const MAX_WATCH_FETCH: usize = 25;
 
 pub struct Ubuntu {
     base: String,
-    backfill_pages: u32,
+    /// Horizont des Erstabrufs in Tagen (0 = gesamte Liste).
+    horizon_days: u32,
     max_pages: u32,
     lim: Limits,
 }
@@ -35,7 +36,7 @@ impl Ubuntu {
     pub fn new(c: &CveConfig) -> Self {
         Self {
             base: c.ubuntu_url.trim_end_matches('/').to_owned(),
-            backfill_pages: c.ubuntu_backfill_pages,
+            horizon_days: c.ubuntu_horizon_days,
             max_pages: c.ubuntu_max_pages,
             lim: Limits {
                 max_bytes: c.ubuntu_max_page_bytes,
@@ -45,6 +46,91 @@ impl Ubuntu {
             },
         }
     }
+}
+
+impl Ubuntu {
+    /// Horizont des Erstabrufs: Zeitstempel, bis zu dem (nach `updated`) geladen wird. 0 Tage = gesamte Liste.
+    fn horizon(&self, now: DateTime<Utc>) -> DateTime<Utc> {
+        if self.horizon_days == 0 {
+            DateTime::<Utc>::UNIX_EPOCH
+        } else {
+            now - chrono::Duration::days(i64::from(self.horizon_days))
+        }
+    }
+}
+
+/// Altbestände: Quellen, die noch aus der Zeit stammen, in der der Erstabruf nach 5 Seiten als vollständig galt
+/// (Cursor gesetzt, aber nie bis zu einem Horizont geladen), bekommen beim Start einen Erstabruf-Abbau und
+/// gelten bis zu dessen Ende als unvollständig. Gibt die Zahl der wieder geöffneten Quellen zurück.
+pub async fn reopen_legacy_imports(
+    pool: &sqlx::PgPool,
+    horizon_days: u32,
+) -> anyhow::Result<usize> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT f.source, f.cursor FROM feed_state f JOIN cve_sources s ON s.id = f.source \
+         WHERE s.kind = 'ubuntu' AND s.deleted_at IS NULL AND f.cursor IS NOT NULL \
+           AND f.backfill IS NULL AND f.covered_since IS NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    let now = Utc::now();
+    let horizon = if horizon_days == 0 {
+        DateTime::<Utc>::UNIX_EPOCH
+    } else {
+        now - chrono::Duration::days(i64::from(horizon_days))
+    };
+    for (source, cursor) in &rows {
+        let b = Backfill {
+            target: horizon.to_rfc3339(),
+            pending: cursor.clone(),
+            next_offset: 0,
+            pages_done: 0,
+            runs: 0,
+            started_at: now,
+            initial: true,
+            est_pages: None,
+        };
+        sqlx::query("UPDATE feed_state SET backfill = $2 WHERE source = $1 AND backfill IS NULL")
+            .bind(source)
+            .bind(serde_json::to_value(&b)?)
+            .execute(pool)
+            .await?;
+    }
+    Ok(rows.len())
+}
+
+fn page_url(base: &str, limit: usize, offset: usize) -> String {
+    // Der Filter `package=linux` ist geprüft: kein Kernel-Paket hat mehr CVEs als `linux` (siehe README).
+    format!(
+        "{base}/security/cves.json?package=linux&limit={limit}&offset={offset}&order=descending&sort_by=updated"
+    )
+}
+
+/// Schätzt, wie viele Seiten bis zum Horizont zu laden sind: Binärsuche nach dem ersten Eintrag mit
+/// `updated_at <= Horizont` (die Liste ist absteigend sortiert). Nur eine Schätzung für die Anzeige; Fehler
+/// ergeben `None` und beeinflussen den Abruf nicht.
+async fn estimate_pages(
+    client: &reqwest::Client,
+    base: &str,
+    lim: Limits,
+    total: u64,
+    target: DateTime<Utc>,
+) -> Option<u32> {
+    if target == DateTime::<Utc>::UNIX_EPOCH {
+        return Some(total.div_ceil(PAGE as u64) as u32);
+    }
+    let (mut lo, mut hi) = (0u64, total); // erster Offset mit updated <= target liegt in [lo, hi]
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        let url = page_url(base, 1, mid as usize);
+        let page = fetch_page(client, &url, lim, Some(target), 1).await.ok()?;
+        if page.reached_end {
+            hi = mid; // Eintrag bei `mid` ist schon im Horizont (oder die Liste endet)
+        } else {
+            lo = mid + 1;
+        }
+    }
+    Some(lo.div_ceil(PAGE as u64) as u32)
 }
 
 fn map_status(status: &str, desc: &str) -> Option<(SourceStatus, Option<String>)> {
@@ -142,40 +228,43 @@ impl CveSource for Ubuntu {
         ctx: &FetchCtx,
     ) -> Result<FetchOutcome, FeedError> {
         // Bestätigter Cursor: alles Neuere ist vollständig geladen. Er rückt nur vor, wenn die Lücke zwischen
-        // altem Cursor und Listenkopf geschlossen ist; solange sie offen ist, steht der Fortschritt in `backfill`.
+        // Ziel (alter Cursor bzw. Horizont des Erstabrufs) und Listenkopf geschlossen ist; solange sie offen
+        // ist, steht der Fortschritt in `backfill`. Auch der Erstabruf ist so ein Abbau: ohne Cursor gilt die
+        // Quelle erst als vollständig, wenn der Horizont erreicht ist (oder die Liste endet).
         let confirmed = state.cursor.as_deref().and_then(parse_time);
-        // Ein Rückstandsabbau wird nur fortgesetzt, wenn er zum bestätigten Cursor passt (wurde der Cursor
-        // von Hand geändert oder ist der Eintrag beschädigt, beginnt der Abruf wieder bei Seite 1).
+        // Ein Abbau wird nur fortgesetzt, wenn er zum Zustand passt (wurde der Cursor von Hand geändert oder ist
+        // der Eintrag beschädigt, beginnt der Abruf wieder bei Seite 1). Ein Erstabruf-Abbau gilt unabhängig vom
+        // Cursor: er holt auch Altbestände nach, die nur den Kopf der Liste kannten.
         let resume = state.backfill.as_ref().filter(|b| {
-            state.cursor.as_deref() == Some(b.target.as_str())
+            (b.initial || state.cursor.as_deref() == Some(b.target.as_str()))
                 && parse_time(&b.target).is_some()
                 && parse_time(&b.pending).is_some()
         });
-        let max_pages = if confirmed.is_some() {
-            self.max_pages
-        } else {
-            self.backfill_pages
+        let initial = confirmed.is_none() || resume.is_some_and(|b| b.initial);
+        // Ziel: bis wohin gelesen werden muss. Beim Erstabruf der Horizont, einmal festgelegt und danach
+        // nicht mehr mitwandernd (sonst würde der Abbau nie fertig).
+        let target = match (resume, confirmed) {
+            (Some(b), _) => parse_time(&b.target),
+            (None, Some(c)) => Some(c),
+            (None, None) => Some(self.horizon(Utc::now())),
         };
-        // Ohne Cursor ist es der Erstabruf: bewusst begrenzt (Backfill) und danach als vollständig gewertet.
-        let mut complete = confirmed.is_none();
+        let mut complete = false;
         let start_offset = resume.map_or(0, |b| b.next_offset as usize);
         // Neuester gesehener Zeitstempel des gesamten Durchlaufs (über Läufe hinweg in `pending` gehalten).
         let mut newest = resume.and_then(|b| parse_time(&b.pending)).or(confirmed);
         let mut records: Vec<Record> = Vec::new();
         let mut pages_fetched = 0usize;
         let mut interrupted: Option<FeedError> = None;
+        let mut est_pages = resume.and_then(|b| b.est_pages);
 
-        'pages: for i in 0..max_pages as usize {
-            let url = format!(
-                "{}/security/cves.json?package=linux&limit={PAGE}&offset={}&order=descending&sort_by=updated",
-                self.base,
-                start_offset + i * PAGE
-            );
+        'pages: for i in 0..self.max_pages as usize {
+            let url = page_url(&self.base, PAGE, start_offset + i * PAGE);
             // Eine Seite wird ganz oder gar nicht übernommen; so zeigt der Fortschritt nie über Daten hinaus,
             // die wirklich gespeichert werden.
-            let page = match fetch_page(client, &url, self.lim, confirmed).await {
+            let page = match fetch_page(client, &url, self.lim, target, PAGE).await {
                 Ok(p) => p,
                 // Schon Fortschritt erzielt: behalten und beim nächsten Lauf weitermachen, nicht wegwerfen.
+                // Ein Fehler schon auf der ersten Seite ist ein Fehlschlag (und beim Erstabruf nie "vollständig").
                 Err(e) if pages_fetched > 0 => {
                     interrupted = Some(e);
                     break 'pages;
@@ -185,6 +274,16 @@ impl CveSource for Ubuntu {
             pages_fetched += 1;
             records.extend(page.records);
             newest = newest.max(page.newest);
+            // Erstabruf: einmal die Gesamtzahl der Seiten bis zum Horizont schätzen ("N von M Seiten").
+            if initial
+                && pages_fetched == 1
+                && !page.reached_end
+                && resume.is_none_or(|b| b.runs == 0 && b.est_pages.is_none())
+            {
+                if let (Some(total), Some(t)) = (page.total, target) {
+                    est_pages = estimate_pages(client, &self.base, self.lim, total, t).await;
+                }
+            }
             if page.reached_end {
                 complete = true;
                 break;
@@ -197,12 +296,17 @@ impl CveSource for Ubuntu {
             FeedState {
                 cursor: newest.map(|n| n.to_rfc3339()),
                 backfill: None,
+                // Ein abgeschlossener Erstabruf hat die Liste bis zum Horizont vollständig geladen.
+                covered_since: match (initial, target) {
+                    (true, Some(t)) => Some(t.to_rfc3339()),
+                    _ => state.covered_since.clone(),
+                },
                 ..state.clone()
             }
         } else {
-            // `complete == false` heißt: es gibt einen Cursor und wir haben mindestens eine Seite gelesen.
-            let (Some(target), Some(pending)) = (state.cursor.clone(), newest) else {
-                return Err(FeedError::Format("Rückstand ohne Cursor".into()));
+            // `complete == false` heißt: mindestens eine Seite gelesen (sonst wäre es ein Fehler gewesen).
+            let (Some(target), Some(pending)) = (target, newest) else {
+                return Err(FeedError::Format("Abbau ohne Ziel".into()));
             };
             // Eine Seite Überlappung: Offsets verschieben sich nur nach hinten, wenn oben neue Änderungen
             // eintreffen (Doppelte sind harmlos, der Upsert ist idempotent) -- die Überlappung fängt zusätzlich
@@ -213,17 +317,25 @@ impl CveSource for Ubuntu {
             let prev = resume;
             FeedState {
                 backfill: Some(Backfill {
-                    target,
+                    // Beim Catch-up bleibt die Zeichenkette gleich dem gespeicherten Cursor.
+                    target: if initial {
+                        target.to_rfc3339()
+                    } else {
+                        state.cursor.clone().unwrap_or_else(|| target.to_rfc3339())
+                    },
                     pending: pending.to_rfc3339(),
                     next_offset: next as u32,
                     pages_done: prev.map_or(0, |b| b.pages_done) + pages_fetched as u32,
                     runs: prev.map_or(0, |b| b.runs) + 1,
                     started_at: prev.map_or_else(Utc::now, |b| b.started_at),
+                    initial,
+                    est_pages,
                 }),
                 ..state.clone()
             }
         };
-        if complete && confirmed.is_none() && records.is_empty() {
+        // Ein Erstabruf ohne einen einzigen Eintrag ist ein Formatfehler, nie "vollständig".
+        if complete && initial && !had_backfill && records.is_empty() {
             return Err(FeedError::Format("Feed liefert keine CVEs".into()));
         }
 
@@ -277,8 +389,10 @@ struct Page {
     records: Vec<Record>,
     /// Neuester `updated_at`-Wert der Seite.
     newest: Option<DateTime<Utc>>,
-    /// Bestätigter Cursor erreicht oder Listenende: alles Ältere ist bereits bekannt.
+    /// Ziel (Cursor bzw. Horizont) erreicht oder Listenende: alles Ältere ist bereits bekannt bzw. uninteressant.
     reached_end: bool,
+    /// `total_results` der API (nur für die Schätzung der Seitenzahl).
+    total: Option<u64>,
 }
 
 async fn fetch_page(
@@ -286,6 +400,7 @@ async fn fetch_page(
     url: &str,
     lim: Limits,
     stop_at: Option<DateTime<Utc>>,
+    limit: usize,
 ) -> Result<Page, FeedError> {
     let f = http::get(client, url, &[("accept", "application/json")], lim).await?;
     let v: Value = serde_json::from_slice(&f.body)
@@ -297,7 +412,8 @@ async fn fetch_page(
     let mut page = Page {
         records: Vec::new(),
         newest: None,
-        reached_end: cves.len() < PAGE,
+        reached_end: cves.len() < limit,
+        total: v.get("total_results").and_then(Value::as_u64),
     };
     for c in cves {
         let updated = c

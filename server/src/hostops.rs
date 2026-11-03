@@ -27,6 +27,91 @@ pub async fn set_status(conn: &mut PgConnection, host_id: i64, new: &str) -> sql
     Ok(true)
 }
 
+/// Nutzbar für die Bewertung ist eine Quelle (`cve_sources d`, `$2` = jetzt) nur, wenn sie mindestens einen
+/// vollständigen, erfolgreichen Abruf hatte, kein Abbau (Erstabruf oder Rückstand) offen ist, der letzte Erfolg
+/// nicht älter ist als max(3 x Intervall, 6 Stunden) (`usable_until`) und kein Dauerfehler vorliegt (mindestens
+/// 3 Fehlschläge in Folge, wie beim Alarm).
+const SOURCE_USABLE_SQL: &str = "EXISTS (SELECT 1 FROM feed_state f WHERE f.source = d.id \
+     AND f.last_success_at IS NOT NULL AND f.backfill IS NULL AND f.consecutive_failures < 3 \
+     AND f.usable_until > $2)";
+
+/// SQL-Ausdruck: Für diesen Host (`h` = Tabellenalias von `hosts`) fehlt eine nutzbare CVE-Quelle. Gilt für
+/// Debian/Ubuntu-Hosts außer Proxmox. Es müssen alle eingeschalteten Quellen der Distribution nutzbar sein, und
+/// es muss mindestens eine geben. (Das Auswerten selbst bleibt in `eval.rs` unverändert: hier wird nur
+/// entschieden, ob die Daten für ein "grün" ausreichen.)
+fn cve_source_missing_sql(h: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM settings WHERE key = 'cve_sources.seeded') AND NOT {h}.is_proxmox \
+           AND {h}.os_id IN ('debian', 'ubuntu') \
+           AND (NOT EXISTS (SELECT 1 FROM cve_sources d WHERE d.kind = {h}.os_id AND d.enabled AND d.deleted_at IS NULL) \
+                OR EXISTS (SELECT 1 FROM cve_sources d WHERE d.kind = {h}.os_id AND d.enabled AND d.deleted_at IS NULL \
+                           AND NOT {SOURCE_USABLE_SQL})))"
+    )
+}
+
+/// Berechnet den Status der Debian-/Ubuntu-Hosts (`kind` = nur diese Distribution) neu. Nötig, wenn sich die
+/// Nutzbarkeit einer Quelle ändert, ohne dass ein Report oder Datenwechsel vorliegt (Abbau fertig, Fehler, Alterung).
+/// `set_status` schreibt und meldet nur bei einer tatsächlichen Änderung.
+pub async fn recompute_cve_gated_hosts(
+    pool: &sqlx::PgPool,
+    kind: Option<&str>,
+    stale_after: Duration,
+) -> sqlx::Result<usize> {
+    let ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM hosts WHERE os_id IN ('debian', 'ubuntu') AND NOT is_proxmox \
+         AND ($1::text IS NULL OR os_id = $1) AND last_report_at IS NOT NULL",
+    )
+    .bind(kind)
+    .fetch_all(pool)
+    .await?;
+    for id in &ids {
+        let mut tx = pool.begin().await?;
+        recompute_host(&mut tx, *id, stale_after, Utc::now()).await?;
+        tx.commit().await?;
+    }
+    Ok(ids.len())
+}
+
+/// Begründung für "CVE-Lage unbekannt": welche Quelle der Distribution nicht nutzbar ist und warum.
+/// `None`, wenn alle zuständigen Quellen nutzbar sind (oder der Host keine Quelle braucht).
+pub async fn cve_source_issues(
+    pool: &sqlx::PgPool,
+) -> sqlx::Result<std::collections::HashMap<String, String>> {
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(String, String, bool, Option<DateTime<Utc>>, i32, bool)> = sqlx::query_as(
+        "SELECT d.kind, d.label, f.backfill IS NOT NULL, f.last_success_at, \
+                COALESCE(f.consecutive_failures, 0), COALESCE(f.usable_until > now(), false) \
+         FROM cve_sources d LEFT JOIN feed_state f ON f.source = d.id \
+         WHERE d.enabled AND d.deleted_at IS NULL AND d.kind IN ('debian', 'ubuntu') ORDER BY d.label",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut out = std::collections::HashMap::new();
+    let mut seen_kinds = std::collections::HashSet::new();
+    for (kind, label, backfill, success, failures, fresh) in rows {
+        seen_kinds.insert(kind.clone());
+        let why = if backfill {
+            "unvollständig (Abruf wird noch aufgebaut)"
+        } else if success.is_none() {
+            "noch nie erfolgreich abgerufen"
+        } else if failures >= 3 {
+            "fehlerhaft (wiederholt Fehlschläge)"
+        } else if !fresh {
+            "veraltet"
+        } else {
+            continue;
+        };
+        out.entry(kind)
+            .or_insert_with(|| format!("Quelle {label} {why}"));
+    }
+    for kind in ["debian", "ubuntu"] {
+        if !seen_kinds.contains(kind) {
+            out.insert(kind.to_owned(), "keine aktive CVE-Quelle".to_owned());
+        }
+    }
+    Ok(out)
+}
+
 /// Berechnet den Status aus den gespeicherten Daten neu und setzt ihn.
 pub async fn recompute_host(
     conn: &mut PgConnection,
@@ -35,15 +120,15 @@ pub async fn recompute_host(
     now: DateTime<Utc>,
 ) -> sqlx::Result<HostStatus> {
     #[allow(clippy::type_complexity)]
-    let row: (Option<DateTime<Utc>>, Option<bool>, Option<bool>, Option<i32>, Option<i32>, bool, bool) = sqlx::query_as(
+    let row: (Option<DateTime<Utc>>, Option<bool>, Option<bool>, Option<i32>, Option<i32>, bool, bool) = sqlx::query_as(&format!(
         "SELECT last_report_at, reboot_required_file, reboot_needed_kernel, updates_pending, updates_security, \
          EXISTS (SELECT 1 FROM host_cve_status c WHERE c.host_id = hosts.id AND c.status = 'vulnerable'), \
-         EXISTS (SELECT 1 FROM settings WHERE key = 'cve_sources.seeded') AND NOT is_proxmox \
-           AND os_id IN ('debian', 'ubuntu') \
-           AND NOT EXISTS (SELECT 1 FROM cve_sources d WHERE d.kind = hosts.os_id AND d.enabled AND d.deleted_at IS NULL) \
+         {} \
          FROM hosts WHERE id = $1",
-    )
+        cve_source_missing_sql("hosts")
+    ))
     .bind(host_id)
+    .bind(now)
     .fetch_one(&mut *conn)
     .await?;
     let snap = Snapshot {

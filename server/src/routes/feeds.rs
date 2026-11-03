@@ -21,14 +21,21 @@ struct FeedDb {
     backfill: Option<Value>,
 }
 
-/// Fortschritt eines Rückstandsabbaus für die Feed-Tabelle.
+/// Fortschritt eines Rückstandsabbaus oder Erstabrufs für die Feed-Tabelle.
 #[derive(Serialize)]
 pub struct BackfillView {
+    /// Erstabruf (noch nie vollständig) statt Aufholen nach einem bestätigten Cursor.
+    initial: bool,
     pages_done: u32,
     runs: u32,
     next_offset: u32,
+    /// Position in der Liste in Seiten (ohne Überlappung) und geschätzte Gesamtzahl bis zum Ziel.
+    position_pages: u32,
+    est_pages: Option<u32>,
     /// Seitenlimit je Lauf (nur Quellen mit Cursor-Paginierung).
     pages_per_run: Option<u32>,
+    /// Horizont des Erstabrufs bzw. der alte Cursor, bis zu dem noch gelesen werden muss.
+    target: String,
     since: DateTime<Utc>,
     /// Fertiger Text für die Anzeige.
     progress: String,
@@ -37,18 +44,35 @@ pub struct BackfillView {
 fn backfill_view(raw: &Value, pages_per_run: Option<u32>) -> Option<BackfillView> {
     let b: crate::cve::Backfill = serde_json::from_value(raw.clone()).ok()?;
     let per = pages_per_run.map_or(String::new(), |n| format!(", bis zu {n} Seiten pro Lauf"));
+    let position = b.next_offset / crate::cve::ubuntu::PAGE as u32;
+    let runs = format!("{} {}", b.runs, if b.runs == 1 { "Lauf" } else { "Läufe" });
+    let progress = if b.initial {
+        let of = b.est_pages.map_or(format!("{position} Seiten"), |m| {
+            format!("{position} von ca. {m} Seiten")
+        });
+        let horizon = if b.target.starts_with("1970") {
+            "gesamte Liste".to_owned()
+        } else {
+            format!("Horizont ab {}", b.target.get(..10).unwrap_or(&b.target))
+        };
+        format!("Erstabruf läuft, {of} ({horizon}; {runs} bisher{per})")
+    } else {
+        format!(
+            "Rückstand wird abgebaut: {} Seiten in {} geladen{per}",
+            b.pages_done, runs
+        )
+    };
     Some(BackfillView {
+        initial: b.initial,
         pages_done: b.pages_done,
         runs: b.runs,
         next_offset: b.next_offset,
+        position_pages: position,
+        est_pages: b.est_pages,
         pages_per_run,
+        target: b.target,
         since: b.started_at,
-        progress: format!(
-            "Rückstand wird abgebaut: {} Seiten in {} {} geladen{per}",
-            b.pages_done,
-            b.runs,
-            if b.runs == 1 { "Lauf" } else { "Läufen" }
-        ),
+        progress,
     })
 }
 

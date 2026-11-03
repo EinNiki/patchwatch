@@ -250,6 +250,11 @@ function CveSection({
           . Eine Prüfung gilt nur für den Kernel, bei dem sie gesetzt wurde.
         </p>
       ) : null}
+      {host.cve_source_issue ? (
+        <p role="note" className="mb-3 border-l-4 border-unknown bg-unknown-soft px-3 py-2 text-unknown">
+          <strong className="font-semibold">CVE-Lage unbekannt:</strong> {host.cve_source_issue}.
+        </p>
+      ) : null}
       {feedWarning ? (
         <p role="note" className="mb-3 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
           <strong className="font-semibold">{feedWarning}.</strong> Die Bewertung kann veraltet sein.

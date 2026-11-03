@@ -57,7 +57,12 @@ async fn ubuntu_list(
             "unbekannter Parameter {k}"
         );
     }
-    m.log.push(format!("ubuntu offset={offset}"));
+    // Einzelabfragen (limit=1) dienen nur der Seitenschätzung des Erstabrufs und zählen nicht als Seite.
+    m.log.push(if limit == 20 {
+        format!("ubuntu offset={offset}")
+    } else {
+        format!("ubuntu probe={offset}")
+    });
     if let Some(code) = m.ubuntu_status {
         return StatusCode::from_u16(code).unwrap().into_response();
     }
@@ -601,13 +606,7 @@ async fn feed_failure_keeps_old_state_and_is_visible(pool: PgPool) {
 async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
     let mock: Shared = Arc::default();
     let base = start_mock(mock.clone()).await;
-    let st = setup(
-        pool.clone(),
-        &["ubuntu"],
-        "ubuntu_backfill_pages = 2\nubuntu_max_pages = 2",
-        &base,
-    )
-    .await;
+    let st = setup(pool.clone(), &["ubuntu"], "ubuntu_max_pages = 2", &base).await;
     let now = Utc::now();
     let make = |n: usize, newest_min_ago: i64| -> Vec<Value> {
         (0..n)
@@ -620,13 +619,13 @@ async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
             })
             .collect()
     };
-    // 45 CVEs, nur die neuesten 2 Seiten (40) werden im Erstabruf geladen.
+    // 45 CVEs bei 2 Seiten pro Lauf: der Erstabruf ist erst nach 2 Läufen vollständig (nie nach nur 40).
     mock.lock().unwrap().ubuntu = make(45, 100);
     let out = refresh::refresh_all(&st).await;
     assert!(
         matches!(
             out[0].1,
-            Outcome::Updated {
+            Outcome::Incomplete {
                 changed_rows: 40,
                 ..
             }
@@ -634,15 +633,13 @@ async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
         "{:?}",
         out[0].1
     );
-    assert_eq!(
-        mock.lock()
-            .unwrap()
-            .log
-            .iter()
-            .filter(|l| l.starts_with("ubuntu offset"))
-            .count(),
-        2
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
     );
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 45);
 
     // Unverändert: nur die erste Seite wird angefragt, dann Stopp am Cursor.
     mock.lock().unwrap().log.clear();
@@ -748,13 +745,7 @@ fn offsets(mock: &Shared) -> Vec<usize> {
 async fn ubuntu_backlog_larger_than_page_limit_is_worked_off_over_runs(pool: PgPool) {
     let mock: Shared = Arc::default();
     let base = start_mock(mock.clone()).await;
-    let st = setup(
-        pool.clone(),
-        &["ubuntu"],
-        "ubuntu_backfill_pages = 1\nubuntu_max_pages = 2",
-        &base,
-    )
-    .await;
+    let st = setup(pool.clone(), &["ubuntu"], "ubuntu_max_pages = 2", &base).await;
     let app = patchwatch_server::router(st.clone());
     let cookies = login(&app, &pool).await;
     let now = Utc::now();
@@ -873,13 +864,7 @@ async fn ubuntu_backlog_larger_than_page_limit_is_worked_off_over_runs(pool: PgP
 async fn ubuntu_run_interrupted_midway_keeps_progress(pool: PgPool) {
     let mock: Shared = Arc::default();
     let base = start_mock(mock.clone()).await;
-    let st = setup(
-        pool.clone(),
-        &["ubuntu"],
-        "ubuntu_backfill_pages = 1\nubuntu_max_pages = 4",
-        &base,
-    )
-    .await;
+    let st = setup(pool.clone(), &["ubuntu"], "ubuntu_max_pages = 4", &base).await;
     let app = patchwatch_server::router(st.clone());
     let cookies = login(&app, &pool).await;
     let now = Utc::now();
@@ -974,13 +959,7 @@ async fn ubuntu_run_interrupted_midway_keeps_progress(pool: PgPool) {
 async fn ubuntu_backfill_is_dropped_when_cursor_changed_manually(pool: PgPool) {
     let mock: Shared = Arc::default();
     let base = start_mock(mock.clone()).await;
-    let st = setup(
-        pool.clone(),
-        &["ubuntu"],
-        "ubuntu_backfill_pages = 1\nubuntu_max_pages = 2",
-        &base,
-    )
-    .await;
+    let st = setup(pool.clone(), &["ubuntu"], "ubuntu_max_pages = 2", &base).await;
     let now = Utc::now();
     mock.lock().unwrap().ubuntu = ubuntu_batch(1, 20, now - Duration::hours(10));
     refresh::refresh_all(&st).await;
@@ -1007,6 +986,474 @@ async fn ubuntu_backfill_is_dropped_when_cursor_changed_manually(pool: PgPool) {
     mock.lock().unwrap().log.clear();
     refresh::refresh_all(&st).await;
     assert_eq!(offsets(&mock)[0], 0);
+}
+
+// ---------- Fund 2: Erstabruf ist ein fortsetzbarer Abbau, nie "vollständig" nach wenigen Seiten ----------
+
+async fn ubuntu_feed_row(app: &Router, h: &[(String, String)]) -> Value {
+    feed(&feeds(app, h).await, "ubuntu").clone()
+}
+
+async fn ubuntu_cursor_opt(pool: &PgPool) -> Option<String> {
+    sqlx::query_scalar("SELECT cursor FROM feed_state WHERE source = 'ubuntu'")
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+        .flatten()
+}
+
+/// Erstabruf mit mehr CVEs als Seitenlimit: mehrere Läufe, am Ende ist alles da, dazwischen ist die Quelle nie
+/// "ok", der Cursor fehlt bis zum Schluss, die Anzeige nennt "Erstabruf läuft, N von M Seiten".
+#[sqlx::test(migrations = "./migrations")]
+async fn fund2_initial_import_larger_than_page_limit_is_built_up_over_runs(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed_extra(pool.clone(), &["ubuntu"], &base, "ubuntu_max_pages = 2").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let now = Utc::now();
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 130, now - Duration::hours(1));
+
+    let mut runs = 0;
+    loop {
+        runs += 1;
+        assert!(runs <= 12, "Erstabruf wird nicht fertig");
+        mock.lock().unwrap().log.clear();
+        let out = refresh::refresh_all(&st).await;
+        let row = ubuntu_feed_row(&app, &h).await;
+        match &out[0].1 {
+            Outcome::Incomplete { .. } => {
+                assert_eq!(row["state"], "incomplete", "Lauf {runs}");
+                assert_eq!(row["healthy"], false);
+                assert_eq!(row["backfill"]["initial"], true);
+                assert_eq!(row["backfill"]["est_pages"], 7, "130 CVEs = 7 Seiten");
+                let text = row["backfill"]["progress"].as_str().unwrap();
+                assert!(
+                    text.starts_with("Erstabruf läuft, ") && text.contains(" von ca. 7 Seiten"),
+                    "{text}"
+                );
+                assert!(
+                    ubuntu_cursor_opt(&pool).await.is_none(),
+                    "kein Cursor vor dem Ende"
+                );
+            }
+            Outcome::Updated { .. } => {
+                assert_eq!(row["state"], "ok");
+                break;
+            }
+            other => panic!("Lauf {runs}: {other:?}"),
+        }
+        if runs == 1 {
+            assert!(
+                mock.lock()
+                    .unwrap()
+                    .log
+                    .iter()
+                    .any(|l| l.starts_with("ubuntu probe=")),
+                "Seitenschätzung fehlt"
+            );
+        }
+    }
+    assert_eq!(runs, 6);
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 130);
+    assert!(ubuntu_cursor_opt(&pool).await.is_some());
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM feed_state WHERE source = 'ubuntu' AND covered_since IS NOT NULL"
+        )
+        .await,
+        1
+    );
+    // Danach normal: nur die erste Seite, Stopp am Cursor.
+    mock.lock().unwrap().log.clear();
+    assert_eq!(refresh::refresh_all(&st).await[0].1, Outcome::NotModified);
+    assert_eq!(mock.lock().unwrap().log, vec!["ubuntu offset=0"]);
+}
+
+/// Horizont: der Erstabruf endet beim ersten Eintrag, der älter ist; die Quelle gilt dann als vollständig.
+#[sqlx::test(migrations = "./migrations")]
+async fn fund2_initial_import_stops_at_the_horizon(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed_extra(pool.clone(), &["ubuntu"], &base, "ubuntu_horizon_days = 1").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let now = Utc::now();
+    {
+        let mut m = mock.lock().unwrap();
+        let mut list = ubuntu_batch(1, 25, now - Duration::minutes(5));
+        let mut old = ubuntu_batch(2, 25, now - Duration::days(3));
+        for c in &mut old {
+            c["id"] = json!(c["id"]
+                .as_str()
+                .unwrap()
+                .replace("CVE-2026-2", "CVE-2026-8"));
+        }
+        list.extend(old);
+        m.ubuntu = list;
+    }
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM cves").await,
+        25,
+        "nur innerhalb des Horizonts"
+    );
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+}
+
+/// Ein Erstabruf, der mittendrin abbricht, gilt nie als vollständig; ein Fehler schon auf der ersten Seite auch nicht.
+#[sqlx::test(migrations = "./migrations")]
+async fn fund2_interrupted_initial_import_is_never_complete(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed_extra(pool.clone(), &["ubuntu"], &base, "ubuntu_max_pages = 4").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let now = Utc::now();
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 100, now - Duration::hours(1));
+
+    // Allererster Abruf scheitert auf der ersten Seite: nichts wird als vollständig vermerkt.
+    mock.lock().unwrap().ubuntu_status = Some(500);
+    let out = refresh::refresh_all(&st).await;
+    assert!(matches!(&out[0].1, Outcome::Failed(_)), "{:?}", out[0].1);
+    assert!(ubuntu_cursor_opt(&pool).await.is_none());
+    assert_ne!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+    mock.lock().unwrap().ubuntu_status = None;
+
+    // Dritte Seite bricht ab: die beiden ersten bleiben, kein Cursor, "unvollständig".
+    mock.lock().unwrap().ubuntu_fail_offset = Some(40);
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Incomplete { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 40);
+    assert!(ubuntu_cursor_opt(&pool).await.is_none());
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(row["state"], "incomplete");
+    assert!(row["last_error"].as_str().unwrap().contains("unterbrochen"));
+
+    // Weiter ohne Fehler: am Ende vollständig.
+    mock.lock().unwrap().ubuntu_fail_offset = None;
+    let mut last = Outcome::NotModified;
+    for _ in 0..4 {
+        last = refresh::refresh_all(&st).await.remove(0).1;
+        if matches!(last, Outcome::Updated { .. }) {
+            break;
+        }
+        assert_ne!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+    }
+    assert!(matches!(last, Outcome::Updated { .. }), "{last:?}");
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 100);
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+}
+
+/// Löschen und Neuanlegen der Quelle startet den Abbau neu: neue ID, leerer Zustand, wieder "unvollständig".
+#[sqlx::test(migrations = "./migrations")]
+async fn fund2_deleting_and_recreating_the_source_restarts_the_import(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed_extra(pool.clone(), &["ubuntu"], &base, "ubuntu_max_pages = 2").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 60, Utc::now() - Duration::hours(1));
+    for _ in 0..6 {
+        refresh::refresh_all(&st).await;
+    }
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+
+    let r = call(&app, Method::DELETE, "/api/v1/feeds/ubuntu", &hdr(&h), None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/feeds",
+        &hdr(&h),
+        Some(json!({"type": "ubuntu"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let new_id = r.json["source"]
+        .as_str()
+        .or(r.json["id"].as_str())
+        .unwrap()
+        .to_owned();
+    assert_ne!(new_id, "ubuntu", "neue Quelle hat eine neue ID");
+
+    mock.lock().unwrap().log.clear();
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Incomplete { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert!(
+        mock.lock()
+            .unwrap()
+            .log
+            .iter()
+            .any(|l| l.starts_with("ubuntu probe=")),
+        "neuer Erstabruf beginnt mit der Seitenschätzung"
+    );
+    let row = feed(&feeds(&app, &h).await, &new_id).clone();
+    assert_eq!(
+        row["state"], "incomplete",
+        "neue Quelle ist erst nach dem Abbau vollständig"
+    );
+    assert_eq!(row["backfill"]["initial"], true);
+}
+
+/// Altbestand: ein Cursor ohne bestätigten Horizont (früher: nach 5 Seiten "vollständig") wird beim Start wieder
+/// zum Erstabruf; bis zum Ende ist die Quelle unvollständig, danach vollständig und alle Einträge sind da.
+#[sqlx::test(migrations = "./migrations")]
+async fn fund2_legacy_truncated_import_is_reopened_on_start(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed_extra(pool.clone(), &["ubuntu"], &base, "ubuntu_max_pages = 3").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let now = Utc::now();
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 80, now - Duration::hours(1));
+    patchwatch_server::cve::sources::ensure_seeded(&st)
+        .await
+        .unwrap();
+    // Zustand der alten Version: Cursor gesetzt, Daten nur vom Kopf der Liste, nie bis zu einem Horizont geladen.
+    sqlx::query("INSERT INTO feed_state (source, cursor, last_success_at, usable_until) VALUES ('ubuntu', $1, now(), now() + interval '6 hours')")
+        .bind((now - Duration::hours(1)).to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        ubuntu_feed_row(&app, &h).await["state"],
+        "ok",
+        "so sah es vorher aus"
+    );
+
+    let n = patchwatch_server::cve::ubuntu::reopen_legacy_imports(&pool, 365)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(
+        patchwatch_server::cve::ubuntu::reopen_legacy_imports(&pool, 365)
+            .await
+            .unwrap(),
+        0
+    );
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(row["state"], "incomplete");
+    assert_eq!(row["backfill"]["initial"], true);
+
+    let mut done = false;
+    for _ in 0..6 {
+        let out = refresh::refresh_all(&st).await;
+        if matches!(out[0].1, Outcome::Updated { .. }) {
+            done = true;
+            break;
+        }
+        assert_ne!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+    }
+    assert!(done);
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 80);
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+    assert_eq!(
+        patchwatch_server::cve::ubuntu::reopen_legacy_imports(&pool, 365)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+// ---------- Fund 3: Host nur grün, wenn alle zuständigen Quellen nutzbar sind ----------
+
+async fn host_issue(app: &Router, h: &[(String, String)], id: i64) -> Option<String> {
+    let r = call(
+        app,
+        Method::GET,
+        &format!("/api/v1/hosts/{id}"),
+        &hdr(h),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    r.json["cve_source_issue"].as_str().map(str::to_owned)
+}
+
+async fn gate(st: &AppState) {
+    patchwatch_server::hostops::recompute_cve_gated_hosts(&st.pool, None, Duration::hours(26))
+        .await
+        .unwrap();
+}
+
+/// Quelle nie geladen, nur teilweise, zuletzt fehlerhaft, veraltet, abgeschaltet, gelöscht: Host nie grün,
+/// mit Begründung. Quelle in Ordnung: grün wie bisher.
+#[sqlx::test(migrations = "./migrations")]
+async fn fund3_host_is_never_green_unless_the_source_is_complete_and_fresh(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed_extra(pool.clone(), &["ubuntu"], &base, "ubuntu_max_pages = 1").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    patchwatch_server::cve::sources::ensure_seeded(&st)
+        .await
+        .unwrap();
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    // Nur Fixes, die der Host schon hat: bei vollständigen Daten ist er "ok".
+    mock.lock().unwrap().ubuntu = (0..45)
+        .map(|i| {
+            ubuntu_cve(
+                &format!("CVE-2026-1{i:04}"),
+                Utc::now() - Duration::minutes(i as i64 + 1),
+                &[("noble", "released", "6.8.0-20.20")],
+            )
+        })
+        .collect();
+
+    // 1. Nie geladen.
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown", "nie geladen");
+    assert!(host_issue(&app, &h, hid)
+        .await
+        .unwrap()
+        .contains("noch nie"));
+
+    // 2. Nur teilweise (1 Seite pro Lauf): unvollständig, nie grün; Report ändert daran nichts.
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Incomplete { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown");
+    assert!(host_issue(&app, &h, hid)
+        .await
+        .unwrap()
+        .contains("unvollständig"));
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        host_status(&pool, hid).await,
+        "cve_unknown",
+        "ein neuer Report macht nicht grün"
+    );
+
+    // 3. Vollständig: grün wie bisher, keine Begründung.
+    for _ in 0..4 {
+        refresh::refresh_all(&st).await;
+    }
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+    assert_eq!(host_status(&pool, hid).await, "ok");
+    assert!(host_issue(&app, &h, hid).await.is_none());
+
+    // 4. Zuletzt fehlerhaft: ein oder zwei Fehlschläge sind noch kein Dauerfehler, der dritte schon.
+    mock.lock().unwrap().ubuntu_status = Some(500);
+    for _ in 0..2 {
+        refresh::refresh_all(&st).await;
+    }
+    assert_eq!(
+        host_status(&pool, hid).await,
+        "ok",
+        "gelegentlicher Fehler: noch nutzbar"
+    );
+    refresh::refresh_all(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown", "Dauerfehler");
+    assert!(host_issue(&app, &h, hid)
+        .await
+        .unwrap()
+        .contains("fehlerhaft"));
+    mock.lock().unwrap().ubuntu_status = None;
+    refresh::refresh_all(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "ok", "Erholung");
+
+    // 5. Veraltet: ohne neuen Abruf läuft die Frische ab (max(3 x Intervall, 6 h)).
+    sqlx::query(
+        "UPDATE feed_state SET usable_until = now() - interval '1 minute' WHERE source = 'ubuntu'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown", "veraltet");
+    assert!(host_issue(&app, &h, hid)
+        .await
+        .unwrap()
+        .contains("veraltet"));
+    refresh::refresh_all(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "ok");
+    let until: chrono::DateTime<Utc> =
+        sqlx::query_scalar("SELECT usable_until FROM feed_state WHERE source = 'ubuntu'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        until > Utc::now() + Duration::hours(5) && until < Utc::now() + Duration::hours(7),
+        "Frist ist max(3 x 60 min, 6 h) = 6 h: {until}"
+    );
+
+    // 6. Rot bleibt rot: bekannte verwundbare CVE bleibt sichtbar, auch wenn die Quelle veraltet.
+    mock.lock().unwrap().ubuntu.insert(
+        0,
+        ubuntu_cve("CVE-2026-99001", Utc::now(), &[("noble", "needed", "")]),
+    );
+    refresh::refresh_all(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
+    sqlx::query(
+        "UPDATE feed_state SET usable_until = now() - interval '1 minute' WHERE source = 'ubuntu'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-99001").await.as_deref(),
+        Some("vulnerable")
+    );
+    mock.lock().unwrap().ubuntu.remove(0);
+
+    // 7. Abgeschaltet und 8. gelöscht: nie grün.
+    sqlx::query("DELETE FROM host_cve_status")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE feed_state SET usable_until = now() + interval '6 hours', cursor = cursor WHERE source = 'ubuntu'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE cve_sources SET enabled = false WHERE id = 'ubuntu'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown", "abgeschaltet");
+    assert!(host_issue(&app, &h, hid)
+        .await
+        .unwrap()
+        .contains("keine aktive"));
+    sqlx::query("UPDATE cve_sources SET enabled = true WHERE id = 'ubuntu'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "ok");
+    sqlx::query("UPDATE cve_sources SET deleted_at = now() WHERE id = 'ubuntu'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown", "gelöscht");
 }
 
 /// Watchlist-CVEs außerhalb des neuesten Fensters werden gezielt nachgeladen.
@@ -1438,6 +1885,10 @@ async fn osv_third_source(pool: PgPool) {
 const SECRET_B64: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
 
 async fn setup_keyed(pool: PgPool, sources: &[&str], base: &str) -> AppState {
+    setup_keyed_extra(pool, sources, base, "").await
+}
+
+async fn setup_keyed_extra(pool: PgPool, sources: &[&str], base: &str, extra: &str) -> AppState {
     let list = sources
         .iter()
         .map(|s| format!("\"{s}\""))
@@ -1445,7 +1896,7 @@ async fn setup_keyed(pool: PgPool, sources: &[&str], base: &str) -> AppState {
         .join(",");
     let toml = format!(
         "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\n\
-         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\n"
+         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\n{extra}\n"
     );
     let cfg = Config::from_sources(Some(&toml), &|k| {
         (k == "PATCHWATCH_SECRET_KEY").then(|| SECRET_B64.to_owned())
