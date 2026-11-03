@@ -1504,6 +1504,97 @@ async fn low_feed_fetch_is_locked_across_instances(pool: PgPool) {
     assert!(free, "Sperre wurde nach dem Lauf freigegeben");
 }
 
+/// Bewertungsregel (eval.rs, seit fd5ed39): Ein nur angekündigter Fix ("pending") lässt den Host verwundbar, nicht
+/// "Fix angekündigt". Wirkt auf Host-Status, Host-Liste, CVE-Liste (Fix-Filter) und die Begründung.
+#[sqlx::test(migrations = "./migrations")]
+async fn rule_announced_fix_counts_as_vulnerable_everywhere(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    mock.lock().unwrap().ubuntu = vec![ubuntu_cve(
+        "CVE-2026-50001",
+        Utc::now() - Duration::minutes(5),
+        &[("noble", "pending", "6.8.0-99.99")],
+    )];
+    refresh::refresh_all(&st).await;
+
+    // Host-Status und Bewertung: verwundbar, Begründung nennt "Fix in Arbeit" und die erwartete Version.
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-50001").await.as_deref(),
+        Some("vulnerable")
+    );
+    let reason: String = sqlx::query_scalar(
+        "SELECT reason FROM host_cve_status WHERE host_id = $1 AND cve_id = 'CVE-2026-50001'",
+    )
+    .bind(hid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        reason.contains("verwundbar, Fix in Arbeit") && reason.contains("6.8.0-99.99"),
+        "{reason}"
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM host_cve_status WHERE status = 'fix_pending'"
+        )
+        .await,
+        0
+    );
+    assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
+
+    // Host-Liste: als verwundbar gezählt, nie als "Fix angekündigt".
+    let r = call(&app, Method::GET, "/api/v1/hosts", &hdr(&h), None).await;
+    assert_eq!(r.json[0]["cve_vulnerable"], 1);
+    assert_eq!(r.json[0]["cve_fix_pending"], 0);
+    // CVE-Liste: Host-Zähler und Fix-Filter "offen" (verwundbar oder angekündigt).
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?releases=all&ubuntu=open",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    let list = r.json.as_array().unwrap();
+    assert_eq!(list.len(), 1, "{}", r.json);
+    assert_eq!(list[0]["hosts_vulnerable"], 1);
+    assert_eq!(list[0]["hosts_fix_pending"], 0);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?releases=all&ubuntu=fixed",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert!(
+        r.json.as_array().unwrap().is_empty(),
+        "angekündigt ist nicht behoben"
+    );
+
+    // Der Fix erscheint: dieselbe CVE wird für den Host nicht mehr verwundbar gemeldet, sobald er die Version hat.
+    mock.lock().unwrap().ubuntu = vec![ubuntu_cve(
+        "CVE-2026-50001",
+        Utc::now(),
+        &[("noble", "released", "6.8.0-20.20")],
+    )];
+    refresh::refresh_all(&st).await;
+    assert_ne!(
+        cve_status(&pool, hid, "CVE-2026-50001").await.as_deref(),
+        Some("vulnerable")
+    );
+    assert_eq!(host_status(&pool, hid).await, "ok");
+}
+
 /// Watchlist-CVEs außerhalb des neuesten Fensters werden gezielt nachgeladen.
 #[sqlx::test(migrations = "./migrations")]
 async fn watchlist_cve_is_fetched_individually(pool: PgPool) {

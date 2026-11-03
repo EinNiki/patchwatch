@@ -190,6 +190,32 @@ erhalten, der Fehler wird gespeichert und unter `GET /api/v1/feeds` als „veral
 der Scheduler hängt). Nie wird eine Quelle stillschweigend als gesund gewertet. Abrufe haben Timeouts,
 Größenlimits und Retry mit Backoff; nach 3 Fehlschlägen in Folge gibt es genau eine Benachrichtigung.
 
+### Bewertungsregeln
+
+Pro Host und CVE wird aus den Daten der Quellen (`cve_source_status`) und dem laufenden Kernel ein Status gebildet
+(`server/src/cve/eval.rs`; die Regeln sind getestet):
+
+| Quellenstand für Release und Kernelpaket | Ergebnis |
+|---|---|
+| Behoben in Version V, der laufende Kernel ist ≥ V | behoben (nicht gespeichert) |
+| Behoben in V, der laufende Kernel ist älter, ein installierter neuerer Kernel ist ≥ V | Neustart nötig |
+| Behoben in V, weder laufender noch installierter Kernel erreicht V | **verwundbar** |
+| Behoben, aber ohne gültige Fix-Version | unbekannt |
+| Offen (`needed`, `ignored`, `deferred`) | **verwundbar** |
+| **Fix angekündigt, aber nicht veröffentlicht (Ubuntu `pending`)** | **verwundbar**, Begründung „verwundbar, Fix in Arbeit (voraussichtlich in V), noch nicht veröffentlicht“ |
+| Nicht betroffen | nicht betroffen (nicht gespeichert) |
+| Unklar, kein Eintrag, ungültige Version, Proxmox-Kernel | unbekannt, nie „behoben“ |
+
+Die Regel zu „Fix angekündigt“ gilt seit Commit `fd5ed39`: Solange der Fix nicht veröffentlicht ist, ist der Host
+verwundbar (wie auf ubuntu.com „Vulnerable“). Deshalb erscheint ein angekündigter Fix in Host-Status, Host-Liste,
+CVE-Liste und Benachrichtigungen als **verwundbar**; der Zähler „Fix angekündigt“ bleibt in der Oberfläche vorhanden, wird
+für neue Bewertungen aber nicht mehr erzeugt. Der Fix-Filter „offen“ der CVE-Liste umfasst verwundbar und angekündigt,
+„behoben“ nur veröffentlichte Fixes. Zeilen abgeschalteter oder gelöschter Quellen werden bei der Bewertung ignoriert
+(seit `0cd2c5e`, `reeval.rs`).
+
+Grün (kein offener CVE-Befund) zeigt ein Host nur, wenn alle zuständigen Quellen nutzbar sind (siehe nächster
+Abschnitt); sonst „CVE-Lage unbekannt“ mit Begründung.
+
 ### Grenzen der CVE-Bewertung
 
 - **Proxmox-Kernel (`-pve`) haben keine belastbare CVE-Quelle.** Sie werden immer als **UNKNOWN** bewertet („manuell
