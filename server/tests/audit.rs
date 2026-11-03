@@ -515,3 +515,196 @@ fn fund4_release_profile_unwinds() {
         "panic = abort würde CatchPanicLayer wirkungslos machen"
     );
 }
+
+// ---------- Niedrige Funde ----------
+
+async fn long_poll(
+    app: &Router,
+    token: &str,
+    wait: u32,
+) -> (StatusCode, Value, std::time::Duration) {
+    let t0 = std::time::Instant::now();
+    let auth = format!("Bearer {token}");
+    let r = call(
+        app,
+        Method::POST,
+        &format!("/api/v1/agent/checkin?wait={wait}"),
+        &[("authorization", &auth)],
+        None,
+    )
+    .await;
+    (r.status, r.json, t0.elapsed())
+}
+
+async fn host_with_token(pool: &PgPool, name: &str, token: &str) -> i64 {
+    sqlx::query_scalar("INSERT INTO hosts (name, token_hash) VALUES ($1, $2) RETURNING id")
+        .bind(name)
+        .bind(security::sha256(token))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn request_report(pool: &PgPool, id: i64) {
+    sqlx::query("UPDATE hosts SET report_requested_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// Check-in-Long-Poll: je Host höchstens eine offene Anfrage; eine neue löst die alte ab.
+#[sqlx::test(migrations = "./migrations")]
+async fn low_checkin_long_poll_allows_one_open_request_per_host(pool: PgPool) {
+    let st = state(pool.clone(), &[]);
+    let app = router(st.clone());
+    let id = host_with_token(&pool, "web1", "pw_token-eins-0123456789abcdef0123456789").await;
+
+    let a = tokio::spawn({
+        let app = app.clone();
+        async move { long_poll(&app, "pw_token-eins-0123456789abcdef0123456789", 30).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(st.checkin_waiters.lock().unwrap().len(), 1);
+    // Zweite Anfrage desselben Hosts: die erste endet ohne Report, es bleibt eine offen.
+    let b = tokio::spawn({
+        let app = app.clone();
+        async move { long_poll(&app, "pw_token-eins-0123456789abcdef0123456789", 30).await }
+    });
+    let (status, body, took) = a.await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["report_requested"], false);
+    assert!(
+        took < std::time::Duration::from_secs(8),
+        "alte Anfrage wird abgelöst, nicht 30 s gehalten: {took:?}"
+    );
+    assert_eq!(
+        st.checkin_waiters.lock().unwrap().len(),
+        1,
+        "genau eine offene Anfrage"
+    );
+    // Die neue Anfrage ist weiter gültig und bekommt den Report-Wunsch.
+    request_report(&pool, id).await;
+    let (_, body, _) = b.await.unwrap();
+    assert_eq!(body["report_requested"], true);
+    assert!(
+        st.checkin_waiters.lock().unwrap().is_empty(),
+        "nach dem Ende bleibt nichts hängen"
+    );
+    assert_eq!(
+        st.checkin_slots.available_permits(),
+        patchwatch_server::state::MAX_OPEN_CHECKINS
+    );
+}
+
+/// Globale Grenze: ist sie erreicht, antwortet der Server weiteren Hosts sofort statt sie warten zu lassen.
+#[sqlx::test(migrations = "./migrations")]
+async fn low_checkin_long_poll_has_a_global_limit(pool: PgPool) {
+    let mut st = state(pool.clone(), &[]);
+    st.checkin_slots = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+    let app = router(st.clone());
+    let toks = [
+        "pw_token-a-0123456789abcdef0123456789abcd",
+        "pw_token-b-0123456789abcdef0123456789abcd",
+        "pw_token-c-0123456789abcdef0123456789abcd",
+    ];
+    let mut ids = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        ids.push(host_with_token(&pool, &format!("h{i}"), t).await);
+    }
+    let mut open = Vec::new();
+    for t in &toks[..2] {
+        let app = app.clone();
+        let t = (*t).to_owned();
+        open.push(tokio::spawn(async move { long_poll(&app, &t, 30).await }));
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(
+        st.checkin_slots.available_permits(),
+        0,
+        "beide Plätze belegt"
+    );
+    let (status, body, took) = long_poll(&app, toks[2], 30).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["report_requested"], false);
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "dritte Anfrage wartet nicht: {took:?}"
+    );
+    assert_eq!(st.checkin_waiters.lock().unwrap().len(), 2);
+    for id in &ids[..2] {
+        request_report(&pool, *id).await;
+    }
+    for h in open {
+        assert_eq!(h.await.unwrap().1["report_requested"], true);
+    }
+    assert_eq!(st.checkin_slots.available_permits(), 2);
+}
+
+/// NVD-Schlüssel (Header `apiKey`) darf bei einer Weiterleitung auf einen anderen Host nicht mitgehen.
+#[tokio::test]
+async fn low_nvd_key_header_is_not_sent_after_a_redirect() {
+    use patchwatch_server::cve::nvd::Nvd;
+    use patchwatch_server::cve::{CveSource, FeedState, FetchCtx};
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    // Ziel der Weiterleitung (anderer Host-Name: localhost statt 127.0.0.1): merkt sich alle Anfragen.
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let tport = target.local_addr().unwrap().port();
+    let s2 = seen.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut c, _)) = target.accept().await else {
+                return;
+            };
+            let mut buf = vec![0u8; 8192];
+            let n = c.read(&mut buf).await.unwrap_or(0);
+            s2.lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&buf[..n]).to_lowercase());
+            let _ = c
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+                .await;
+        }
+    });
+    // "NVD": leitet jede Anfrage auf das Ziel um.
+    let nvd = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let nport = nvd.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut c, _)) = nvd.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = c.read(&mut buf).await;
+            let resp = format!(
+                "HTTP/1.1 302 Found\r\nlocation: http://localhost:{tport}/gestohlen\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            );
+            let _ = c.write_all(resp.as_bytes()).await;
+        }
+    });
+
+    let cfg = Config::from_sources(None, &|_| None).unwrap();
+    let source = Nvd::new(
+        &cfg.cve,
+        Some(format!("http://127.0.0.1:{nport}")),
+        None,
+        Some("geheimer-nvd-schluessel".into()),
+    );
+    let ctx = FetchCtx {
+        enrich: vec!["CVE-2024-0001".into()],
+        ..FetchCtx::default()
+    };
+    // Der gemeinsame Client folgt Redirects; der NVD-Quelle darf er nie als Ersatz dienen.
+    let shared = reqwest::Client::new();
+    let _ = source.fetch(&shared, &FeedState::default(), &ctx).await;
+    let log = seen.lock().unwrap().join("\n");
+    assert!(
+        !log.contains("geheimer-nvd-schluessel"),
+        "Schlüssel beim Redirect-Ziel angekommen: {log}"
+    );
+    assert!(seen.lock().unwrap().is_empty(), "Redirect wurde gefolgt");
+}

@@ -23,6 +23,8 @@ pub enum Outcome {
         events: usize,
     },
     Failed(String),
+    /// Eine andere Instanz ruft diese Quelle gerade ab (Advisory-Lock); dieser Lauf wird ausgelassen.
+    Skipped,
 }
 
 async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
@@ -166,8 +168,44 @@ async fn restrict_to_known(state: &AppState, records: Vec<Record>) -> Result<Vec
         .collect())
 }
 
-/// Ruft eine Quelle ab und führt Buch über Erfolg und Misserfolg.
+/// Schlüssel der Advisory-Sperre einer Quelle (Text, in Postgres zu einem 64-Bit-Wert gehasht).
+fn lock_key(id: &str) -> String {
+    format!("patchwatch.feed:{id}")
+}
+
+/// Versucht, die Sperre dieser Quelle über alle Server-Instanzen hinweg zu nehmen. Eigene, aus dem Pool gelöste
+/// Verbindung: eine Sitzungssperre würde sonst mit der Verbindung in den Pool zurückkehren und hängen bleiben.
+/// Wird die Verbindung geschlossen (Ende des Laufs, Abbruch der Aufgabe, Absturz), gibt Postgres die Sperre frei.
+async fn try_lock_source(state: &AppState, id: &str) -> Result<Option<sqlx::PgConnection>> {
+    let mut conn = state.pool.acquire().await?.detach();
+    let got: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtextextended($1, 0))")
+        .bind(lock_key(id))
+        .fetch_one(&mut conn)
+        .await?;
+    if got {
+        Ok(Some(conn))
+    } else {
+        let _ = sqlx::Connection::close(conn).await;
+        Ok(None)
+    }
+}
+
+/// Ruft eine Quelle ab und führt Buch über Erfolg und Misserfolg. Je Quelle läuft über alle Instanzen höchstens ein
+/// Abruf (`pg_try_advisory_lock`); ist die Sperre vergeben, wird der Lauf ausgelassen.
 pub async fn refresh_source(state: &AppState, id: &str, src: &dyn CveSource) -> Result<Outcome> {
+    let Some(lock) = try_lock_source(state, id).await? else {
+        tracing::info!(
+            source = id,
+            "Feed-Abruf läuft bereits in einer anderen Instanz, ausgelassen"
+        );
+        return Ok(Outcome::Skipped);
+    };
+    let out = refresh_source_locked(state, id, src).await;
+    let _ = sqlx::Connection::close(lock).await;
+    out
+}
+
+async fn refresh_source_locked(state: &AppState, id: &str, src: &dyn CveSource) -> Result<Outcome> {
     // `kind` ist der Typ der Quelle (steht in cve_source_status.source), `name` die stabile ID für Feed-Zustand und Meldungen.
     let kind = src.name();
     let name = id;

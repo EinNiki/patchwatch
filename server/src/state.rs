@@ -15,7 +15,14 @@ pub struct AppState {
     pub live: tokio::sync::broadcast::Sender<Arc<str>>,
     /// Begrenzt gleichzeitige WebSocket-Verbindungen.
     pub live_slots: Arc<tokio::sync::Semaphore>,
+    /// Offene Check-in-Long-Polls: höchstens ein wartender Aufruf je Host (neuer ersetzt alten) ...
+    pub checkin_waiters: Arc<std::sync::Mutex<std::collections::HashMap<i64, u64>>>,
+    /// ... und höchstens `MAX_OPEN_CHECKINS` gleichzeitig; weitere Aufrufe werden sofort beantwortet.
+    pub checkin_slots: Arc<tokio::sync::Semaphore>,
 }
+
+/// Globale Obergrenze offener Check-in-Long-Polls.
+pub const MAX_OPEN_CHECKINS: usize = 256;
 
 impl AppState {
     pub fn new(pool: PgPool, cfg: Config) -> anyhow::Result<Self> {
@@ -31,6 +38,8 @@ impl AppState {
             refresh_lock: Arc::default(),
             live: tokio::sync::broadcast::channel(256).0,
             live_slots: Arc::new(tokio::sync::Semaphore::new(64)),
+            checkin_waiters: Arc::default(),
+            checkin_slots: Arc::new(tokio::sync::Semaphore::new(MAX_OPEN_CHECKINS)),
         })
     }
 }

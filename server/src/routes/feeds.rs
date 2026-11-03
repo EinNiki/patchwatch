@@ -534,6 +534,7 @@ pub async fn refresh(
                 refresh::Outcome::Updated { changed_rows, events } => json!({ "source": source, "result": "updated", "changed_rows": changed_rows, "events": events }),
                 refresh::Outcome::Incomplete { changed_rows, events } => json!({ "source": source, "result": "incomplete", "changed_rows": changed_rows, "events": events }),
                 refresh::Outcome::Failed(e) => json!({ "source": source, "result": "failed", "error": e }),
+                refresh::Outcome::Skipped => json!({ "source": source, "result": "skipped" }),
             })
             .collect();
         return Ok((StatusCode::OK, Json(json!({ "results": body }))));

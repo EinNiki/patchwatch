@@ -1456,6 +1456,54 @@ async fn fund3_host_is_never_green_unless_the_source_is_complete_and_fresh(pool:
     assert_eq!(host_status(&pool, hid).await, "cve_unknown", "gelöscht");
 }
 
+/// Fund (niedrig): Feed-Abrufe sind über Instanzen hinweg gesperrt. Hält eine andere Instanz (hier: eine zweite
+/// Verbindung mit demselben Sperrschlüssel) die Sperre, wird der Lauf ausgelassen und es geht keine Anfrage raus.
+#[sqlx::test(migrations = "./migrations")]
+async fn low_feed_fetch_is_locked_across_instances(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 5, Utc::now() - Duration::hours(1));
+
+    // "Andere Instanz": eine zweite Verbindung hält die Sperre dieser Quelle (Sitzungssperren sind je Verbindung).
+    let mut other = pool.acquire().await.unwrap();
+    let got: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_lock(hashtextextended('patchwatch.feed:ubuntu', 0))",
+    )
+    .fetch_one(&mut *other)
+    .await
+    .unwrap();
+    assert!(got);
+
+    let out = refresh::refresh_all(&st).await;
+    assert_eq!(out[0].1, Outcome::Skipped);
+    assert!(
+        mock.lock().unwrap().log.is_empty(),
+        "keine Anfrage bei gehaltener Sperre"
+    );
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 0);
+
+    // Sperre frei: der nächste Lauf holt die Daten, und danach ist die Sperre wieder frei (kein Hängenbleiben).
+    sqlx::query("SELECT pg_advisory_unlock(hashtextextended('patchwatch.feed:ubuntu', 0))")
+        .execute(&mut *other)
+        .await
+        .unwrap();
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 5);
+    let free: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_lock(hashtextextended('patchwatch.feed:ubuntu', 0))",
+    )
+    .fetch_one(&mut *other)
+    .await
+    .unwrap();
+    assert!(free, "Sperre wurde nach dem Lauf freigegeben");
+}
+
 /// Watchlist-CVEs außerhalb des neuesten Fensters werden gezielt nachgeladen.
 #[sqlx::test(migrations = "./migrations")]
 async fn watchlist_cve_is_fetched_individually(pool: PgPool) {

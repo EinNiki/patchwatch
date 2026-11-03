@@ -41,6 +41,17 @@ impl Nvd {
         client: Option<reqwest::Client>,
         key: Option<String>,
     ) -> Self {
+        // Der Schlüssel geht im Header `apiKey` raus; reqwest entfernt nur Authorization/Cookie bei einem Redirect auf
+        // einen anderen Host, nicht diesen Header. Daher kein Redirect, wenn ein Schlüssel im Spiel ist (der
+        // übergebene Spiegel-Client ist bereits ohne Redirect).
+        let client = client.or_else(|| {
+            reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(20))
+                .user_agent(concat!("patchwatch-server/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .ok()
+        });
         let pause = if key.is_some() {
             PAUSE_WITH_KEY
         } else {
@@ -153,7 +164,12 @@ impl CveSource for Nvd {
         state: &FeedState,
         ctx: &FetchCtx,
     ) -> Result<FetchOutcome, FeedError> {
-        let client = self.client.as_ref().unwrap_or(shared);
+        // Nie der gemeinsame Client (folgt Redirects): mit Schlüssel lieber Fehler als Schlüssel-Leck.
+        let client = match (&self.client, &self.key) {
+            (Some(c), _) => c,
+            (None, None) => shared,
+            (None, Some(_)) => return Err(FeedError::Network("HTTP-Client nicht baubar".into())),
+        };
         let todo: Vec<&String> = ctx
             .enrich
             .iter()
