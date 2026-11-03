@@ -131,6 +131,12 @@ Reports, allgemeine API), strikte Eingabevalidierung, Body-Limit 4 MB. Server nu
 VPN/WireGuard oder hinter einem TLS-Reverse-Proxy erreichbar machen; `trust_proxy=true` nur
 setzen, wenn ein vertrauenswürdiger Proxy davorsteht und den echten Client in `X-Forwarded-For` anhängt.
 
+**Ausgehende Proxys:** `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` werden für Benachrichtigungskanäle und Quellen-Spiegel
+(alles, was die SSRF-Prüfung durchläuft) bewusst **ignoriert**: Ein Proxy würde die geprüfte, gepinnte Adresse umgehen.
+Die Feeds der festen Standardquellen (Ubuntu, Debian, OSV, NVD, KEV) und OIDC laufen über den allgemeinen Client und
+folgen den Proxy-Variablen; deren Ziele kommen nicht aus Benutzereingaben. Eine eigene, ebenfalls geprüfte
+Proxy-Einstellung gibt es nicht; sie wäre nur mit Prüfung der Proxy-Adresse selbst sinnvoll.
+
 ### Benachrichtigungskanäle
 
 ntfy, Matrix, Gotify, Discord-Webhook und „Live im Browser“ werden in der UI eingerichtet und in der Datenbank

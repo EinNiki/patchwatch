@@ -210,8 +210,12 @@ pub async fn resolve(url: Url, allowed_hosts: &[String]) -> Result<Target, UrlEr
 }
 
 /// HTTP-Client, der nur zu den geprüften Adressen verbindet und keinen Redirect folgt.
+///
+/// `.no_proxy()`: reqwest läse sonst `HTTP(S)_PROXY`/`ALL_PROXY` aus der Umgebung und schickte die Anfrage an den Proxy
+/// statt an die geprüfte, gepinnte IP; Adressprüfung und Rebinding-Schutz wären dann wirkungslos (Fund 6).
 pub fn pinned_client(target: &Target) -> reqwest::Result<reqwest::Client> {
     let mut b = reqwest::Client::builder()
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
@@ -226,6 +230,17 @@ pub fn pinned_client(target: &Target) -> reqwest::Result<reqwest::Client> {
         b = b.resolve_to_addrs(&target.host, &target.addrs);
     }
     b.build()
+}
+
+/// Client für vertrauenswürdige Ziele (Allowlist des Betreibers, keine Adressprüfung): ohne Redirects und ebenfalls
+/// ohne Umgebungs-Proxy, damit ein gesetzter Proxy nicht unbemerkt neue Wege öffnet.
+pub fn trusted_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
 }
 
 #[cfg(test)]

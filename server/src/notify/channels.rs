@@ -65,11 +65,7 @@ impl Http {
         body: &Value,
     ) -> Result<(), SendError> {
         let client = if self.trusted {
-            reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .connect_timeout(ssrf::CONNECT_TIMEOUT)
-                .timeout(ssrf::REQUEST_TIMEOUT)
-                .build()
+            ssrf::trusted_client()
         } else {
             let target = ssrf::resolve(url.clone(), &self.allowed_hosts)
                 .await
