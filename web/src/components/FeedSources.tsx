@@ -18,6 +18,7 @@ import { Mono } from "@/components/Version";
 const FEED_STATE: Record<Feed["state"], StatusInfo> = {
   ok: { label: "Aktuell", tone: "ok", icon: "ok", rank: 0 },
   stale: { label: "Veraltet", tone: "warn", icon: "clock", rank: 1 },
+  incomplete: { label: "Unvollständig", tone: "warn", icon: "clock", rank: 1 },
   never: { label: "Noch nie abgerufen", tone: "unknown", icon: "unknown", rank: 2 },
   disabled: { label: "Abgeschaltet", tone: "unknown", icon: "unknown", rank: 3 },
 };
@@ -151,7 +152,7 @@ export function FeedSources() {
                     </div>
                   </td>
                   <td className="cell-status lead">
-                    <StatusBadge info={FEED_STATE[f.state]} label={f.state === "stale" && f.stale_since ? `Veraltet seit ${absTime(f.stale_since)}` : undefined} />
+                    <StatusBadge info={FEED_STATE[f.state]} label={(f.state === "stale" || f.state === "incomplete") && f.stale_since ? `${f.state === "stale" ? "Veraltet" : "Unvollständig"} seit ${absTime(f.stale_since)}` : undefined} />
                   </td>
                   <td data-label="Letzter Erfolg">
                     <RelTime iso={f.last_success_at} />
@@ -160,12 +161,14 @@ export function FeedSources() {
                   <td data-label="Intervall" className="whitespace-nowrap">
                     alle {f.interval_minutes} Min.
                   </td>
-                  <td className={`max-w-[24rem] max-md:max-w-none ${f.last_error ? "" : "max-md:hidden"}`}>
+                  <td className={`max-w-[24rem] max-md:max-w-none ${f.last_error || f.backfill ? "" : "max-md:hidden"}`}>
+                    {f.backfill ? <div className="text-warn">{f.backfill.progress}</div> : null}
                     {f.last_error ? (
                       <span className="text-warn">
-                        {f.last_error} <span className="text-fg3">({f.consecutive_failures}× in Folge)</span>
+                        {f.last_error}
+                        {f.consecutive_failures > 0 ? <span className="text-fg3"> ({f.consecutive_failures}× in Folge)</span> : null}
                       </span>
-                    ) : (
+                    ) : f.backfill ? null : (
                       <span className="text-fg3">–</span>
                     )}
                   </td>

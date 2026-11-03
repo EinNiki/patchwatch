@@ -29,6 +29,8 @@ struct Mock {
     ubuntu_single: HashMap<String, Value>,
     ubuntu_status: Option<u16>,
     ubuntu_garbage: bool,
+    /// Seite ab diesem Offset antwortet mit HTTP 500 (Netz-/Serverfehler mitten im Lauf).
+    ubuntu_fail_offset: Option<usize>,
     debian_body: String,
     debian_status: Option<u16>,
     osv_body: Value,
@@ -58,6 +60,9 @@ async fn ubuntu_list(
     m.log.push(format!("ubuntu offset={offset}"));
     if let Some(code) = m.ubuntu_status {
         return StatusCode::from_u16(code).unwrap().into_response();
+    }
+    if m.ubuntu_fail_offset == Some(offset) {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     if m.ubuntu_garbage {
         return Json(json!({"unexpected": true})).into_response();
@@ -591,7 +596,7 @@ async fn feed_failure_keeps_old_state_and_is_visible(pool: PgPool) {
     assert_eq!(feeds.json[0]["consecutive_failures"], 0);
 }
 
-/// Ubuntu: Cursor-Paginierung lädt nicht jedes Mal alles; zu großer Rückstand ist ein sichtbarer Fehler.
+/// Ubuntu: Cursor-Paginierung lädt nicht jedes Mal alles; zu großer Rückstand ist sichtbar unvollständig.
 #[sqlx::test(migrations = "./migrations")]
 async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
     let mock: Shared = Arc::default();
@@ -687,7 +692,7 @@ async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
     }
     let out = refresh::refresh_all(&st).await;
     assert!(
-        matches!(&out[0].1, Outcome::Failed(m) if m.contains("Cursor")),
+        matches!(&out[0].1, Outcome::Incomplete { .. }),
         "{:?}",
         out[0].1
     );
@@ -697,6 +702,311 @@ async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
             .await
             .unwrap();
     assert_eq!(cursor_before, cursor_after);
+}
+
+// ---------- Ubuntu: Rückstand größer als das Seitenlimit ----------
+
+/// `n` CVEs mit absteigenden Zeitstempeln ab `newest`; IDs `CVE-2026-{prefix}NNNN`.
+fn ubuntu_batch(prefix: u32, n: usize, newest: chrono::DateTime<Utc>) -> Vec<Value> {
+    (0..n)
+        .map(|i| {
+            ubuntu_cve(
+                &format!("CVE-2026-{prefix}{i:04}"),
+                newest - Duration::seconds(i as i64),
+                &[("noble", "needed", "")],
+            )
+        })
+        .collect()
+}
+
+async fn ubuntu_feed(app: &Router, cookies: &[(String, String)]) -> Value {
+    let r = call(app, Method::GET, "/api/v1/feeds", &hdr(cookies), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    r.json[0].clone()
+}
+
+async fn ubuntu_cursor(pool: &PgPool) -> String {
+    sqlx::query_scalar("SELECT cursor FROM feed_state WHERE source = 'ubuntu'")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn offsets(mock: &Shared) -> Vec<usize> {
+    mock.lock()
+        .unwrap()
+        .log
+        .iter()
+        .filter_map(|l| l.strip_prefix("ubuntu offset=")?.parse().ok())
+        .collect()
+}
+
+/// Rückstand > Seitenlimit über mehrere Läufe: Fortschritt wird gespeichert, der Abruf setzt dort fort (nicht bei
+/// Seite 1), der bestätigte Cursor springt nie über die Lücke, die Quelle ist bis zum Schluss nie "ok", und am Ende
+/// sind alle Records da. Währenddessen neu eintreffende Änderungen am Listenkopf gehen nicht verloren.
+#[sqlx::test(migrations = "./migrations")]
+async fn ubuntu_backlog_larger_than_page_limit_is_worked_off_over_runs(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(
+        pool.clone(),
+        &["ubuntu"],
+        "ubuntu_backfill_pages = 1\nubuntu_max_pages = 2",
+        &base,
+    )
+    .await;
+    let app = patchwatch_server::router(st.clone());
+    let cookies = login(&app, &pool).await;
+    let now = Utc::now();
+
+    // Erstabruf: 20 alte CVEs, Cursor = neueste davon.
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 20, now - Duration::hours(10));
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(ubuntu_feed(&app, &cookies).await["state"], "ok");
+    let confirmed = ubuntu_cursor(&pool).await;
+
+    // Rückstand: 130 neue CVEs = 6,5 Seiten bei 2 Seiten pro Lauf (netto 20 je Lauf wegen der Überlappung).
+    let flood_newest = now - Duration::hours(1);
+    {
+        let mut m = mock.lock().unwrap();
+        let mut list = ubuntu_batch(2, 130, flood_newest);
+        list.extend(m.ubuntu.clone());
+        m.ubuntu = list;
+        m.log.clear();
+    }
+    let expected_pending = flood_newest.to_rfc3339();
+
+    let mut runs = 0;
+    let mut late_head_added = false;
+    loop {
+        runs += 1;
+        assert!(runs <= 12, "Rückstand wird nicht abgebaut");
+        mock.lock().unwrap().log.clear();
+        let out = refresh::refresh_all(&st).await;
+        let first_offset = offsets(&mock)[0];
+        if runs == 1 {
+            assert_eq!(first_offset, 0);
+        } else if matches!(
+            out[0].1,
+            Outcome::Incomplete { .. } | Outcome::Updated { .. }
+        ) {
+            // Wiederaufsetzen: nie wieder bei Seite 1 beginnen.
+            assert!(first_offset > 0, "Lauf {runs} begann wieder bei Seite 1");
+        }
+        let feed = ubuntu_feed(&app, &cookies).await;
+        match &out[0].1 {
+            Outcome::Incomplete { .. } => {
+                // Bestätigter Cursor bleibt stehen, Quelle ist unvollständig und nie grün, Fortschritt sichtbar.
+                assert_eq!(
+                    ubuntu_cursor(&pool).await,
+                    confirmed,
+                    "Cursor sprang in Lauf {runs}"
+                );
+                assert_eq!(feed["state"], "incomplete", "Lauf {runs}");
+                assert_eq!(feed["healthy"], false);
+                assert_eq!(feed["backfill"]["runs"], runs);
+                assert_eq!(feed["backfill"]["pages_per_run"], 2);
+                assert!(feed["backfill"]["progress"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Rückstand wird abgebaut"));
+                assert!(feed["stale_since"].is_string());
+                assert_eq!(
+                    feed["consecutive_failures"], 0,
+                    "Fortschritt ist kein Fehlschlag"
+                );
+                // Neue Änderungen am Listenkopf mitten im Abbau (verschiebt alle Offsets nach hinten).
+                if runs == 2 && !late_head_added {
+                    late_head_added = true;
+                    let mut m = mock.lock().unwrap();
+                    let mut list = ubuntu_batch(3, 3, now);
+                    list.extend(m.ubuntu.clone());
+                    m.ubuntu = list;
+                }
+            }
+            Outcome::Updated { .. } => {
+                assert_eq!(feed["state"], "ok");
+                assert!(feed["backfill"].is_null());
+                break;
+            }
+            other => panic!("Lauf {runs}: {other:?}"),
+        }
+    }
+    assert_eq!(
+        runs, 6,
+        "20 Seiten Netto je Lauf: 130 CVEs brauchen 6 Läufe"
+    );
+
+    // Der Cursor ist erst jetzt vorgerückt, und zwar auf den neuesten Stand zu BEGINN des Abbaus.
+    assert_eq!(ubuntu_cursor(&pool).await, expected_pending);
+    // Alle 20 + 130 CVEs sind da; die 3 nachträglichen Änderungen sind noch nicht geladen (neuer als der Cursor).
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 150);
+
+    // Nächster Lauf holt genau die 3 Änderungen, die während des Abbaus am Kopf eintrafen.
+    mock.lock().unwrap().log.clear();
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(
+            out[0].1,
+            Outcome::Updated {
+                changed_rows: 3,
+                ..
+            }
+        ),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(offsets(&mock), vec![0], "normaler Lauf stoppt am Cursor");
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 153);
+    assert_eq!(ubuntu_feed(&app, &cookies).await["state"], "ok");
+}
+
+/// Ein Lauf bricht mittendrin ab (Netzfehler): bereits geladene Seiten bleiben gespeichert, der Cursor bleibt, der
+/// Fehler ist sichtbar und der nächste Lauf macht dort weiter. Ein Fehler schon auf der ersten Seite verliert
+/// den gespeicherten Fortschritt nicht.
+#[sqlx::test(migrations = "./migrations")]
+async fn ubuntu_run_interrupted_midway_keeps_progress(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(
+        pool.clone(),
+        &["ubuntu"],
+        "ubuntu_backfill_pages = 1\nubuntu_max_pages = 4",
+        &base,
+    )
+    .await;
+    let app = patchwatch_server::router(st.clone());
+    let cookies = login(&app, &pool).await;
+    let now = Utc::now();
+
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 20, now - Duration::hours(10));
+    refresh::refresh_all(&st).await;
+    let confirmed = ubuntu_cursor(&pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        let mut list = ubuntu_batch(2, 100, now - Duration::hours(1));
+        list.extend(m.ubuntu.clone());
+        m.ubuntu = list;
+        m.ubuntu_fail_offset = Some(40); // dritte Seite schlägt fehl
+        m.log.clear();
+    }
+
+    // Lauf 1: Seiten 0 und 1 sind da, Seite 2 bricht ab.
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(
+            out[0].1,
+            Outcome::Incomplete {
+                changed_rows: 40,
+                ..
+            }
+        ),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM cves").await,
+        60,
+        "40 neue + 20 alte"
+    );
+    assert_eq!(
+        ubuntu_cursor(&pool).await,
+        confirmed,
+        "Cursor darf nicht vorrücken"
+    );
+    let feed = ubuntu_feed(&app, &cookies).await;
+    assert_eq!(feed["state"], "incomplete");
+    assert!(feed["last_error"]
+        .as_str()
+        .unwrap()
+        .contains("unterbrochen"));
+    assert_eq!(feed["consecutive_failures"], 0);
+    assert_eq!(
+        feed["backfill"]["next_offset"], 20,
+        "eine Seite Überlappung"
+    );
+
+    // Lauf 2: Fehler schon auf der ersten Seite (Offset 20) -> Fehlschlag, Fortschritt bleibt erhalten.
+    mock.lock().unwrap().ubuntu_fail_offset = Some(20);
+    mock.lock().unwrap().log.clear();
+    let out = refresh::refresh_all(&st).await;
+    assert!(matches!(&out[0].1, Outcome::Failed(_)), "{:?}", out[0].1);
+    assert_eq!(offsets(&mock)[0], 20, "setzt bei gespeichertem Offset fort");
+    assert_eq!(ubuntu_cursor(&pool).await, confirmed);
+    let feed = ubuntu_feed(&app, &cookies).await;
+    assert_eq!(feed["state"], "incomplete");
+    assert_eq!(feed["consecutive_failures"], 1);
+    assert_eq!(
+        feed["backfill"]["next_offset"], 20,
+        "Fortschritt unverändert"
+    );
+
+    // Läufe 3 und 4: Quelle wieder erreichbar, Rückstand wird fertig abgebaut.
+    mock.lock().unwrap().ubuntu_fail_offset = None;
+    let mut last = Outcome::NotModified;
+    for _ in 0..3 {
+        last = refresh::refresh_all(&st).await.remove(0).1;
+        if matches!(last, Outcome::Updated { .. }) {
+            break;
+        }
+        assert!(matches!(last, Outcome::Incomplete { .. }), "{last:?}");
+        assert_ne!(ubuntu_feed(&app, &cookies).await["state"], "ok");
+    }
+    assert!(matches!(last, Outcome::Updated { .. }), "{last:?}");
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 120);
+    let feed = ubuntu_feed(&app, &cookies).await;
+    assert_eq!(feed["state"], "ok");
+    assert!(feed["last_error"].is_null() && feed["backfill"].is_null());
+    assert_eq!(
+        ubuntu_cursor(&pool).await,
+        (now - Duration::hours(1)).to_rfc3339()
+    );
+}
+
+/// Wurde der Cursor von Hand geändert, passt ein offener Rückstandsabbau nicht mehr dazu: der Abruf beginnt wieder
+/// bei Seite 1, statt mit einem veralteten Offset über eine neue Lücke hinwegzulesen.
+#[sqlx::test(migrations = "./migrations")]
+async fn ubuntu_backfill_is_dropped_when_cursor_changed_manually(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(
+        pool.clone(),
+        &["ubuntu"],
+        "ubuntu_backfill_pages = 1\nubuntu_max_pages = 2",
+        &base,
+    )
+    .await;
+    let now = Utc::now();
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 20, now - Duration::hours(10));
+    refresh::refresh_all(&st).await;
+    {
+        let mut m = mock.lock().unwrap();
+        let mut list = ubuntu_batch(2, 100, now - Duration::hours(1));
+        list.extend(m.ubuntu.clone());
+        m.ubuntu = list;
+    }
+    refresh::refresh_all(&st).await;
+    refresh::refresh_all(&st).await;
+    let nxt: i64 = sqlx::query_scalar(
+        "SELECT (backfill->>'next_offset')::bigint FROM feed_state WHERE source = 'ubuntu'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(nxt > 0);
+    sqlx::query("UPDATE feed_state SET cursor = $1 WHERE source = 'ubuntu'")
+        .bind((now - Duration::hours(5)).to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+    mock.lock().unwrap().log.clear();
+    refresh::refresh_all(&st).await;
+    assert_eq!(offsets(&mock)[0], 0);
 }
 
 /// Watchlist-CVEs außerhalb des neuesten Fensters werden gezielt nachgeladen.

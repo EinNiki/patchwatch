@@ -115,7 +115,9 @@ pub struct CveConfig {
     pub kev_url: String,
     /// Seiten (je 20 CVEs, ca. 3,7 MB) beim allerersten Ubuntu-Abruf.
     pub ubuntu_backfill_pages: u32,
-    /// Obergrenze an Seiten pro Lauf; wird sie vor dem Cursor erreicht, gilt der Abruf als fehlgeschlagen.
+    /// Obergrenze an Seiten pro Lauf (Umgebungsvariable `PATCHWATCH_CVE_UBUNTU_MAX_PAGES`). Wird sie vor dem
+    /// Cursor erreicht, speichert der Lauf seinen Fortschritt und der nächste setzt dort fort; die Quelle gilt
+    /// bis zum Ende dieses Rückstandsabbaus als unvollständig.
     pub ubuntu_max_pages: u32,
     pub ubuntu_max_page_bytes: u64,
     pub debian_max_bytes: u64,
@@ -136,7 +138,7 @@ impl Default for CveConfig {
             nvd_url: "https://services.nvd.nist.gov/rest/json/cves/2.0".into(),
             kev_url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json".into(),
             ubuntu_backfill_pages: 5,
-            ubuntu_max_pages: 50,
+            ubuntu_max_pages: 100,
             ubuntu_max_page_bytes: 32 * 1024 * 1024,
             debian_max_bytes: 200 * 1024 * 1024,
             request_timeout_secs: 120,
@@ -329,6 +331,9 @@ impl Config {
                 .filter(|x| !x.is_empty())
                 .collect();
         }
+        if let Some(v) = s("CVE_UBUNTU_MAX_PAGES") {
+            c.cve.ubuntu_max_pages = v.parse().context("CVE_UBUNTU_MAX_PAGES")?;
+        }
         if let Some(v) = s("CVE_UBUNTU_URL") {
             c.cve.ubuntu_url = v;
         }
@@ -374,6 +379,9 @@ impl Config {
         }
         if self.cve.interval_minutes < 5 {
             bail!("cve.interval_minutes muss >= 5 sein");
+        }
+        if !(1..=2000).contains(&self.cve.ubuntu_max_pages) {
+            bail!("cve.ubuntu_max_pages (PATCHWATCH_CVE_UBUNTU_MAX_PAGES) muss zwischen 1 und 2000 liegen");
         }
         if let Some(bad) = self
             .cve
@@ -476,6 +484,19 @@ mod tests {
         let c = Config::default();
         assert!(c.cve.enabled && c.cve.interval_minutes == 60);
         assert_eq!(c.cve.sources, ["ubuntu", "debian"]);
+        assert_eq!(c.cve.ubuntu_max_pages, 100);
+        let c = Config::from_sources(None, &env_of(&[("PATCHWATCH_CVE_UBUNTU_MAX_PAGES", "250")]))
+            .unwrap();
+        assert_eq!(c.cve.ubuntu_max_pages, 250);
+        for bad in ["0", "5000", "viele"] {
+            assert!(
+                Config::from_sources(None, &|k: &str| {
+                    (k == "PATCHWATCH_CVE_UBUNTU_MAX_PAGES").then(|| bad.to_owned())
+                })
+                .is_err(),
+                "{bad}"
+            );
+        }
         let c = Config::from_sources(
             None,
             &env_of(&[

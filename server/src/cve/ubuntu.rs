@@ -3,11 +3,15 @@
 //! Die API hat keinen serverseitigen "updated since"-Filter (geprüft: nur `package`, `limit`, `offset`,
 //! `order`, `sort_by`, `version`, `status`, `priority`, `component`, `show_hidden`). Deshalb wird absteigend
 //! nach `updated` sortiert paginiert und gestoppt, sobald der gespeicherte Cursor erreicht ist.
+//!
+//! Reicht das Seitenlimit eines Laufs nicht bis zum Cursor, wird der Fortschritt (`Backfill`) gespeichert und
+//! der nächste Lauf setzt per Offset dort fort. Der bestätigte Cursor bleibt unverändert, bis die Lücke
+//! geschlossen ist; erst dann rückt er auf den neuesten zu Beginn gesehenen Zeitstempel vor.
 
 use super::http::{self, Limits};
 use super::{
-    is_cve_id, is_kernel_source, truncate, valid_version, CveSource, Entry, FeedError, FeedState,
-    FetchCtx, FetchOutcome, Record, SourceStatus,
+    is_cve_id, is_kernel_source, truncate, valid_version, Backfill, CveSource, Entry, FeedError,
+    FeedState, FetchCtx, FetchOutcome, Record, SourceStatus,
 };
 use crate::config::CveConfig;
 use async_trait::async_trait;
@@ -137,58 +141,89 @@ impl CveSource for Ubuntu {
         state: &FeedState,
         ctx: &FetchCtx,
     ) -> Result<FetchOutcome, FeedError> {
-        let cursor = state.cursor.as_deref().and_then(parse_time);
-        let max_pages = if cursor.is_some() {
+        // Bestätigter Cursor: alles Neuere ist vollständig geladen. Er rückt nur vor, wenn die Lücke zwischen
+        // altem Cursor und Listenkopf geschlossen ist; solange sie offen ist, steht der Fortschritt in `backfill`.
+        let confirmed = state.cursor.as_deref().and_then(parse_time);
+        // Ein Rückstandsabbau wird nur fortgesetzt, wenn er zum bestätigten Cursor passt (wurde der Cursor
+        // von Hand geändert oder ist der Eintrag beschädigt, beginnt der Abruf wieder bei Seite 1).
+        let resume = state.backfill.as_ref().filter(|b| {
+            state.cursor.as_deref() == Some(b.target.as_str())
+                && parse_time(&b.target).is_some()
+                && parse_time(&b.pending).is_some()
+        });
+        let max_pages = if confirmed.is_some() {
             self.max_pages
         } else {
             self.backfill_pages
         };
+        // Ohne Cursor ist es der Erstabruf: bewusst begrenzt (Backfill) und danach als vollständig gewertet.
+        let mut complete = confirmed.is_none();
+        let start_offset = resume.map_or(0, |b| b.next_offset as usize);
+        // Neuester gesehener Zeitstempel des gesamten Durchlaufs (über Läufe hinweg in `pending` gehalten).
+        let mut newest = resume.and_then(|b| parse_time(&b.pending)).or(confirmed);
         let mut records: Vec<Record> = Vec::new();
-        let mut newest = cursor;
-        // Erstabruf ist bewusst begrenzt (Backfill); danach muss der Cursor erreicht werden.
-        let mut complete = cursor.is_none();
+        let mut pages_fetched = 0usize;
+        let mut interrupted: Option<FeedError> = None;
 
-        'pages: for page in 0..max_pages as usize {
+        'pages: for i in 0..max_pages as usize {
             let url = format!(
                 "{}/security/cves.json?package=linux&limit={PAGE}&offset={}&order=descending&sort_by=updated",
                 self.base,
-                page * PAGE
+                start_offset + i * PAGE
             );
-            let f = http::get(client, &url, &[("accept", "application/json")], self.lim).await?;
-            let v: Value = serde_json::from_slice(&f.body)
-                .map_err(|e| FeedError::Format(format!("kein JSON: {e}")))?;
-            let cves = v
-                .get("cves")
-                .and_then(Value::as_array)
-                .ok_or_else(|| FeedError::Format("Feld `cves` fehlt".into()))?;
-            for c in cves {
-                let updated = c
-                    .get("updated_at")
-                    .and_then(Value::as_str)
-                    .and_then(parse_time)
-                    .ok_or_else(|| {
-                        FeedError::Format("`updated_at` fehlt oder ist ungültig".into())
-                    })?;
-                if cursor.is_some_and(|cur| updated <= cur) {
-                    complete = true;
+            // Eine Seite wird ganz oder gar nicht übernommen; so zeigt der Fortschritt nie über Daten hinaus,
+            // die wirklich gespeichert werden.
+            let page = match fetch_page(client, &url, self.lim, confirmed).await {
+                Ok(p) => p,
+                // Schon Fortschritt erzielt: behalten und beim nächsten Lauf weitermachen, nicht wegwerfen.
+                Err(e) if pages_fetched > 0 => {
+                    interrupted = Some(e);
                     break 'pages;
                 }
-                newest = Some(newest.map_or(updated, |n| n.max(updated)));
-                if let Some(rec) = parse_cve(c) {
-                    records.push(rec);
-                }
-            }
-            if cves.len() < PAGE {
+                Err(e) => return Err(e),
+            };
+            pages_fetched += 1;
+            records.extend(page.records);
+            newest = newest.max(page.newest);
+            if page.reached_end {
                 complete = true;
                 break;
             }
         }
-        if !complete {
-            return Err(FeedError::Incomplete(format!(
-                "Cursor nach {max_pages} Seiten nicht erreicht"
-            )));
-        }
-        if cursor.is_none() && records.is_empty() {
+
+        let had_backfill = state.backfill.is_some();
+        let new_state = if complete {
+            // Lücke geschlossen: erst jetzt rückt der bestätigte Cursor vor.
+            FeedState {
+                cursor: newest.map(|n| n.to_rfc3339()),
+                backfill: None,
+                ..state.clone()
+            }
+        } else {
+            // `complete == false` heißt: es gibt einen Cursor und wir haben mindestens eine Seite gelesen.
+            let (Some(target), Some(pending)) = (state.cursor.clone(), newest) else {
+                return Err(FeedError::Format("Rückstand ohne Cursor".into()));
+            };
+            // Eine Seite Überlappung: Offsets verschieben sich nur nach hinten, wenn oben neue Änderungen
+            // eintreffen (Doppelte sind harmlos, der Upsert ist idempotent) -- die Überlappung fängt zusätzlich
+            // gelöschte oder ausgeblendete Einträge ab. Mit nur einer Seite pro Lauf gibt es keine, damit der
+            // Abruf überhaupt vorankommt.
+            let end = start_offset + pages_fetched * PAGE;
+            let next = if pages_fetched > 1 { end - PAGE } else { end };
+            let prev = resume;
+            FeedState {
+                backfill: Some(Backfill {
+                    target,
+                    pending: pending.to_rfc3339(),
+                    next_offset: next as u32,
+                    pages_done: prev.map_or(0, |b| b.pages_done) + pages_fetched as u32,
+                    runs: prev.map_or(0, |b| b.runs) + 1,
+                    started_at: prev.map_or_else(Utc::now, |b| b.started_at),
+                }),
+                ..state.clone()
+            }
+        };
+        if complete && confirmed.is_none() && records.is_empty() {
             return Err(FeedError::Format("Feed liefert keine CVEs".into()));
         }
 
@@ -219,17 +254,67 @@ impl CveSource for Ubuntu {
             }
         }
 
-        if records.is_empty() {
+        if !complete {
+            return Ok(FetchOutcome::Partial {
+                records,
+                state: new_state,
+                interrupted: interrupted.map(|e| e.to_string()),
+            });
+        }
+        // Ein geschlossener Rückstand muss den Cursor auch dann übernehmen, wenn er keine Records brachte.
+        if records.is_empty() && !had_backfill {
             return Ok(FetchOutcome::NotModified);
         }
         Ok(FetchOutcome::Records {
             records,
-            state: FeedState {
-                cursor: newest.map(|n| n.to_rfc3339()),
-                ..state.clone()
-            },
+            state: new_state,
         })
     }
+}
+
+/// Eine geladene und geprüfte Seite.
+struct Page {
+    records: Vec<Record>,
+    /// Neuester `updated_at`-Wert der Seite.
+    newest: Option<DateTime<Utc>>,
+    /// Bestätigter Cursor erreicht oder Listenende: alles Ältere ist bereits bekannt.
+    reached_end: bool,
+}
+
+async fn fetch_page(
+    client: &reqwest::Client,
+    url: &str,
+    lim: Limits,
+    stop_at: Option<DateTime<Utc>>,
+) -> Result<Page, FeedError> {
+    let f = http::get(client, url, &[("accept", "application/json")], lim).await?;
+    let v: Value = serde_json::from_slice(&f.body)
+        .map_err(|e| FeedError::Format(format!("kein JSON: {e}")))?;
+    let cves = v
+        .get("cves")
+        .and_then(Value::as_array)
+        .ok_or_else(|| FeedError::Format("Feld `cves` fehlt".into()))?;
+    let mut page = Page {
+        records: Vec::new(),
+        newest: None,
+        reached_end: cves.len() < PAGE,
+    };
+    for c in cves {
+        let updated = c
+            .get("updated_at")
+            .and_then(Value::as_str)
+            .and_then(parse_time)
+            .ok_or_else(|| FeedError::Format("`updated_at` fehlt oder ist ungültig".into()))?;
+        if stop_at.is_some_and(|cur| updated <= cur) {
+            page.reached_end = true;
+            break;
+        }
+        page.newest = page.newest.max(Some(updated));
+        if let Some(rec) = parse_cve(c) {
+            page.records.push(rec);
+        }
+    }
+    Ok(page)
 }
 
 #[cfg(test)]

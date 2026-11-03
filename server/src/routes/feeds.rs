@@ -17,6 +17,39 @@ struct FeedDb {
     last_error: Option<String>,
     last_error_at: Option<DateTime<Utc>>,
     consecutive_failures: i32,
+    /// Offener Rückstandsabbau (siehe `cve::Backfill`).
+    backfill: Option<Value>,
+}
+
+/// Fortschritt eines Rückstandsabbaus für die Feed-Tabelle.
+#[derive(Serialize)]
+pub struct BackfillView {
+    pages_done: u32,
+    runs: u32,
+    next_offset: u32,
+    /// Seitenlimit je Lauf (nur Quellen mit Cursor-Paginierung).
+    pages_per_run: Option<u32>,
+    since: DateTime<Utc>,
+    /// Fertiger Text für die Anzeige.
+    progress: String,
+}
+
+fn backfill_view(raw: &Value, pages_per_run: Option<u32>) -> Option<BackfillView> {
+    let b: crate::cve::Backfill = serde_json::from_value(raw.clone()).ok()?;
+    let per = pages_per_run.map_or(String::new(), |n| format!(", bis zu {n} Seiten pro Lauf"));
+    Some(BackfillView {
+        pages_done: b.pages_done,
+        runs: b.runs,
+        next_offset: b.next_offset,
+        pages_per_run,
+        since: b.started_at,
+        progress: format!(
+            "Rückstand wird abgebaut: {} Seiten in {} {} geladen{per}",
+            b.pages_done,
+            b.runs,
+            if b.runs == 1 { "Lauf" } else { "Läufen" }
+        ),
+    })
 }
 
 #[derive(Serialize)]
@@ -43,7 +76,8 @@ pub struct FeedRow {
     secret_set: bool,
     base_url: Option<String>,
     interval_minutes: i64,
-    /// `ok`, `stale` (Fehler oder zu lange kein Erfolg), `never` (noch nie erfolgreich) oder `disabled` (abgeschaltet).
+    /// `ok`, `stale` (Fehler oder zu lange kein Erfolg), `incomplete` (Rückstand wird abgebaut, Daten noch
+    /// lückenhaft), `never` (noch nie erfolgreich) oder `disabled` (abgeschaltet).
     state: &'static str,
     healthy: bool,
     last_attempt_at: Option<DateTime<Utc>>,
@@ -53,6 +87,8 @@ pub struct FeedRow {
     last_error: Option<String>,
     last_error_at: Option<DateTime<Utc>>,
     consecutive_failures: i32,
+    /// Fortschritt, solange der Feed unvollständig ist.
+    backfill: Option<BackfillView>,
 }
 
 /// Zustand eines Feeds; ein Feed ist nie "ok", solange der letzte Abruf fehlschlug, er zu lange her ist oder er abgeschaltet ist.
@@ -65,6 +101,10 @@ fn classify(
     if !enabled {
         return ("disabled", f.last_success_at);
     }
+    // Offene Lücke: die Daten sind lückenhaft, auch wenn der letzte Lauf Fortschritt brachte. Nie "ok".
+    if f.backfill.is_some() {
+        return ("incomplete", f.last_success_at);
+    }
     match f.last_success_at {
         None => ("never", None),
         Some(t) if f.consecutive_failures > 0 || now - t > max_age => ("stale", Some(t)),
@@ -75,7 +115,7 @@ fn classify(
 pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<FeedRow>>> {
     let sources = sources::list(&st).await?;
     let rows: Vec<FeedDb> = sqlx::query_as(
-        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures FROM feed_state",
+        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill FROM feed_state",
     )
     .fetch_all(&st.pool)
     .await?;
@@ -91,6 +131,7 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             last_error: None,
             last_error_at: None,
             consecutive_failures: 0,
+            backfill: None,
         };
         let f = f.unwrap_or(&empty);
         let interval = crate::schedule::feed_interval_minutes(&st.pool, &src.id, default).await;
@@ -122,6 +163,12 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             last_error: f.last_error.clone(),
             last_error_at: f.last_error_at,
             consecutive_failures: f.consecutive_failures,
+            backfill: f.backfill.as_ref().and_then(|b| {
+                backfill_view(
+                    b,
+                    (src.kind == "ubuntu").then_some(st.cfg.cve.ubuntu_max_pages),
+                )
+            }),
             source: src.id,
         });
     }
@@ -461,6 +508,7 @@ pub async fn refresh(
             .map(|(source, o)| match o {
                 refresh::Outcome::NotModified => json!({ "source": source, "result": "not_modified" }),
                 refresh::Outcome::Updated { changed_rows, events } => json!({ "source": source, "result": "updated", "changed_rows": changed_rows, "events": events }),
+                refresh::Outcome::Incomplete { changed_rows, events } => json!({ "source": source, "result": "incomplete", "changed_rows": changed_rows, "events": events }),
                 refresh::Outcome::Failed(e) => json!({ "source": source, "result": "failed", "error": e }),
             })
             .collect();
@@ -487,6 +535,7 @@ mod tests {
                 last_error: None,
                 last_error_at: None,
                 consecutive_failures: failures,
+                backfill: None,
             },
             now,
         )
@@ -512,5 +561,17 @@ mod tests {
             "disabled",
             "abgeschaltet ist nie ok"
         );
+        // Offene Lücke (Rückstandsabbau): nie "ok" -- auch nicht, wenn der letzte Lauf Fortschritt brachte,
+        // kein Fehler gespeichert ist und der letzte Erfolg erst eine Stunde zurückliegt, oder es noch gar keinen gab.
+        let marker = Some(json!({}));
+        let (mut f, now) = feed(Some(1), 0);
+        f.backfill = marker.clone();
+        let (state, since) = classify(&f, true, now, max);
+        assert_eq!(state, "incomplete");
+        assert_eq!(since, f.last_success_at);
+        let (mut f, now) = feed(None, 0);
+        f.backfill = marker;
+        assert_eq!(classify(&f, true, now, max).0, "incomplete");
+        assert_eq!(classify(&f, false, now, max).0, "disabled");
     }
 }

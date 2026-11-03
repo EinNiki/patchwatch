@@ -14,6 +14,7 @@ pub mod ubuntu;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
@@ -80,15 +81,45 @@ pub struct Record {
 pub struct FeedState {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
+    /// Zuletzt BESTÄTIGTER Stand: alles, was neuer ist, ist vollständig geladen. Rückt nie über eine offene
+    /// Lücke hinweg vor (siehe [`Backfill`]).
     pub cursor: Option<String>,
+    /// Offener Rückstandsabbau (nur Quellen mit Cursor-Paginierung).
+    pub backfill: Option<Backfill>,
+}
+
+/// Fortschritt eines Rückstandsabbaus. Die Lücke liegt zwischen `target` (alter bestätigter Cursor) und dem
+/// Kopf der Liste. Fortschritt und bestätigter Cursor sind bewusst getrennt: `FeedState::cursor` bleibt
+/// `target`, bis die Lücke geschlossen ist; erst dann wird er auf `pending` gesetzt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Backfill {
+    /// Bestätigter Cursor zu Beginn der Lücke; bis hierhin muss gelesen werden.
+    pub target: String,
+    /// Neuester bisher gesehener Zeitstempel; wird zum bestätigten Cursor, sobald die Lücke zu ist.
+    pub pending: String,
+    /// Offset der nächsten Seite (liegt eine Seite vor dem zuletzt gelesenen Ende, siehe Überlappung).
+    pub next_offset: u32,
+    /// Insgesamt geladene Seiten (inkl. Überlappung) und Läufe seit Beginn der Lücke.
+    pub pages_done: u32,
+    pub runs: u32,
+    pub started_at: DateTime<Utc>,
 }
 
 pub enum FetchOutcome {
     /// Quelle erreichbar, nichts Neues (HTTP 304 oder unveränderter Cursor).
     NotModified,
+    /// Vollständiger Abruf: `state` wird übernommen (auch ein vorgerückter Cursor).
     Records {
         records: Vec<Record>,
         state: FeedState,
+    },
+    /// Teilabruf: die Records sind gültig und werden gespeichert, aber die Lücke ist noch offen. `state.cursor`
+    /// bleibt der alte bestätigte Stand, `state.backfill` hält den Fortschritt. Die Quelle gilt weiter als
+    /// unvollständig. `interrupted` nennt den Fehler, falls der Lauf mittendrin abbrach (sonst Seitenlimit).
+    Partial {
+        records: Vec<Record>,
+        state: FeedState,
+        interrupted: Option<String>,
     },
 }
 
@@ -99,8 +130,6 @@ pub enum FeedError {
     TooLarge(u64),
     /// Antwort hat nicht das erwartete Format (Quelle hat das Format geändert?).
     Format(String),
-    /// Nicht alle Änderungen konnten in einem Lauf geladen werden.
-    Incomplete(String),
 }
 
 impl fmt::Display for FeedError {
@@ -110,7 +139,6 @@ impl fmt::Display for FeedError {
             Self::Http(c) => write!(f, "HTTP {c}"),
             Self::TooLarge(n) => write!(f, "Antwort größer als das Limit von {n} Bytes"),
             Self::Format(m) => write!(f, "unerwartetes Format: {m}"),
-            Self::Incomplete(m) => write!(f, "unvollständig: {m}"),
         }
     }
 }

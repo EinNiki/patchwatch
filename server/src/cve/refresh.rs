@@ -13,7 +13,15 @@ const ALERT_AFTER_FAILURES: i32 = 3;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     NotModified,
-    Updated { changed_rows: usize, events: usize },
+    Updated {
+        changed_rows: usize,
+        events: usize,
+    },
+    /// Teilabruf: Daten sind gespeichert, aber eine Lücke ist noch offen (Rückstandsabbau); nie "grün".
+    Incomplete {
+        changed_rows: usize,
+        events: usize,
+    },
     Failed(String),
 }
 
@@ -26,15 +34,23 @@ async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
         .bind(name)
         .execute(&state.pool)
         .await?;
-    let (etag, last_modified, cursor): (Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as("SELECT etag, last_modified, cursor FROM feed_state WHERE source = $1")
-            .bind(name)
-            .fetch_one(&state.pool)
-            .await?;
+    let (etag, last_modified, cursor, backfill): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<serde_json::Value>,
+    ) = sqlx::query_as(
+        "SELECT etag, last_modified, cursor, backfill FROM feed_state WHERE source = $1",
+    )
+    .bind(name)
+    .fetch_one(&state.pool)
+    .await?;
     Ok(FeedState {
         etag,
         last_modified,
         cursor,
+        // Ein unlesbarer Eintrag zählt als "kein Fortschritt": der Abruf beginnt dann wieder vorn.
+        backfill: backfill.and_then(|v| serde_json::from_value(v).ok()),
     })
 }
 
@@ -143,49 +159,12 @@ pub async fn refresh_source(state: &AppState, id: &str, src: &dyn CveSource) -> 
         Ok(FetchOutcome::Records {
             records,
             state: new_state,
-        }) => {
-            // Daten und Feed-Zustand gemeinsam übernehmen: schlägt das Speichern fehl, bleibt der alte Stand.
-            let enrich = sources::enrich_only(kind);
-            let records = if enrich {
-                restrict_to_known(state, records).await?
-            } else {
-                records
-            };
-            let mut tx = state.pool.begin().await?;
-            let stats = match ingest::ingest_with(&mut tx, kind, id, &records, !enrich).await {
-                Ok(s) => s,
-                Err(e) => {
-                    drop(tx);
-                    let msg = format!("Speichern fehlgeschlagen: {e}");
-                    record_failure(state, name, &msg).await?;
-                    return Ok(Outcome::Failed(msg));
-                }
-            };
-            sqlx::query(
-                "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, last_success_at = now(), \
-                 last_error = NULL, consecutive_failures = 0 WHERE source = $1",
-            )
-            .bind(name)
-            .bind(&new_state.etag)
-            .bind(&new_state.last_modified)
-            .bind(&new_state.cursor)
-            .execute(&mut *tx)
-            .await?;
-            tx.commit().await?;
-            let hosts = reeval::reevaluate_affected(state, &stats.changed_pairs).await?;
-            tracing::info!(
-                source = name,
-                records = records.len(),
-                changed_rows = stats.changed_rows,
-                new_cves = stats.new_cves,
-                hosts_reevaluated = hosts,
-                "Feed aktualisiert"
-            );
-            Ok(Outcome::Updated {
-                changed_rows: stats.changed_rows,
-                events: stats.events,
-            })
-        }
+        }) => store(state, kind, id, records, new_state, None).await,
+        Ok(FetchOutcome::Partial {
+            records,
+            state: new_state,
+            interrupted,
+        }) => store(state, kind, id, records, new_state, Some(interrupted)).await,
         Err(e) => {
             let msg = e.to_string();
             tracing::warn!(source = name, error = %msg, "Feed-Abruf fehlgeschlagen, alter Stand bleibt erhalten");
@@ -193,6 +172,95 @@ pub async fn refresh_source(state: &AppState, id: &str, src: &dyn CveSource) -> 
             Ok(Outcome::Failed(msg))
         }
     }
+}
+
+/// Speichert die Records eines Abrufs zusammen mit dem Feed-Zustand in einer Transaktion: schlägt das Speichern
+/// fehl, bleibt der alte Stand. `partial` ist `None` bei einem vollständigen Abruf; bei einem Teilabruf
+/// (`Some`) bleibt der bestätigte Cursor unverändert, der Fortschritt wird gespeichert, `last_success_at` rückt
+/// nicht vor und der Feed bleibt unvollständig (nie "ok"). `Some(Some(fehler))` heißt: der Lauf brach mittendrin ab.
+async fn store(
+    state: &AppState,
+    kind: &str,
+    name: &str,
+    records: Vec<Record>,
+    new_state: FeedState,
+    partial: Option<Option<String>>,
+) -> Result<Outcome> {
+    let enrich = sources::enrich_only(kind);
+    let records = if enrich {
+        restrict_to_known(state, records).await?
+    } else {
+        records
+    };
+    let mut tx = state.pool.begin().await?;
+    let stats = match ingest::ingest_with(&mut tx, kind, name, &records, !enrich).await {
+        Ok(s) => s,
+        Err(e) => {
+            drop(tx);
+            let msg = format!("Speichern fehlgeschlagen: {e}");
+            record_failure(state, name, &msg).await?;
+            return Ok(Outcome::Failed(msg));
+        }
+    };
+    let backfill = new_state
+        .backfill
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()?;
+    match &partial {
+        None => {
+            sqlx::query(
+                "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
+                 last_success_at = now(), last_error = NULL, consecutive_failures = 0 WHERE source = $1",
+            )
+            .bind(name)
+            .bind(&new_state.etag)
+            .bind(&new_state.last_modified)
+            .bind(&new_state.cursor)
+            .bind(&backfill)
+            .execute(&mut *tx)
+            .await?;
+        }
+        Some(interrupted) => {
+            // Fortschritt zählt nicht als Fehlschlag (kein Alarm); ein Abbruch mittendrin bleibt aber sichtbar.
+            sqlx::query(
+                "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
+                 last_error = $6, last_error_at = CASE WHEN $6::text IS NULL THEN last_error_at ELSE now() END, \
+                 consecutive_failures = 0 WHERE source = $1",
+            )
+            .bind(name)
+            .bind(&new_state.etag)
+            .bind(&new_state.last_modified)
+            .bind(&new_state.cursor)
+            .bind(&backfill)
+            .bind(interrupted.as_deref().map(|m| format!("Lauf unterbrochen: {m}")))
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    let hosts = reeval::reevaluate_affected(state, &stats.changed_pairs).await?;
+    tracing::info!(
+        source = name,
+        records = records.len(),
+        changed_rows = stats.changed_rows,
+        new_cves = stats.new_cves,
+        hosts_reevaluated = hosts,
+        incomplete = partial.is_some(),
+        "Feed aktualisiert"
+    );
+    let (changed_rows, events) = (stats.changed_rows, stats.events);
+    Ok(if partial.is_some() {
+        Outcome::Incomplete {
+            changed_rows,
+            events,
+        }
+    } else {
+        Outcome::Updated {
+            changed_rows,
+            events,
+        }
+    })
 }
 
 /// Alle eingeschalteten Quellen nacheinander abrufen (Ergebnis je stabiler Quellen-ID). Abgeschaltete oder gelöschte

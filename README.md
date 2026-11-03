@@ -122,7 +122,7 @@ das Datenmodell (`cve_source_status` je CVE, Quelle, Release, Paket) ist für be
 
 | Quelle | Abruf | Besonderheit (an echten Antworten geprüft) |
 |---|---|---|
-| Ubuntu `cves.json` | inkrementell | Die API hat **keinen** „updated since“-Filter. Es wird absteigend nach `updated` paginiert (20 CVEs, ca. 3,7 MB je Seite) und am gespeicherten Cursor gestoppt. Erstabruf: die neuesten 5 Seiten; Watchlist-CVEs außerhalb davon werden einzeln nachgeladen. |
+| Ubuntu `cves.json` | inkrementell | Die API hat **keinen** „updated since“-Filter. Es wird absteigend nach `updated` paginiert (20 CVEs, ca. 3,7 MB je Seite) und am gespeicherten Cursor gestoppt. Erstabruf: die neuesten 5 Seiten; Watchlist-CVEs außerhalb davon werden einzeln nachgeladen. Pro Lauf höchstens `PATCHWATCH_CVE_UBUNTU_MAX_PAGES` Seiten (Standard 100). Ist der Rückstand größer, wird der Fortschritt gespeichert und der nächste Lauf setzt per Offset dort fort (eine Seite Überlappung). Der bestätigte Cursor rückt erst vor, wenn die Lücke geschlossen ist; bis dahin zeigt die Feed-Tabelle „Unvollständig“ samt Fortschritt, nie „Aktuell“. Eine Seite ist ca. 3,7 MB groß (169 Kernel-Pakete je CVE), auf dem Netz aber nur ca. 90 KB (gzip). |
 | Debian Security Tracker | bedingt | Es gibt **keinen ETag**, aber `Last-Modified`: `If-Modified-Since` ergibt bei Unverändertem 304 und es passiert nichts. 87 MB entpackt, daher streamendes Parsen (nur Kernel-Pakete) und hartes Größenlimit. |
 | OSV.dev (optional, `PATCHWATCH_CVE_SOURCES=ubuntu,debian,osv`) | je Host-Kernelversion | Ergänzend; Distributions-Tracker haben Vorrang. Antworten enthalten fremde Ökosysteme (werden gefiltert) und sind paginiert. |
 

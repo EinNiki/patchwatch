@@ -197,7 +197,7 @@ export interface Feed {
   secret_set: boolean;
   base_url: string | null;
   interval_minutes: number;
-  state: "ok" | "stale" | "never" | "disabled";
+  state: "ok" | "stale" | "incomplete" | "never" | "disabled";
   healthy: boolean;
   last_attempt_at: string | null;
   last_success_at: string | null;
@@ -205,6 +205,8 @@ export interface Feed {
   last_error: string | null;
   last_error_at: string | null;
   consecutive_failures: number;
+  /** Nur bei state "incomplete": Fortschritt des Rückstandsabbaus. */
+  backfill: { pages_done: number; runs: number; next_offset: number; pages_per_run: number | null; since: string; progress: string } | null;
 }
 
 export interface Me {
