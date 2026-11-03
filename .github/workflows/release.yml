@@ -39,6 +39,23 @@ jobs:
             cp agent/dist/install.sh dist/install.sh
             (cd dist && sha256sum install.sh > install.sh.sha256)
           fi
+      # Signatur (minisign). VORAUSSETZUNG, einmalig: Geheimnis MINISIGN_SECRET_KEY im Repository anlegen (siehe
+      # README, "Release-Signatur einrichten"). Fehlt es, bricht der Release ab: ungeprüfte Artefakte gibt es nicht.
+      - name: Binary signieren
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::Geheimnis MINISIGN_SECRET_KEY fehlt - Release-Signatur nicht eingerichtet (README)"
+            exit 1
+          fi
+          sudo apt-get install -y minisign
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          (umask 077; printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile")
+          # Schlüssel ohne Passwort (minisign -G -W); Ausgabe unterdrückt, damit nichts im Log landet.
+          minisign -S -s "$keyfile" -m dist/patchwatch-agent-${{ matrix.arch }}-linux \
+            -x dist/patchwatch-agent-${{ matrix.arch }}-linux.minisig -t "patchwatch ${{ github.ref_name }}" >/dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agent-${{ matrix.arch }}

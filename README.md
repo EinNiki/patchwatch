@@ -21,13 +21,41 @@ Installation (als root, Token kommt aus dem Server, siehe Betrieb):
 PATCHWATCH_TOKEN=… sh install.sh --server-url https://patchwatch.example.org
 ```
 
-**Agent aktualisieren:** `sudo patchwatch-agent-update` (lädt die neueste Version, prüft die SHA256-Summe, behält
-Server-URL und Token). Bei Agents ohne diesen Befehl einmal den Installationsbefehl erneut ausführen – Server-URL
-und Token werden aus `/etc/patchwatch` übernommen. Mit `--auto-update` prüft ein wöchentlicher Timer selbst auf
-neue Versionen (`--no-auto-update` schaltet ihn ab).
+**Agent aktualisieren:** `sudo patchwatch-agent-update` lädt **nur das Binary** (nie ein Skript) der festgelegten
+Hauptversion, prüft SHA256-Summe und Signatur, sichert die alte Datei (`patchwatch-agent.prev`), testet die neue vor dem
+Austausch und fällt bei einem Fehler auf die alte zurück. Server-URL und Token bleiben. Eine neue Hauptversion wird nie
+automatisch geladen; dafür bewusst `install.sh --version vX.Y.Z` ausführen (das setzt auch die Hauptversion neu). **Automatische Updates sind standardmäßig aus.** Einschalten: `install.sh --auto-update` (setzt
+`auto_update=yes` in `/etc/patchwatch/update.conf` und aktiviert den wöchentlichen Timer; `--no-auto-update` schaltet
+ab).
 
-`install.sh` lädt das Binary aus dem GitHub Release und prüft die SHA256-Summe vor der
-Installation. Der Token liegt in `/etc/patchwatch/token` (`root:root 0600`) und wird per
+**Prüfung beim Installieren und Aktualisieren:** `install.sh` berechnet den SHA256 der heruntergeladenen Datei selbst und
+vergleicht ihn mit dem Eintrag in der `.sha256`-Datei für genau diesen Dateinamen (fehlt er oder ist er nicht eindeutig,
+Abbruch; kein `sha256sum -c`). Zusätzlich muss die minisign-Signatur (`.minisig`) zu dem im Skript eingetragenen
+öffentlichen Schlüssel passen. Dafür wird das Paket `minisign` benötigt (`apt install minisign`). Fehlt der Schlüssel
+oder minisign, wird **nichts installiert**.
+
+### Release-Signatur einrichten (einmalig, Voraussetzung)
+
+Warum minisign: ein einzelner kleiner öffentlicher Schlüssel (eine Zeile), im Skript fest eingetragen, ohne Online-Dienst
+oder Transparenzlog (cosign „keyless“ bräuchte Sigstore zur Prüfzeit und ein größeres Werkzeug auf jedem Host); das Paket
+ist in Debian und Ubuntu enthalten.
+
+Bis das erledigt ist, **scheitern Installation und Update des Agents absichtlich** (Platzhalter `PW_PUBKEY`), und der
+Release-Workflow bricht ab. Der Schlüssel wurde nicht erzeugt; der private Teil darf nie in das Repository.
+
+1. Schlüsselpaar auf einem vertrauenswürdigen Rechner erzeugen (ohne Passwort, damit die CI ihn nutzen kann):
+   `minisign -G -W -p patchwatch.pub -s patchwatch.key`
+2. Inhalt von `patchwatch.key` als Repository-Geheimnis `MINISIGN_SECRET_KEY` hinterlegen (GitHub: Settings → Secrets and
+   variables → Actions), danach die Datei sicher löschen oder offline aufbewahren.
+3. Die **zweite Zeile** von `patchwatch.pub` (beginnt mit `RW`) in `agent/dist/install.sh` bei `PW_PUBKEY=` eintragen,
+   dasselbe Skript nach `install.sh` im Wurzelverzeichnis kopieren (`cp agent/dist/install.sh install.sh`) und committen.
+4. Release-Tag erzeugen. Der Workflow signiert `patchwatch-agent-*-linux` und veröffentlicht die `.minisig`-Dateien.
+5. Bereits installierte Agents tragen den Schlüssel in `/usr/local/lib/patchwatch/verify.sh`: einmal `install.sh` neu
+   ausführen, damit sie ihn bekommen.
+
+Tests: `sh agent/tests/install_test.sh` (läuft in der CI; ohne Root und Netz, minisign wird durch eine Attrappe ersetzt).
+
+`install.sh` lädt das Binary aus dem GitHub Release. Der Token liegt in `/etc/patchwatch/token` (`root:root 0600`) und wird per
 systemd-`LoadCredential` an den Dienst `patchwatch` (kein `DynamicUser`) gereicht.
 Konfiguration: `/etc/patchwatch/agent.toml`, Beispiel in `agent/dist/agent.toml.example`.
 
