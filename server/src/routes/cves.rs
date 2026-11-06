@@ -276,7 +276,7 @@ fn build_filter(q: &ListQuery, all_releases: bool) -> ApiResult<Built<'_>> {
         // Standardansicht: nur CVEs, die zu deinen Hosts gehören (Eintrag für ein laufendes Release, das nicht
         // „nicht betroffen“ ist, oder eine Bewertung eines Hosts) sowie beobachtete CVEs.
         conds.push(format!(
-            "(w.cve_id IS NOT NULL OR EXISTS (SELECT 1 FROM host_cve_status x WHERE x.cve_id = c.id) \
+            "(w.cve_id IS NOT NULL OR EXISTS (SELECT 1 FROM host_cve_status x WHERE x.cve_id = c.id AND x.status <> 'not_affected') \
              OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.status <> 'not_affected' AND {MINE_SQL}))"
         ));
     }

@@ -1,25 +1,19 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
-import { prefetchApi, useApi } from "@/lib/useApi";
+import { useParams, useSearchParams } from "next/navigation";
+import { useApi } from "@/lib/useApi";
 import { absTime, kernelBase, uptime } from "@/lib/format";
-import { CVE_STATUS, HOST_STATUS } from "@/lib/status";
-import type { Feed, HistoryRow, Host, HostCve, UpdateItem } from "@/lib/types";
-import { Marker } from "@/components/DistroChip";
+import { HOST_STATUS } from "@/lib/status";
+import type { Feed, HistoryRow, Host, UpdateItem } from "@/lib/types";
+import { HostCves, parseCveFilter } from "@/components/HostCves";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Icon } from "@/components/Icons";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
-import { Button } from "@/components/Controls";
-import { Linkified } from "@/components/Linkified";
 import { feedSummary } from "@/components/FeedStatus";
 
-const PROXMOX_ADVISORIES = "https://forum.proxmox.com/forums/security-advisories.26/";
-const CVE_PAGE = 200;
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -34,8 +28,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 export default function HostDetailPage() {
   const { id } = useParams<{ id: string }>();
   const host = useApi<Host>(`/hosts/${id}`, 30_000, LIVE);
-  const [cveLimit, setCveLimit] = useState(CVE_PAGE);
-  const cves = useApi<HostCve[]>(`/hosts/${id}/cves?limit=${cveLimit}`, 60_000, LIVE);
+  const initialFilter = parseCveFilter(useSearchParams().get("cve"));
   const history = useApi<HistoryRow[]>(`/hosts/${id}/history?limit=30`, 60_000, LIVE);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
 
@@ -71,7 +64,10 @@ export default function HostDetailPage() {
         ) : null}
       </div>
 
-      {/* Ab 1600 px: CVE-Bewertung und Verlauf links, Stand rechts (DOM-Reihenfolge bleibt Stand zuerst). */}
+      {/* Die CVE-Lage steht oben und über die volle Breite (zwei Spalten ab 1280 px), damit sie ohne Seitenscroll sichtbar ist. */}
+      <HostCves host={h} initialFilter={initialFilter} feedWarning={feed && !feed.ok ? feed.label : null} />
+
+      {/* Ab 1600 px: Updates und Verlauf links, Stand rechts (DOM-Reihenfolge bleibt Stand zuerst). */}
       <div className="wide:grid wide:grid-cols-[minmax(0,1fr)_26rem] wide:gap-x-8">
       <section aria-labelledby="facts" className="mb-6 wide:col-start-2 wide:row-start-1">
         <h2 id="facts" className="mb-2 text-lg font-semibold">
@@ -145,8 +141,6 @@ export default function HostDetailPage() {
       </section>
 
       <div className="min-w-0 wide:col-start-1 wide:row-start-1">
-      <CveSection host={h} cves={cves} limit={cveLimit} onMore={() => setCveLimit(cveLimit + CVE_PAGE * 5)} feedWarning={feed && !feed.ok ? feed.label : null} />
-
       <UpdatesSection hostId={h.id} pending={h.updates_pending ?? 0} />
 
       <section aria-labelledby="hist" className="mt-6">
@@ -196,188 +190,6 @@ export default function HostDetailPage() {
       </div>
       </div>
     </>
-  );
-}
-
-function CveSection({
-  host,
-  cves,
-  limit,
-  onMore,
-  feedWarning,
-}: {
-  host: Host;
-  cves: ReturnType<typeof useApi<HostCve[]>>;
-  limit: number;
-  onMore: () => void;
-  feedWarning: string | null;
-}) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  async function toggleReview(c: HostCve, checked: boolean) {
-    setBusy(c.cve_id);
-    setProblem(null);
-    try {
-      const path = `/hosts/${host.id}/cves/${c.cve_id}/review`;
-      if (checked) await api.put(path);
-      else await api.del(path);
-      await cves.reload();
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : "Speichern fehlgeschlagen");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  // Der Server liefert bereits nach Dringlichkeit sortiert und begrenzt; hier nur noch darstellen.
-  const list = cves.data ?? [];
-  const total = host.cve_vulnerable + host.cve_fix_pending + host.cve_unknown;
-  const more = list.length >= limit;
-
-  return (
-    <section aria-labelledby="cve">
-      <h2 id="cve" className="mb-2 text-lg font-semibold">
-        CVE-Bewertung für den laufenden Kernel
-      </h2>
-      {host.is_proxmox ? (
-        <p role="note" className="mb-3 border-l-4 border-unknown bg-unknown-soft px-3 py-2 text-unknown">
-          <strong className="font-semibold">Proxmox-Kernel:</strong> Für -pve-Kernel gibt es keine belastbare CVE-Quelle. Jede Bewertung ist
-          unbekannt und muss manuell geprüft werden:{" "}
-          <a href={PROXMOX_ADVISORIES} target="_blank" rel="noopener noreferrer">
-            Proxmox Security Advisories
-          </a>
-          . Eine Prüfung gilt nur für den Kernel, bei dem sie gesetzt wurde.
-        </p>
-      ) : null}
-      {host.cve_source_issue ? (
-        <p role="note" className="mb-3 border-l-4 border-unknown bg-unknown-soft px-3 py-2 text-unknown">
-          <strong className="font-semibold">CVE-Lage unbekannt:</strong> {host.cve_source_issue}.
-        </p>
-      ) : null}
-      {feedWarning ? (
-        <p role="note" className="mb-3 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
-          <strong className="font-semibold">{feedWarning}.</strong> Die Bewertung kann veraltet sein.
-        </p>
-      ) : null}
-      {problem ? <ErrorNote message={problem} /> : null}
-      {cves.error && !cves.data ? <ErrorNote message={cves.error} /> : null}
-      {!cves.data ? (
-        <Loading what="CVE-Bewertungen" />
-      ) : list.length === 0 ? (
-        <Empty title={host.is_proxmox ? "Keine CVEs zur manuellen Prüfung" : "Keine offenen CVE-Bewertungen"}>
-          {host.is_proxmox ? (
-            <>
-              Setze CVEs auf die <Link href="/cves">Watchlist</Link>, dann erscheinen sie hier als „manuell prüfen“.
-            </>
-          ) : (
-            <>
-              Für den laufenden Kernel ist keine CVE verwundbar, angekündigt oder unklar.
-              {feedWarning ? " Beachte den Hinweis zum veralteten Feed." : ""}
-            </>
-          )}
-        </Empty>
-      ) : (
-        <>
-          <p className="mb-2 text-sm text-fg2">
-            „Manuelle Prüfung“: Setze das Häkchen, wenn du diese CVE für diesen Host selbst geprüft hast. Es merkt sich, wer wann geprüft hat, und gilt nur für den aktuellen Kernel; nach einem Kernel-Wechsel verfällt es. Der Status ändert sich dadurch nicht. Besonders nützlich bei „unbekannt“ (z. B. Proxmox, wo Feed-Daten zum Kernel fehlen).</p>
-          <div className="max-lg:overflow-x-auto">
-            <table className="tbl stack">
-              <caption>CVE-Bewertungen dieses Hosts mit Status, Begründung und manueller Prüfung</caption>
-              <thead>
-                <tr>
-                  <th scope="col"><span className="th-pad">CVE</span></th>
-                  <th scope="col"><span className="th-pad">Status</span></th>
-                  <th scope="col"><span className="th-pad">Begründung und Quellen</span></th>
-                  <th scope="col"><span className="th-pad">Manuelle Prüfung</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((c) => (
-                  <tr key={c.cve_id}>
-                    <td className="cell-primary">
-                      <Link href={`/cves/${c.cve_id}`} className="mono font-medium" onPointerEnter={() => prefetchApi(`/cves/${c.cve_id}`)} onFocus={() => prefetchApi(`/cves/${c.cve_id}`)}>
-                        {c.cve_id}
-                      </Link>
-                      {c.watched ? <span className="ml-2 inline-flex align-middle"><Marker>Watchlist</Marker></span> : null}
-                      {c.level ? <div className="text-xs text-fg3">Level {c.level}/10</div> : null}
-                    </td>
-                    <td className="cell-status lead">
-                      <StatusBadge info={CVE_STATUS[c.status]} label={host.is_proxmox && c.status === "unknown" ? "Unbekannt: manuell prüfen" : undefined} />
-                    </td>
-                    <td data-label="Begründung" className="max-w-[44rem]">
-                      <details>
-                        <summary className="cursor-pointer text-fg2">{c.reason.split(/(?<=\.)\s/)[0]}</summary>
-                        <div className="mt-2 space-y-2">
-                          <p className="break-words">
-                            <Linkified text={c.reason} />
-                          </p>
-                          {c.description ? <p className="text-fg3">{c.description}</p> : null}
-                          {c.sources.length > 0 ? (
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="text-left text-fg3">
-                                  <th className="pr-3 font-semibold">Quelle</th>
-                                  <th className="pr-3 font-semibold">Release</th>
-                                  <th className="pr-3 font-semibold">Paket</th>
-                                  <th className="pr-3 font-semibold">Status</th>
-                                  <th className="font-semibold">Fix-Version</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {c.sources.map((s) => (
-                                  <tr key={`${s.source}${s.release}${s.package}`}>
-                                    <td className="pr-3">{s.source}</td>
-                                    <td className="pr-3">{s.release}</td>
-                                    <td className="pr-3"><Mono>{s.package}</Mono></td>
-                                    <td className="pr-3">{s.status}</td>
-                                    <td><Mono>{s.fix_version ?? "–"}</Mono></td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          ) : null}
-                          <p className="text-xs text-fg3">Berechnet {absTime(c.computed_at)}</p>
-                        </div>
-                      </details>
-                    </td>
-                    <td data-label="Prüfung">
-                                              <label className="flex min-h-8 items-start gap-2 py-1 max-md:min-h-11 max-md:items-center">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 size-4 accent-[var(--accent)] max-md:mt-0 max-md:size-5"
-                            checked={Boolean(c.reviewed_at)}
-                            disabled={busy === c.cve_id}
-                            onChange={(e) => void toggleReview(c, e.target.checked)}
-                            aria-label={`${c.cve_id} manuell geprüft`}
-                          />
-                          <span>
-                            {c.reviewed_at ? (
-                              <>
-                                geprüft am {absTime(c.reviewed_at)}
-                                {c.reviewed_by ? <span className="text-fg3"> von {c.reviewed_by}</span> : null}
-                              </>
-                            ) : (
-                              "Manuell geprüft"
-                            )}
-                          </span>
-                        </label>
-                      
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 flex flex-wrap items-center gap-3 text-fg2">
-            <span aria-live="polite">
-              {more ? `Die ${list.length} dringlichsten von mindestens ${Math.max(total, list.length)} Bewertungen` : `${list.length} Bewertungen`}, dringlichste zuerst.
-            </span>
-            {more ? <Button onClick={onMore}>Weitere laden</Button> : null}
-          </p>
-        </>
-      )}
-    </section>
   );
 }
 

@@ -51,6 +51,8 @@ export interface Host {
   cve_vulnerable: number;
   cve_fix_pending: number;
   cve_unknown: number;
+  cve_reboot: number;
+  cve_fixed: number;
 }
 
 export interface HistoryRow {
@@ -84,6 +86,27 @@ export interface HostCve {
   reviewed_by: string | null;
   /** Priorität als Stufe 0–10 (0 = unbekannt). */
   level: number;
+  /** Fix-Version und Name der zuständigen Quelle. */
+  fix_version: string | null;
+  source: string | null;
+}
+
+export interface HostCvesResponse {
+  items: HostCve[];
+  /** Treffer für den aktuellen Filter (ohne Seitenbegrenzung). */
+  total: number;
+  /** Zähler je Zustand für den ganzen Host (unabhängig von Filter und Suche). */
+  counts: Record<CveStatus, number>;
+  /** Warum die Bewertung eingeschränkt ist (Quelle unvollständig/veraltet), sonst null. */
+  issue: string | null;
+  host: {
+    is_proxmox: boolean;
+    running_kernel: string | null;
+    running_kernel_version: string | null;
+    newest_kernel: string | null;
+    newest_kernel_version: string | null;
+    reboot_needed: boolean;
+  };
 }
 
 export interface Cve {

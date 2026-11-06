@@ -416,7 +416,7 @@ function CveView() {
           </Empty>
         ) : (
           <>
-            <div className="updatable max-lg:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
+            <div className="updatable max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
               <table className="tbl stack">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>

@@ -548,3 +548,16 @@ summary {
     padding-inline: 8px;
   }
 }
+
+/* Tab-Wechsel in der CVE-Lage: kurzes Einblenden (≤150 ms); prefers-reduced-motion wird global abgeschaltet. */
+.tab-fade {
+  animation: tab-in 120ms var(--ease-out);
+}
+@keyframes tab-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

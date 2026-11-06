@@ -679,8 +679,9 @@ async fn host_cves_are_ordered_by_severity_before_limit(pool: PgPool) {
     )
     .await;
     assert_eq!(r.status, StatusCode::OK);
-    let list = r.json.as_array().unwrap();
+    let list = r.json["items"].as_array().unwrap();
     assert_eq!(list.len(), 5);
+    assert_eq!(r.json["total"], 301);
     assert_eq!(
         list[0]["cve_id"], "CVE-2001-0001",
         "verwundbare CVE muss trotz niedriger ID zuerst kommen"
@@ -695,7 +696,12 @@ async fn host_cves_are_ordered_by_severity_before_limit(pool: PgPool) {
         None,
     )
     .await;
-    assert_eq!(r.json.as_array().unwrap().len(), 301);
+    assert_eq!(
+        r.json["items"].as_array().unwrap().len(),
+        100,
+        "Standardseite"
+    );
+    assert_eq!(r.json["total"], 301);
     let r = call(
         &app,
         Method::GET,
@@ -704,7 +710,7 @@ async fn host_cves_are_ordered_by_severity_before_limit(pool: PgPool) {
         None,
     )
     .await;
-    assert_eq!(r.json.as_array().unwrap().len(), 1);
+    assert_eq!(r.json["items"].as_array().unwrap().len(), 1);
 }
 
 async fn checkin(app: &Router, token: &str) -> Resp {

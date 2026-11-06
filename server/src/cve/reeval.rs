@@ -118,16 +118,25 @@ async fn candidates(
     Ok((all.into_iter().collect(), watched.into_iter().collect()))
 }
 
-/// Nur Ergebnisse mit Handlungsbezug werden gespeichert (Watchlist immer); `fixed`/`not_affected` sind es nicht.
-fn worth_storing(s: CveStatus, watched: bool) -> bool {
-    watched
-        || matches!(
-            s,
-            CveStatus::Vulnerable
-                | CveStatus::FixPending
-                | CveStatus::FixedInstalledRebootRequired
-                | CveStatus::Unknown
-        )
+/// Handlungsbezug: offen, Fix angekündigt, Neustart nötig oder unbekannt. `fixed` und `not_affected` werden
+/// ebenfalls gespeichert (für die Host-Ansicht "gefixt"/"nicht betroffen"), lösen aber keine Ereignisse aus.
+fn actionable(s: CveStatus) -> bool {
+    matches!(
+        s,
+        CveStatus::Vulnerable
+            | CveStatus::FixPending
+            | CveStatus::FixedInstalledRebootRequired
+            | CveStatus::Unknown
+    )
+}
+
+/// Ob ein Wechsel `old -> new` ein Ereignis ist. Wie bisher nur, wenn dabei ein Zustand mit Handlungsbezug im Spiel
+/// ist: ein neu auftauchendes "gefixt" oder der Wechsel zwischen "gefixt" und "nicht betroffen" ist keines.
+fn is_event(old: Option<&str>, new: CveStatus) -> bool {
+    match old {
+        None => actionable(new),
+        Some(o) => o != new.as_str() && (actionable(CveStatus::parse(o)) || actionable(new)),
+    }
 }
 
 /// Bewertet einen Host neu, speichert Änderungen, erzeugt Events und berechnet den Host-Status.
@@ -159,6 +168,9 @@ pub async fn evaluate_host(pool: &PgPool, host_id: i64, stale_after: Duration) -
     .into_iter()
     .collect();
     let initial = existing.is_empty();
+    // Quelle unvollständig, veraltet oder Release ohne Import: daraus entsteht nie ein NEUES "gefixt" oder
+    // "nicht betroffen" (bereits bekannte Einträge bleiben stehen).
+    let source_missing = hostops::cve_source_missing(&mut tx, host_id, Utc::now()).await?;
 
     let mut keep: Vec<(String, Verdict)> = Vec::new();
     let mut changes: Vec<(String, Option<String>, CveStatus)> = Vec::new();
@@ -174,14 +186,14 @@ pub async fn evaluate_host(pool: &PgPool, host_id: i64, stale_after: Duration) -
         .collect();
     for (cve, v) in &verdicts {
         let old = existing.get(cve);
-        if worth_storing(v.status, watched.contains(cve)) {
-            kept_ids.insert(cve);
-            keep.push((cve.clone(), v.clone()));
-            if old.map(String::as_str) != Some(v.status.as_str()) {
-                changes.push((cve.clone(), old.cloned(), v.status));
-            }
-        } else if let Some(old) = old {
-            changes.push((cve.clone(), Some(old.clone()), v.status));
+        let settled = matches!(v.status, CveStatus::Fixed | CveStatus::NotAffected);
+        if settled && old.is_none() && source_missing {
+            continue;
+        }
+        kept_ids.insert(cve);
+        keep.push((cve.clone(), v.clone()));
+        if is_event(old.map(String::as_str), v.status) {
+            changes.push((cve.clone(), old.cloned(), v.status));
         }
     }
     let gone: Vec<String> = existing
@@ -302,6 +314,24 @@ pub async fn reevaluate_affected(
                 Ok(_) => n += 1,
                 Err(e) => tracing::error!(host = h.id, error = %e, "Neubewertung fehlgeschlagen"),
             }
+        }
+    }
+    Ok(n)
+}
+
+/// Alle Hosts einer Distribution neu bewerten (z. B. wenn deren CVE-Quelle wieder nutzbar wird).
+pub async fn reevaluate_kind(state: &AppState, kind: &str) -> Result<usize> {
+    let ids: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM hosts WHERE running_kernel IS NOT NULL AND os_id = $1")
+            .bind(kind)
+            .fetch_all(&state.pool)
+            .await?;
+    let stale_after = Duration::hours(state.cfg.stale_after_hours);
+    let mut n = 0;
+    for id in ids {
+        match evaluate_host(&state.pool, id, stale_after).await {
+            Ok(_) => n += 1,
+            Err(e) => tracing::error!(host = id, error = %e, "Neubewertung fehlgeschlagen"),
         }
     }
     Ok(n)

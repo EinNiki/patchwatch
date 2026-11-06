@@ -17,11 +17,13 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
     h.status, h.status_changed_at, h.last_report_at, h.created_at, \
     h.agent_version, h.last_checkin_at, h.report_requested_at, \
     COALESCE(c.vulnerable, 0) AS cve_vulnerable, COALESCE(c.fix_pending, 0) AS cve_fix_pending, \
-    COALESCE(c.unknown, 0) AS cve_unknown \
+    COALESCE(c.unknown, 0) AS cve_unknown, COALESCE(c.reboot, 0) AS cve_reboot, COALESCE(c.fixed, 0) AS cve_fixed \
     FROM hosts h LEFT JOIN LATERAL ( \
         SELECT count(*) FILTER (WHERE status = 'vulnerable') AS vulnerable, \
                count(*) FILTER (WHERE status = 'fix_pending') AS fix_pending, \
-               count(*) FILTER (WHERE status = 'unknown') AS unknown \
+               count(*) FILTER (WHERE status = 'unknown') AS unknown, \
+               count(*) FILTER (WHERE status = 'fixed_installed_reboot_required') AS reboot, \
+               count(*) FILTER (WHERE status = 'fixed') AS fixed \
         FROM host_cve_status WHERE host_id = h.id) c ON true";
 
 /// Offene Paket-Updates laut letztem Report; `{"items": null}`, wenn der Agent noch keine Liste mitschickt.
@@ -71,6 +73,8 @@ pub struct HostRow {
     cve_vulnerable: i64,
     cve_fix_pending: i64,
     cve_unknown: i64,
+    cve_reboot: i64,
+    cve_fixed: i64,
     /// Warum die CVE-Lage unbekannt ist ("Quelle Ubuntu unvollständig / veraltet / fehlerhaft"); sonst `null`.
     #[sqlx(skip)]
     cve_source_issue: Option<String>,
@@ -161,46 +165,213 @@ pub struct HostCveRow {
     /// Priorität als Stufe 0–10 (0 = unbekannt).
     #[sqlx(skip)]
     level: u8,
+    /// Fix-Version der zuständigen Quelle (aus `sources`) und deren Name.
+    #[sqlx(skip)]
+    fix_version: Option<String>,
+    #[sqlx(skip)]
+    source: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct CvesQuery {
+    /// Gruppe: `open` (offen, Fix angekündigt, Neustart nötig), `fixed`, `all` (Standard).
+    group: Option<String>,
+    /// Ein Status oder eine kommagetrennte Liste; hat Vorrang vor `group`.
+    status: Option<String>,
+    q: Option<String>,
+    /// `importance` (Standard), `cve`, `level`, `changed`.
+    sort: Option<String>,
+    /// `asc` oder `desc`.
+    dir: Option<String>,
     limit: Option<i64>,
+    offset: Option<i64>,
 }
 
-/// CVE-Bewertungen eines Hosts, dringlichste zuerst (verwundbar, Neustart nötig, Fix angekündigt, unbekannt …).
-/// Die Sortierung erfolgt vor dem Limit, damit bei sehr vielen Zeilen nie kritische abgeschnitten werden.
+const ALL_STATES: [&str; 6] = [
+    "vulnerable",
+    "fix_pending",
+    "fixed_installed_reboot_required",
+    "unknown",
+    "fixed",
+    "not_affected",
+];
+
+/// Reihenfolge der Dringlichkeit: Neustart nötig vor offen, dann Fix angekündigt, unbekannt, gefixt, nicht betroffen.
+const RANK_SQL: &str =
+    "CASE s.status WHEN 'fixed_installed_reboot_required' THEN 0 WHEN 'vulnerable' THEN 1 \
+    WHEN 'fix_pending' THEN 2 WHEN 'unknown' THEN 3 WHEN 'fixed' THEN 4 ELSE 5 END";
+const LEVEL_SQL: &str =
+    "CASE c.priority WHEN 'critical' THEN 10 WHEN 'high' THEN 8 WHEN 'medium' THEN 5 \
+    WHEN 'low' THEN 3 WHEN 'negligible' THEN 1 WHEN 'unimportant' THEN 1 ELSE 0 END";
+
+/// CVE-Bewertungen eines Hosts mit allen Zuständen, serverseitig gefiltert, sortiert und seitenweise.
+/// Antwort: `{items, total, counts, host, issue}`. Die Zähler gelten für den ganzen Host (ohne Suche/Filter), `total`
+/// für die gefilterte Liste. Sortierung und Gruppen stammen aus festen Listen; nur der Suchtext ist ein Parameter.
 pub async fn cves(
     _: Admin,
     State(st): State<AppState>,
     Path(id): Path<i64>,
     Query(q): Query<CvesQuery>,
-) -> ApiResult<Json<Vec<HostCveRow>>> {
-    let limit = q.limit.unwrap_or(500).clamp(1, 5000);
-    let rows = sqlx::query_as::<_, HostCveRow>(
-        "SELECT s.cve_id, s.status, s.reason, s.computed_at, s.sources, c.description, c.priority, \
+) -> ApiResult<Json<Value>> {
+    let statuses: Option<Vec<String>> = match (q.status.as_deref(), q.group.as_deref()) {
+        // Kommagetrennte Liste, jeder Eintrag muss aus der festen Liste stammen.
+        (Some(s), _) => {
+            let list: Vec<String> = s.split(',').map(str::to_owned).collect();
+            if list.is_empty() || !list.iter().all(|x| ALL_STATES.contains(&x.as_str())) {
+                return Err(ApiError::BadRequest("Ungültiger Status".into()));
+            }
+            Some(list)
+        }
+        (None, Some("open")) => Some(
+            [
+                "vulnerable",
+                "fix_pending",
+                "fixed_installed_reboot_required",
+            ]
+            .map(String::from)
+            .to_vec(),
+        ),
+        (None, Some("fixed")) => Some(vec!["fixed".to_owned()]),
+        (None, Some("all") | None) => None,
+        (None, Some(_)) => return Err(ApiError::BadRequest("Ungültige Gruppe".into())),
+    };
+    let desc = match q.dir.as_deref() {
+        None | Some("desc") => true,
+        Some("asc") => false,
+        Some(_) => return Err(ApiError::BadRequest("Ungültige Richtung".into())),
+    };
+    let dir = if desc { "DESC" } else { "ASC" };
+    // Feste Fragmente je Sortierung (kein Nutzertext in der Abfrage).
+    let order = match q.sort.as_deref() {
+        None | Some("importance") => {
+            if desc {
+                format!(
+                    "{RANK_SQL} ASC, {LEVEL_SQL} DESC, (w.cve_id IS NOT NULL) DESC, s.cve_id DESC"
+                )
+            } else {
+                format!("{RANK_SQL} DESC, {LEVEL_SQL} ASC, s.cve_id ASC")
+            }
+        }
+        Some("cve") => format!("s.cve_id {dir}"),
+        Some("level") => format!("{LEVEL_SQL} {dir}, s.cve_id DESC"),
+        Some("changed") => format!("s.computed_at {dir}, s.cve_id DESC"),
+        Some(_) => return Err(ApiError::BadRequest("Ungültige Sortierung".into())),
+    };
+    let limit = q.limit.unwrap_or(100).clamp(1, 1000);
+    let offset = q.offset.unwrap_or(0).max(0);
+    let pattern =
+        q.q.as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| {
+                format!(
+                    "%{}%",
+                    t.replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                )
+            });
+
+    let host: Option<HostCveHeader> = sqlx::query_as(
+        "SELECT os_id, os_codename, is_proxmox, running_kernel, kernel_package_version, newest_kernel, \
+                newest_kernel_version, (COALESCE(reboot_required_file, false) OR COALESCE(reboot_needed_kernel, false)) AS reboot_needed \
+         FROM hosts WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&st.pool)
+    .await?;
+    let host = host.ok_or(ApiError::NotFound)?;
+
+    let count_rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT status, count(*) FROM host_cve_status WHERE host_id = $1 GROUP BY status",
+    )
+    .bind(id)
+    .fetch_all(&st.pool)
+    .await?;
+    let mut counts = serde_json::Map::new();
+    for state in ALL_STATES {
+        let n = count_rows
+            .iter()
+            .find(|(s, _)| s == state)
+            .map_or(0, |(_, n)| *n);
+        counts.insert(state.to_owned(), json!(n));
+    }
+
+    let where_sql = "s.host_id = $1 AND ($2::text[] IS NULL OR s.status = ANY($2)) \
+         AND ($3::text IS NULL OR s.cve_id ILIKE $3 OR c.description ILIKE $3)";
+    let total: i64 = sqlx::query_scalar(&format!(
+        "SELECT count(*) FROM host_cve_status s JOIN cves c ON c.id = s.cve_id WHERE {where_sql}"
+    ))
+    .bind(id)
+    .bind(&statuses)
+    .bind(&pattern)
+    .fetch_one(&st.pool)
+    .await?;
+
+    let rows = sqlx::query_as::<_, HostCveRow>(&format!(
+        "SELECT s.cve_id, s.status, s.reason, s.computed_at, s.sources, \
+                left(c.description, 300) AS description, c.priority, \
                 (w.cve_id IS NOT NULL) AS watched, m.reviewed_at, m.reviewed_by \
          FROM host_cve_status s JOIN cves c ON c.id = s.cve_id JOIN hosts h ON h.id = s.host_id \
          LEFT JOIN cve_watchlist w ON w.cve_id = s.cve_id \
          LEFT JOIN manual_reviews m ON m.host_id = s.host_id AND m.cve_id = s.cve_id AND m.kernel_version = h.running_kernel \
-         WHERE s.host_id = $1 \
-         ORDER BY CASE s.status WHEN 'vulnerable' THEN 0 WHEN 'fixed_installed_reboot_required' THEN 1 \
-                                WHEN 'fix_pending' THEN 2 WHEN 'unknown' THEN 3 ELSE 4 END, \
-                  (w.cve_id IS NOT NULL) DESC, s.cve_id DESC \
-         LIMIT $2",
-    )
+         WHERE {where_sql} ORDER BY {order} LIMIT $4 OFFSET $5"
+    ))
     .bind(id)
+    .bind(&statuses)
+    .bind(&pattern)
     .bind(limit)
+    .bind(offset)
     .fetch_all(&st.pool)
     .await?;
-    let rows = rows
+    let items: Vec<HostCveRow> = rows
         .into_iter()
         .map(|mut r| {
             r.level = super::cves::priority_level(r.priority.as_deref());
+            // Verantwortliche Quelle: der erste Eintrag mit Fix-Version (sonst der erste überhaupt).
+            let list = r.sources.as_array().cloned().unwrap_or_default();
+            let pick = list
+                .iter()
+                .find(|e| e["fix_version"].is_string())
+                .or_else(|| list.first());
+            r.fix_version = pick
+                .and_then(|e| e["fix_version"].as_str())
+                .map(String::from);
+            r.source = pick.and_then(|e| e["source"].as_str()).map(String::from);
             r
         })
         .collect();
-    Ok(Json(rows))
+
+    // Hinweis "Bewertung eingeschränkt": die Quelle ist unvollständig, veraltet oder das Release nicht importiert.
+    let issue = if host.is_proxmox {
+        None
+    } else {
+        let issues = crate::hostops::cve_source_issues(&st.pool).await?;
+        host.os_id
+            .as_deref()
+            .and_then(|os| issues.for_host(os, host.os_codename.as_deref()))
+    };
+    Ok(Json(json!({
+        "items": items, "total": total, "counts": counts, "issue": issue,
+        "host": {
+            "is_proxmox": host.is_proxmox, "running_kernel": host.running_kernel,
+            "running_kernel_version": host.kernel_package_version,
+            "newest_kernel": host.newest_kernel, "newest_kernel_version": host.newest_kernel_version,
+            "reboot_needed": host.reboot_needed,
+        },
+    })))
+}
+
+#[derive(sqlx::FromRow)]
+struct HostCveHeader {
+    os_id: Option<String>,
+    os_codename: Option<String>,
+    is_proxmox: bool,
+    running_kernel: Option<String>,
+    kernel_package_version: Option<String>,
+    newest_kernel: Option<String>,
+    newest_kernel_version: Option<String>,
+    reboot_needed: bool,
 }
 
 #[derive(Deserialize)]

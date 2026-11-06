@@ -83,7 +83,7 @@ async fn context(state: &AppState, id: &str, kind: &str) -> Result<FetchCtx> {
     let enrich = if kind == "nvd" {
         sqlx::query_scalar(
             "SELECT c.id FROM cves c WHERE NOT EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source_id = $1) \
-             AND (EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) OR EXISTS (SELECT 1 FROM host_cve_status h WHERE h.cve_id = c.id)) \
+             AND (EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) OR EXISTS (SELECT 1 FROM host_cve_status h WHERE h.cve_id = c.id AND h.status NOT IN ('fixed', 'not_affected'))) \
              ORDER BY EXISTS (SELECT 1 FROM cve_watchlist w WHERE w.cve_id = c.id) DESC, c.id LIMIT 200",
         )
         .bind(id)
@@ -298,7 +298,33 @@ async fn refresh_source_locked(state: &AppState, id: &str, src: &dyn CveSource) 
     let name = id;
     let feed_state = load_state(state, name).await?;
     let ctx = context(state, id, kind).await?;
+    // Waren Hosts dieser Distribution wegen der Quelle "unbekannt" und ist sie danach nutzbar, werden sie neu bewertet:
+    // "gefixt"/"nicht betroffen" wird erst jetzt gespeichert (siehe `reeval::evaluate_host`).
+    let was_gated = crate::hostops::kind_has_gated_hosts(&state.pool, kind)
+        .await
+        .unwrap_or(false);
+    let out = refresh_inner(state, id, src, kind, name, feed_state, ctx).await?;
+    if was_gated
+        && !crate::hostops::kind_has_gated_hosts(&state.pool, kind)
+            .await
+            .unwrap_or(true)
+    {
+        if let Err(e) = reeval::reevaluate_kind(state, kind).await {
+            tracing::warn!(error = %e, "Neubewertung nach nutzbarer Quelle fehlgeschlagen");
+        }
+    }
+    Ok(out)
+}
 
+async fn refresh_inner(
+    state: &AppState,
+    id: &str,
+    src: &dyn CveSource,
+    kind: &str,
+    name: &str,
+    feed_state: FeedState,
+    ctx: FetchCtx,
+) -> Result<Outcome> {
     match fetch_watched(state, src, &feed_state, &ctx).await {
         Ok(FetchOutcome::NotModified) => {
             // Nichts Neues, aber ein vollständiger, erfolgreicher Abruf: die Quelle ist wieder frisch.

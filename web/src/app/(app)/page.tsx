@@ -100,7 +100,7 @@ function HostsView() {
   const flashed = useFlash(
     all,
     (h) => h.id,
-    (h) => `${h.status}|${h.updates_pending}|${h.updates_security}|${h.cve_vulnerable}|${h.cve_fix_pending}|${h.cve_unknown}|${h.last_report_at}|${h.running_kernel}`,
+    (h) => `${h.status}|${h.updates_pending}|${h.updates_security}|${h.cve_vulnerable}|${h.cve_fix_pending}|${h.cve_unknown}|${h.cve_reboot}|${h.cve_fixed}|${h.last_report_at}|${h.running_kernel}`,
   );
 
   const kpis = useMemo<Kpi[]>(() => {
@@ -344,27 +344,41 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
   );
 }
 
-/** CVE-Lage: nie "grün" bei fehlender Datenlage (Proxmox, Feed veraltet). */
+/** CVE-Lage: nie "grün" bei fehlender Datenlage (Proxmox, Feed veraltet). Jede Zahl führt gefiltert zur Host-Seite. */
 function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
+  const to = (f: string) => `/hosts/${h.id}?cve=${f}`;
   const parts: React.ReactNode[] = [];
   if (h.cve_vulnerable > 0)
     parts.push(
-      <span key="v" className="inline-flex items-center gap-1 font-semibold text-crit">
-        <Icon name="crit" /> {h.cve_vulnerable} verwundbar
-      </span>,
+      <Link key="v" href={to("open")} className="inline-flex items-center gap-1 font-semibold text-crit no-underline hover:underline min-h-6 items-center max-md:min-h-11">
+        <Icon name="crit" /> {h.cve_vulnerable} offen
+      </Link>,
     );
   if (h.cve_fix_pending > 0)
     parts.push(
-      <span key="p" className="inline-flex items-center gap-1 text-warn">
+      <Link key="p" href={to("open")} className="inline-flex items-center gap-1 text-warn no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="warn" /> {h.cve_fix_pending} Fix angekündigt
-      </span>,
+      </Link>,
+    );
+  if (h.cve_reboot > 0)
+    parts.push(
+      <Link key="r" href={to("reboot")} className="inline-flex items-center gap-1 text-warn no-underline hover:underline min-h-6 items-center max-md:min-h-11">
+        <Icon name="reboot" /> {h.cve_reboot} Neustart
+      </Link>,
     );
   if (h.is_proxmox || h.cve_unknown > 0)
     parts.push(
-      <span key="u" className="inline-flex items-center gap-1 text-unknown">
+      <Link key="u" href={to("unknown")} className="inline-flex items-center gap-1 text-unknown no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="unknown" /> {h.is_proxmox ? "manuell prüfen" : `${h.cve_unknown} unbekannt`}
-      </span>,
+      </Link>,
     );
+  // Gefixt zählt nie als Entwarnung für Proxmox oder bei fehlender Quelle; es steht nur als ruhige Information dabei.
+  const fixed =
+    h.cve_fixed > 0 && !h.is_proxmox ? (
+      <Link key="f" href={to("fixed")} className="inline-flex items-center gap-1 text-fg2 no-underline hover:underline min-h-6 items-center max-md:min-h-11">
+        <Icon name="ok" /> {h.cve_fixed} gefixt
+      </Link>
+    ) : null;
   if (parts.length === 0) {
     if (h.status === "pending") return <span className="text-fg3">–</span>;
     // Quelle unvollständig/veraltet/fehlerhaft: nie "keine offenen", sondern die Begründung zeigen.
@@ -374,17 +388,27 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
           <Icon name="unknown" /> {h.cve_source_issue}
         </span>
       );
-    return feedOk ? (
-      <span className="inline-flex items-center gap-1 text-fg2">
-        <Icon name="ok" /> keine offenen
-      </span>
-    ) : (
-      <span className="inline-flex items-center gap-1 text-unknown">
-        <Icon name="unknown" /> Feed prüfen
-      </span>
+    return (
+      <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
+        {feedOk ? (
+          <span className="inline-flex items-center gap-1 text-fg2">
+            <Icon name="ok" /> keine offenen
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-unknown">
+            <Icon name="unknown" /> Feed prüfen
+          </span>
+        )}
+        {fixed}
+      </div>
     );
   }
-  return <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">{parts}</div>;
+  return (
+    <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
+      {parts}
+      {fixed}
+    </div>
+  );
 }
 
 export default function HostsPage() {
@@ -396,4 +420,4 @@ export default function HostsPage() {
 }
 
 /** Host-Detail lädt drei Abrufe; Hover/Fokus wärmt sie vor, damit die Seite ohne Skeleton erscheint. */
-const prefetchHost = (id: number) => prefetchApi(`/hosts/${id}`, `/hosts/${id}/cves?limit=200`, `/hosts/${id}/history?limit=30`);
+const prefetchHost = (id: number) => prefetchApi(`/hosts/${id}`, `/hosts/${id}/cves?group=open&limit=200`, `/hosts/${id}/cves?group=fixed&limit=200`, `/hosts/${id}/history?limit=30`);

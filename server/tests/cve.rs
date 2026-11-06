@@ -603,9 +603,9 @@ async fn feed_change_leads_to_event_and_host_status_change(pool: PgPool) {
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        cve_status(&pool, hid, "CVE-2026-10001").await,
-        None,
-        "behobene CVEs werden nicht gespeichert"
+        cve_status(&pool, hid, "CVE-2026-10001").await.as_deref(),
+        Some("fixed"),
+        "behobene CVEs werden als gefixt gespeichert (Host-Ansicht), sind aber kein Handlungsbedarf"
     );
     assert_eq!(host_status(&pool, hid).await, "ok");
 }
@@ -1796,12 +1796,15 @@ async fn debian_trixie_uses_if_modified_since(pool: PgPool) {
         "{:?}",
         out[0].1
     );
-    // CVE-2004-0230 ist in trixie "open" -> verwundbar; CVE-2024-1086 (fixed in 6.6.15-1) ist behoben und nicht gespeichert.
+    // CVE-2004-0230 ist in trixie "open" -> verwundbar; CVE-2024-1086 (fixed in 6.6.15-1) ist behoben und als gefixt gespeichert.
     assert_eq!(
         cve_status(&pool, hid, "CVE-2004-0230").await.as_deref(),
         Some("vulnerable")
     );
-    assert_eq!(cve_status(&pool, hid, "CVE-2024-1086").await, None);
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2024-1086").await.as_deref(),
+        Some("fixed")
+    );
     assert_eq!(
         cve_status(&pool, hid, "CVE-2020-0347").await.as_deref(),
         Some("unknown"),
@@ -1970,7 +1973,7 @@ async fn proxmox_is_unknown_without_alert_and_review_expires(pool: PgPool) {
         None,
     )
     .await;
-    assert!(list.json[0]["reviewed_at"].is_string());
+    assert!(list.json["items"][0]["reviewed_at"].is_string());
 
     // Neuer Proxmox-Kernel: die manuelle Prüfung gilt nicht mehr.
     assert_eq!(
@@ -4962,4 +4965,220 @@ async fn filter_scope_count_tells_how_many_match_with_all_releases(pool: PgPool)
     )
     .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+}
+
+// ---------- Host-Ansicht: Fix-Lage je CVE ----------
+
+/// Alle Zustände werden gespeichert (auch "gefixt" und "nicht betroffen"), mit den richtigen Versionen; die Zähler
+/// stimmen mit der Liste überein; Filter, Sortierung, Seiten und Sonderzeichen funktionieren.
+/// Ohne das Speichern von "gefixt"/"nicht betroffen" bliebe die Liste leer bzw. die Zähler 0.
+#[sqlx::test(migrations = "./migrations")]
+async fn host_cves_lists_all_states_with_versions_and_counters(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let hid = add_host(&pool, "web1").await;
+    // Läuft 6.8.0-31.31, installiert (neuester) 6.8.0-35.35.
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-35.35")).await,
+        StatusCode::NO_CONTENT
+    );
+    let now = Utc::now() - Duration::minutes(10);
+    mock.lock().unwrap().ubuntu = vec![
+        ubuntu_cve("CVE-2026-20001", now, &[("noble", "needed", "")]),
+        ubuntu_cve(
+            "CVE-2026-20002",
+            now,
+            &[("noble", "released", "6.8.0-30.30")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-20003",
+            now,
+            &[("noble", "released", "6.8.0-33.33")],
+        ),
+        ubuntu_cve("CVE-2026-20004", now, &[("noble", "not-affected", "")]),
+        ubuntu_cve(
+            "CVE-2026-20005",
+            now,
+            &[("noble", "pending", "6.8.0-99.99")],
+        ),
+    ];
+    refresh::refresh_all(&st).await;
+
+    let cookies = login(&app, &pool).await;
+    let h = hdr(&cookies);
+    let url = format!("/api/v1/hosts/{hid}/cves");
+    let r = call(&app, Method::GET, &url, &h, None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let by_id = |id: &str| -> Value {
+        r.json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["cve_id"] == id)
+            .unwrap_or_else(|| panic!("{id} fehlt: {}", r.json))
+            .clone()
+    };
+    assert_eq!(by_id("CVE-2026-20001")["status"], "vulnerable");
+    let fixed = by_id("CVE-2026-20002");
+    assert_eq!(fixed["status"], "fixed");
+    assert_eq!(fixed["fix_version"], "6.8.0-30.30");
+    assert_eq!(fixed["source"], "ubuntu");
+    assert_eq!(
+        by_id("CVE-2026-20003")["status"],
+        "fixed_installed_reboot_required"
+    );
+    assert_eq!(by_id("CVE-2026-20003")["fix_version"], "6.8.0-33.33");
+    assert_eq!(by_id("CVE-2026-20004")["status"], "not_affected");
+    // Ein nur angekündigter Fix lässt den Host verwundbar (siehe Regel in eval.rs).
+    assert_eq!(by_id("CVE-2026-20005")["status"], "vulnerable");
+    assert_eq!(r.json["host"]["running_kernel_version"], "6.8.0-31.31");
+    assert_eq!(r.json["host"]["newest_kernel_version"], "6.8.0-35.35");
+    assert_eq!(r.json["host"]["reboot_needed"], true);
+    assert!(r.json["issue"].is_null());
+
+    // Zähler = Listeneinträge je Zustand.
+    let items = r.json["items"].as_array().unwrap();
+    assert_eq!(r.json["total"], items.len());
+    for (state, n) in r.json["counts"].as_object().unwrap() {
+        let listed = items.iter().filter(|i| i["status"] == *state).count();
+        assert_eq!(n.as_u64().unwrap() as usize, listed, "{state}");
+    }
+    assert_eq!(r.json["counts"]["fixed"], 1);
+    assert_eq!(r.json["counts"]["not_affected"], 1);
+    assert_eq!(r.json["counts"]["unknown"], 0);
+
+    // Wichtigstes zuerst: Neustart nötig, dann offen, Fix angekündigt, gefixt, nicht betroffen.
+    let order: Vec<&str> = items
+        .iter()
+        .map(|i| i["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "fixed_installed_reboot_required",
+            "vulnerable",
+            "vulnerable",
+            "fixed",
+            "not_affected"
+        ]
+    );
+
+    // Gruppen, Status, Suche, Sortierung und Seiten (serverseitig).
+    let open = call(&app, Method::GET, &format!("{url}?group=open"), &h, None).await;
+    assert_eq!(open.json["total"], 3);
+    assert_eq!(open.json["counts"]["vulnerable"], 2);
+    let one = call(&app, Method::GET, &format!("{url}?status=fixed"), &h, None).await;
+    assert_eq!(one.json["total"], 1);
+    let q = call(&app, Method::GET, &format!("{url}?q=20004"), &h, None).await;
+    assert_eq!(q.json["total"], 1);
+    assert_eq!(
+        q.json["counts"]["vulnerable"], 2,
+        "Zähler gelten für den ganzen Host"
+    );
+    let asc = call(
+        &app,
+        Method::GET,
+        &format!("{url}?sort=cve&dir=asc&limit=2&offset=1"),
+        &h,
+        None,
+    )
+    .await;
+    let ids: Vec<&str> = asc.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["cve_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["CVE-2026-20002", "CVE-2026-20003"]);
+    assert_eq!(asc.json["total"], 5);
+    // Whitelist: unbekannte Werte werden abgelehnt, nie in SQL übernommen.
+    for bad in ["sort=x;drop", "dir=up", "status=gone", "group=all2"] {
+        let r = call(&app, Method::GET, &format!("{url}?{bad}"), &h, None).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    // Sonderzeichen in der Suche: LIKE-Zeichen und Unicode brechen nichts und treffen nicht alles.
+    for term in ["caf%C3%A9", "%F0%9F%94%A5", "100%25", "a_b", "'%3B--"] {
+        let r = call(&app, Method::GET, &format!("{url}?q={term}"), &h, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{term}");
+        assert_eq!(r.json["total"], 0, "{term}");
+    }
+    // Host-Liste: kompakte CVE-Lage.
+    let hosts = call(&app, Method::GET, "/api/v1/hosts", &h, None).await;
+    assert_eq!(hosts.json[0]["cve_vulnerable"], 2);
+    assert_eq!(hosts.json[0]["cve_reboot"], 1);
+    assert_eq!(hosts.json[0]["cve_fixed"], 1);
+}
+
+/// Eine unvollständige Quelle erzeugt nie neue "gefixt"/"nicht betroffen"-Einträge; bereits Bekanntes bleibt stehen,
+/// der Host zeigt den Hinweis "Bewertung eingeschränkt".
+#[sqlx::test(migrations = "./migrations")]
+async fn host_cves_incomplete_source_creates_no_new_fixed_entries(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-35.35")).await,
+        StatusCode::NO_CONTENT
+    );
+    let now = Utc::now() - Duration::minutes(10);
+    mock.lock().unwrap().ubuntu = vec![ubuntu_cve(
+        "CVE-2026-20002",
+        now,
+        &[("noble", "released", "6.8.0-30.30")],
+    )];
+    refresh::refresh_all(&st).await;
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-20002").await.as_deref(),
+        Some("fixed")
+    );
+
+    // Quelle wird unvollständig (Abruf wird neu aufgebaut): neue CVEs werden nicht als gefixt erfasst.
+    sqlx::query("UPDATE feed_state SET backfill = '{}'::jsonb")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO cves (id) VALUES ('CVE-2026-20009')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO cve_source_status (cve_id, source, source_id, release, package, status, fix_version) \
+         SELECT 'CVE-2026-20009', source, source_id, release, package, status, fix_version \
+         FROM cve_source_status WHERE cve_id = 'CVE-2026-20002' LIMIT 1",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    patchwatch_server::cve::reeval::reevaluate_all(&st)
+        .await
+        .unwrap();
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-20009").await,
+        None,
+        "kein neues gefixt aus unvollständiger Quelle"
+    );
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-20002").await.as_deref(),
+        Some("fixed"),
+        "Bekanntes bleibt"
+    );
+    let cookies = login(&app, &pool).await;
+    let h = hdr(&cookies);
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/hosts/{hid}/cves"),
+        &h,
+        None,
+    )
+    .await;
+    assert!(
+        r.json["issue"].as_str().unwrap().contains("unvollständig"),
+        "{}",
+        r.json
+    );
 }

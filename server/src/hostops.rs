@@ -59,6 +59,35 @@ fn cve_source_missing_sql(h: &str) -> String {
     )
 }
 
+/// Fehlt diesem Host eine nutzbare CVE-Quelle (unvollständig, veraltet, Release ohne Import)? Dieselbe Regel wie für
+/// "CVE-Lage unbekannt"; Proxmox-Hosts und Hosts anderer Distributionen: nein.
+pub async fn cve_source_missing(
+    conn: &mut PgConnection,
+    host_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar(&format!(
+        "SELECT {} FROM hosts WHERE id = $1 AND $2::timestamptz IS NOT NULL",
+        cve_source_missing_sql("hosts")
+    ))
+    .bind(host_id)
+    .bind(now)
+    .fetch_one(conn)
+    .await
+}
+
+/// Gibt es Hosts dieser Distribution, die wegen der Quelle gerade "CVE-Lage unbekannt" zeigen müssten?
+pub async fn kind_has_gated_hosts(pool: &sqlx::PgPool, kind: &str) -> sqlx::Result<bool> {
+    sqlx::query_scalar(&format!(
+        "SELECT EXISTS (SELECT 1 FROM hosts WHERE os_id = $1 AND NOT is_proxmox AND {} )",
+        cve_source_missing_sql("hosts")
+    ))
+    .bind(kind)
+    .bind(Utc::now())
+    .fetch_one(pool)
+    .await
+}
+
 /// Berechnet den Status der Debian-/Ubuntu-Hosts (`kind` = nur diese Distribution) neu. Nötig, wenn sich die
 /// Nutzbarkeit einer Quelle ändert, ohne dass ein Report oder Datenwechsel vorliegt (Abbau fertig, Fehler, Alterung).
 /// `set_status` schreibt und meldet nur bei einer tatsächlichen Änderung.
