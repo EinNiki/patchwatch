@@ -20,7 +20,7 @@ export function feedSummary(feeds: Feed[] | undefined): { info: StatusInfo; labe
   const incomplete = active.filter((f) => f.state === "incomplete");
   if (incomplete.length > 0 && stale.length === 0) {
     const f = incomplete[0]!;
-    return { info: { label: "", tone: "warn", icon: "clock", rank: 0 }, label: `CVE-Feed ${f.label} unvollständig: ${f.backfill?.progress ?? "Rückstand wird abgebaut"}`, ok: false };
+    return { info: { label: "", tone: "warn", icon: "clock", rank: 0 }, label: `CVE-Feed ${f.label} unvollständig: ${f.backfill?.progress ?? "Abruf läuft noch"}`, ok: false };
   }
   if (stale.length > 0) {
     const f = stale[0]!;

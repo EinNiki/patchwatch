@@ -5,47 +5,37 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
-import { CVE_STATUS } from "@/lib/status";
-import type { CveStatus, Host, HostCve, HostCvesResponse } from "@/lib/types";
+import { CVE_STATUS, type IconName } from "@/lib/status";
+import { LEVEL_FILTERS, barSegments, groupTitle, kernelLine, levelWord, openStatusWord, shortText, stateCounts, summarySentence, type FeedNotice, type Tile } from "@/lib/hostCves";
+import type { CveStatus, Host, HostCve, HostCveGroupsResponse, HostCvesResponse } from "@/lib/types";
 import { Marker } from "@/components/DistroChip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Dialog } from "@/components/Dialog";
 import { Mono } from "@/components/Version";
 import { ErrorNote } from "@/components/States";
 import { Linkified } from "@/components/Linkified";
-import { Icon } from "@/components/Icons";
+import { Icon, NavIcon } from "@/components/Icons";
+import { CopyButton } from "@/components/CopyButton";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 const ROW_H = 32; // dichte Zeilen (DESIGN.md): 32 px
-const ROW_H_TOUCH = 64; // unter 768 px: zweizeilig (Zeile 1: ID, Status, Details mit 44-px-Flächen; Zeile 2: Fix-Stand)
+const ROW_H_TOUCH = 64; // unter 768 px: zweizeilig
 const PAGE = 200;
-const VIRTUAL_FROM = 100; // ab dieser Zeilenzahl wird nur der sichtbare Ausschnitt gerendert
+const GROUP_PAGE = 1000; // Obergrenze der API je Anfrage
+const VIRTUAL_FROM = 60; // ab dieser Zeilenzahl wird nur der sichtbare Ausschnitt gerendert
 const PROXMOX_ADVISORIES = "https://forum.proxmox.com/forums/security-advisories.26/";
 
-/** Filter aus der Kopfzeile; `open`/`reboot`/`fixed` gehören je zu einer Spalte, `unknown`/`not_affected` zur Einzelliste. */
-export type CveFilter = "open" | "reboot" | "fixed" | "unknown" | "not_affected";
-const FILTER_STATUS: Record<CveFilter, string> = {
+/** Kacheln der Kopfzeile; jede gehört zu genau einer Liste. */
+export type CveFilter = Tile;
+const TILE_STATUS: Record<Tile, string> = {
   open: "vulnerable,fix_pending",
   reboot: "fixed_installed_reboot_required",
   fixed: "fixed",
-  unknown: "unknown",
   not_affected: "not_affected",
+  unknown: "unknown",
 };
 export function parseCveFilter(v: string | null): CveFilter | null {
-  return v && v in FILTER_STATUS ? (v as CveFilter) : null;
-}
-
-/** Wahr ab 1280 px Breite (Zwei-Spalten-Ansicht); davor Tabs. */
-function useWide(): boolean {
-  const [wide, setWide] = useState(false);
-  useEffect(() => {
-    const m = window.matchMedia("(min-width: 1280px)");
-    const on = () => setWide(m.matches);
-    on();
-    m.addEventListener("change", on);
-    return () => m.removeEventListener("change", on);
-  }, []);
-  return wide;
+  return v && v in TILE_STATUS ? (v as CveFilter) : null;
 }
 
 /** Wahr unter 768 px (Touch-Maße). */
@@ -89,59 +79,64 @@ export function hostState(c: HostCve, running: string | null, proxmox: boolean):
   }
 }
 
-function query(base: { group?: string; status?: string; q: string; limit: number }): string {
-  const p = new URLSearchParams();
-  if (base.status) p.set("status", base.status);
-  else if (base.group) p.set("group", base.group);
-  if (base.q) p.set("q", base.q);
-  p.set("limit", String(base.limit));
-  return p.toString();
-}
+const dateFmt = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+const since = (iso: string | null) => (iso ? dateFmt.format(new Date(iso)) : "–");
 
-export function HostCves({
-  host,
-  initialFilter,
-  feedWarning,
-}: {
-  host: Host;
-  initialFilter: CveFilter | null;
-  feedWarning: string | null;
-}) {
-  const wide = useWide();
+const TILE_META: Record<Tile, { word: string; icon: IconName; tone: "crit" | "warn" | "ok" | "grey" | "unknown"; line: (kernel: string | null) => React.ReactNode }> = {
+  open: { word: "Offen", icon: "crit", tone: "crit", line: () => "Kein Fix installiert" },
+  reboot: { word: "Neustart nötig", icon: "reboot", tone: "warn", line: (k) => (k ? <>Fix installiert, läuft erst nach Neustart auf <span className="whitespace-nowrap">{k}</span></> : "Fix installiert, läuft erst nach Neustart") },
+  fixed: { word: "Gefixt", icon: "ok", tone: "ok", line: () => "Läuft bereits mit Fix" },
+  not_affected: { word: "Nicht betroffen", icon: "ok", tone: "grey", line: () => "Betrifft diesen Kernel nicht" },
+  unknown: { word: "Unbekannt", icon: "unknown", tone: "unknown", line: () => "Quelle liefert keine Aussage" },
+};
+const TONE_BORDER = { crit: "border-crit", warn: "border-warn", ok: "border-ok", grey: "border-fg3", unknown: "border-unknown" } as const;
+const TONE_TEXT = { crit: "text-crit", warn: "text-warn", ok: "text-ok", grey: "text-fg2", unknown: "text-unknown" } as const;
+const TONE_BG = { crit: "bg-crit", warn: "bg-warn", ok: "bg-ok", grey: "bg-fg3", unknown: "bg-unknown" } as const;
+
+export function HostCves({ host, initialFilter, notice }: { host: Host; initialFilter: CveFilter | null; notice: FeedNotice }) {
   // Proxmox: es gibt nur "unbekannt, manuell prüfen"; diese Einträge stehen sofort im Blick (nie grün, kein Alarm).
-  const startFilter = initialFilter ?? (host.is_proxmox ? "unknown" : null);
-  const [filter, setFilter] = useState<CveFilter | null>(startFilter);
-  const [tab, setTab] = useState<"open" | "fixed" | "all">(startFilter === "fixed" ? "fixed" : startFilter ? "all" : "open");
+  const [tile, setTile] = useState<Tile>(initialFilter ?? (host.is_proxmox ? "unknown" : "open"));
   const [text, setText] = useState("");
   const q = useDebounced(text.trim(), 250);
-  const [limits, setLimits] = useState({ left: PAGE, right: PAGE, single: PAGE });
+  const [levelMin, setLevelMin] = useState(0);
+  const [limit, setLimit] = useState(PAGE);
+  const [showAllFixed, setShowAllFixed] = useState(false);
   const [detail, setDetail] = useState<HostCve | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [compact, setCompact] = useState(false);
+  const sentinel = useRef<HTMLDivElement>(null);
 
-  // Welche Listen gerade gebraucht werden: Zwei Spalten (breit), Einzelliste (Tabs oder Filter auf unbekannt/nicht betroffen).
-  const single = filter === "unknown" || filter === "not_affected" || (!wide && tab === "all");
-  const twoCols = wide && !single;
-  const leftStatus = twoCols && (filter === "open" || filter === "reboot") ? FILTER_STATUS[filter] : undefined;
-  const rightStatus = twoCols && filter === "fixed" ? FILTER_STATUS.fixed : undefined;
-  const base = `/hosts/${host.id}/cves?`;
-  const leftPath = twoCols || (!wide && tab === "open" && !single) ? `${base}${query({ group: "open", status: leftStatus, q, limit: limits.left })}` : null;
-  const rightPath = twoCols || (!wide && tab === "fixed" && !single) ? `${base}${query({ group: "fixed", status: rightStatus, q, limit: limits.right })}` : null;
-  const singlePath = single ? `${base}${query({ status: filter ? FILTER_STATUS[filter] : undefined, q, limit: limits.single })}` : null;
-  // Beim Tab-Wechsel bleibt der Gesamtstand sichtbar: `counts` kommt aus jeder Antwort, die Kopfzeile nimmt die jüngste.
-  const left = useApi<HostCvesResponse>(leftPath, 60_000, LIVE, undefined, { keepPrevious: true });
-  const right = useApi<HostCvesResponse>(rightPath, 60_000, LIVE, undefined, { keepPrevious: true });
-  const solo = useApi<HostCvesResponse>(singlePath, 60_000, LIVE, undefined, { keepPrevious: true });
-  const any = solo.data ?? left.data ?? right.data;
-  // Die Kopfzeile bleibt über Wechsel hinweg stehen (kein Springen), solange schon Zähler da waren.
-  const [lastAny, setLastAny] = useState<HostCvesResponse | undefined>(undefined);
-  if (any && any !== lastAny) setLastAny(any);
-  const head = any ?? lastAny;
-  const counts = head?.counts;
-  const issue = head?.issue ?? host.cve_source_issue ?? null;
+  // Kompakte Leiste erst, wenn die große Kopfzeile aus dem Bild gescrollt ist.
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setCompact(!e!.isIntersecting && e!.boundingClientRect.top < 0));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  const grouped = tile === "reboot" || tile === "fixed";
+  const lvl = levelMin > 0 ? `&level_min=${levelMin}` : "";
+  const qs = q ? `&q=${encodeURIComponent(q)}` : "";
+  const base = `/hosts/${host.id}/cves`;
+  // Zähler, Host und Hinweis kommen aus einer eigenen kleinen Anfrage und bleiben beim Kachelwechsel stehen.
+  const head = useApi<HostCvesResponse>(`${base}?limit=1`, 60_000, LIVE, undefined, { keepPrevious: true });
+  const listPath = grouped ? null : `${base}?status=${TILE_STATUS[tile]}${tile === "open" ? "&sort=level&dir=desc" : ""}&limit=${limit}${qs}${lvl}`;
+  const groupsPath = grouped ? `${base}/groups?kind=${tile}${qs}${lvl}` : null;
+  const list = useApi<HostCvesResponse>(listPath, 60_000, LIVE, undefined, { keepPrevious: true });
+  const groups = useApi<HostCveGroupsResponse>(groupsPath, 60_000, LIVE, undefined, { keepPrevious: true });
+
+  const counts = head.data?.counts;
+  const issue = head.data?.issue ?? host.cve_source_issue ?? null;
+  const running = head.data?.host.running_kernel_version ?? head.data?.host.running_kernel ?? host.kernel_package_version ?? host.running_kernel;
+  const newest = head.data?.host.newest_kernel_version ?? host.newest_kernel_version;
+  const rebootNeeded = head.data?.host.reboot_needed ?? host.reboot_needed;
+  const sc = counts ? stateCounts(counts) : null;
+  const numbers: Record<Tile, number> = sc ? { open: sc.open, reboot: sc.reboot, fixed: sc.fixed, not_affected: sc.notAffected, unknown: sc.unknown } : { open: 0, reboot: 0, fixed: 0, not_affected: 0, unknown: 0 };
 
   async function reloadAll() {
-    await Promise.all([left.reload(), right.reload(), solo.reload()]);
+    await Promise.all([head.reload(), list.reload(), groups.reload()]);
   }
 
   async function toggleReview(c: HostCve, checked: boolean) {
@@ -160,28 +155,19 @@ export function HostCves({
     }
   }
 
-  const running = head?.host.running_kernel_version ?? head?.host.running_kernel ?? host.kernel_package_version ?? host.running_kernel;
-  const newest = head?.host.newest_kernel_version ?? host.newest_kernel_version;
-  const open = counts ? counts.vulnerable + counts.fix_pending : 0;
-
-  function toggle(f: CveFilter) {
-    setFilter((cur) => (cur === f ? null : f));
-    setTab(f === "fixed" ? "fixed" : f === "open" || f === "reboot" ? "open" : "all");
+  function pick(t: Tile) {
+    setTile(t);
+    setLimit(PAGE);
+    setShowAllFixed(false);
   }
 
-  const chips: { f: CveFilter; label: string; n: number }[] = counts
-    ? [
-        { f: "open", label: "Offen", n: open },
-        { f: "reboot", label: "Fix da, Neustart nötig", n: counts.fixed_installed_reboot_required },
-        { f: "fixed", label: "Gefixt", n: counts.fixed },
-        { f: "not_affected", label: "Nicht betroffen", n: counts.not_affected },
-        { f: "unknown", label: "Unbekannt", n: counts.unknown },
-      ]
-    : [];
+  const sentence = sc ? summarySentence(sc, { newest, proxmox: host.is_proxmox, restricted: notice.restricted }) : "CVE-Lage wird geladen …";
+  const segments = sc ? barSegments(sc) : [];
+  const bigTiles: Tile[] = ["open", "reboot", "fixed", "not_affected"];
 
   return (
     <section aria-labelledby="cve" className="mb-6">
-      <h2 id="cve" className="mb-2 text-lg font-semibold">
+      <h2 id="cve" className="sr-only">
         CVE-Lage für den laufenden Kernel
       </h2>
       {host.is_proxmox ? (
@@ -194,52 +180,104 @@ export function HostCves({
           . Eine Prüfung („geprüft am“) gilt nur für den Kernel, bei dem sie gesetzt wurde.
         </p>
       ) : null}
-      {issue ? (
-        <p role="note" className="mb-2 border-l-4 border-unknown bg-unknown-soft px-3 py-1.5 text-unknown">
-          <strong className="font-semibold">Bewertung eingeschränkt:</strong> {issue}. Neue Einträge „gefixt“ oder „nicht betroffen“ entstehen erst, wenn die Quelle vollständig ist; bekannte Einträge bleiben.{" "}
-          <Link href="/cves#feeds">Zur Quellen-Tabelle</Link>
+      {notice.text ? (
+        <p role="note" className="mb-2 flex items-start gap-2 border-l-4 border-warn bg-warn-soft px-3 py-1.5 text-warn">
+          <span className="mt-0.5 shrink-0">
+            <Icon name="warn" />
+          </span>
+          <span>
+            {notice.text} <Link href="/cves#feeds">Zur Quellen-Tabelle</Link>
+          </span>
         </p>
-      ) : null}
-      {feedWarning ? (
-        <p role="note" className="mb-2 border-l-4 border-warn bg-warn-soft px-3 py-1.5 text-warn">
-          <strong className="font-semibold">{feedWarning}.</strong> Die Bewertung kann veraltet sein.
+      ) : issue && !notice.restricted ? (
+        <p role="note" className="mb-2 border-l-4 border-unknown bg-unknown-soft px-3 py-1.5 text-unknown">
+          <strong className="font-semibold">Bewertung eingeschränkt:</strong> {issue}. <Link href="/cves#feeds">Zur Quellen-Tabelle</Link>
         </p>
       ) : null}
       {problem ? <ErrorNote message={problem} /> : null}
-      {left.error && !head ? <ErrorNote message={left.error} /> : null}
+      {head.error && !head.data ? <ErrorNote message={head.error} /> : null}
 
-      {/* Zusammenfassung in einer Zeile; bleibt beim Scrollen der Seite stehen. */}
-      <div className="sticky top-(--topbar-h) z-10 -mx-1 mb-2 flex min-h-9 flex-wrap items-center gap-x-1.5 gap-y-1 bg-bg px-1 py-1 md:top-0" role="group" aria-label="Zusammenfassung und Filter">
-        {counts ? (
-          chips.map(({ f, label, n }, i) => (
-            <span key={f} className="inline-flex items-center gap-1.5">
-              {i > 0 ? <span aria-hidden="true" className="text-fg3 max-md:hidden">·</span> : null}
-              <button
-                type="button"
-                aria-pressed={filter === f}
-                onClick={() => toggle(f)}
-                className={`inline-flex h-6 items-center gap-1 rounded-xs border px-1.5 text-xs font-medium max-md:h-11 max-md:px-3 max-md:text-sm ${filter === f ? "border-accent bg-accent text-bg" : "border-line bg-sunk text-fg hover:bg-surface"} ${n === 0 && filter !== f ? "text-fg3" : ""}`}
-              >
-                {label} <span className="tabular-nums font-semibold">{n}</span>
-              </button>
-            </span>
-          ))
-        ) : (
-          <span className="text-xs text-fg3">CVE-Lage wird geladen …</span>
-        )}
-        <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg2">
-          <span>
-            Läuft <Mono>{running ?? "–"}</Mono>
+      {/* Entscheidungshilfe: ein Satz, gestapelter Balken, vier große Kacheln (je eine Liste), Unbekannt klein. */}
+      <p className="mb-1.5 text-base font-semibold" aria-live="polite">
+        {sentence}
+      </p>
+      <div
+        role="img"
+        aria-label={sc ? `Verteilung: ${numbers.open} offen, ${numbers.reboot} Neustart nötig, ${numbers.fixed} gefixt, ${numbers.not_affected} nicht betroffen, ${numbers.unknown} unbekannt` : "Verteilung wird geladen"}
+        className="mb-3 flex h-2.5 w-full overflow-hidden rounded-xs bg-sunk"
+      >
+        {segments.map((sg) => (
+          <span key={sg.tile} style={{ width: `${sg.pct}%` }} className={`${TONE_BG[TILE_META[sg.tile].tone]} ${sg.tile === "unknown" ? "opacity-60" : ""}`} title={`${TILE_META[sg.tile].word}: ${sg.count}`} />
+        ))}
+      </div>
+      <div className="mb-2 grid grid-cols-4 gap-2 max-md:flex max-md:overflow-x-auto max-md:pb-1 max-md:[scroll-snap-type:x_proximity]" role="group" aria-label="CVE-Zustände">
+        {bigTiles.map((t) => (
+          <TileButton
+            key={t}
+            t={t}
+            n={numbers[t]}
+            active={tile === t}
+            loaded={Boolean(sc)}
+            onPick={pick}
+            line={TILE_META[t].line(newest)}
+            sub={t === "open" ? openSub(head.data?.open_with_fix ?? 0, notice.restricted) : null}
+            warn={t === "open" && notice.restricted}
+          />
+        ))}
+        <button
+          type="button"
+          aria-pressed={tile === "unknown"}
+          onClick={() => pick("unknown")}
+          className={`flex shrink-0 flex-col justify-center rounded-xs border px-3 py-1.5 text-left text-xs max-md:min-h-11 ${tile === "unknown" ? "border-2 border-unknown bg-unknown-soft" : "border-line bg-surface hover:bg-sunk"} md:hidden`}
+        >
+          <span className="flex items-center gap-1 font-semibold text-unknown">
+            <Icon name="unknown" size={14} /> Unbekannt <span className="tabular-nums">{sc ? numbers.unknown : "…"}</span>
+            {tile === "unknown" ? <Icon name="ok" size={14} /> : null}
           </span>
-          <span>
-            Neuester installiert <Mono>{newest ?? "–"}</Mono>
-            {head?.host.reboot_needed || host.reboot_needed ? (
-              <span className="ml-1 inline-flex items-center gap-0.5 text-warn">
-                <Icon name="reboot" size={14} /> Neustart nötig
-              </span>
-            ) : null}
-          </span>
+        </button>
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg2">
+        <button
+          type="button"
+          aria-pressed={tile === "unknown"}
+          onClick={() => pick("unknown")}
+          className={`inline-flex h-6 items-center gap-1 rounded-xs border px-1.5 font-medium max-md:hidden ${tile === "unknown" ? "border-2 border-unknown bg-unknown-soft text-unknown" : "border-line bg-surface text-fg2 hover:bg-sunk"}`}
+        >
+          <Icon name="unknown" size={14} /> Unbekannt <span className="tabular-nums font-semibold">{sc ? numbers.unknown : "…"}</span>
+          {tile === "unknown" ? <Icon name="ok" size={14} /> : null}
+        </button>
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>{kernelLine(running ?? null, newest ?? null, Boolean(rebootNeeded))}</span>
+          {rebootNeeded ? <CopyButton text="sudo reboot" label="Befehl kopieren" /> : null}
         </span>
+      </div>
+      <div ref={sentinel} aria-hidden="true" className="h-px" />
+
+      {/* Verkürzte Leiste: erscheint erst beim Scrollen und nimmt keinen Platz ein (keine Layoutsprünge). */}
+      <div className="sticky top-(--topbar-h) z-10 h-0 md:top-0">
+        <div
+          inert={!compact}
+          aria-hidden={!compact}
+          className={`absolute inset-x-0 top-0 flex flex-wrap items-center gap-1.5 border-b border-line bg-bg px-1 py-1 shadow-sm ${compact ? "" : "invisible"}`}
+          role="group"
+          aria-label="Zusammenfassung"
+        >
+          {(["open", "reboot", "fixed", "not_affected", "unknown"] as Tile[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              aria-pressed={tile === t}
+              onClick={() => pick(t)}
+              className={`inline-flex h-6 items-center gap-1 rounded-xs border px-1.5 text-xs font-medium max-md:h-11 max-md:px-3 max-md:text-sm ${tile === t ? `border-2 ${TONE_BORDER[TILE_META[t].tone]} bg-sunk` : "border-line bg-surface hover:bg-sunk"}`}
+            >
+              <span className={TONE_TEXT[TILE_META[t].tone]}>
+                <Icon name={t === "open" && notice.restricted ? "warn" : TILE_META[t].icon} size={14} />
+              </span>
+              {TILE_META[t].word} <span className="tabular-nums font-semibold">{sc ? numbers[t] : "…"}</span>
+              {tile === t ? <Icon name="ok" size={14} /> : null}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -254,114 +292,101 @@ export function HostCves({
             className="min-h-8 w-64 max-w-full rounded-[3px] border border-control bg-sunk px-2 py-1 text-sm text-fg placeholder:text-fg3 max-md:min-h-11"
           />
         </label>
-        {filter ? (
-          <button type="button" className="text-xs underline max-md:min-h-11 max-md:min-w-11" onClick={() => setFilter(null)}>
-            Filter aufheben
+        <div role="group" aria-label="Level-Filter" className="flex flex-wrap gap-1">
+          {LEVEL_FILTERS.map((f) => (
+            <button
+              key={f.min}
+              type="button"
+              aria-pressed={levelMin === f.min}
+              onClick={() => setLevelMin(f.min)}
+              className={`min-h-8 rounded-xs border px-2 text-xs font-medium max-md:min-h-11 max-md:px-3 ${levelMin === f.min ? "border-accent bg-accent text-bg" : "border-line bg-sunk text-fg hover:bg-surface"}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {tile === "fixed" && (groups.data?.groups.length ?? 0) > 1 ? (
+          <button type="button" className="ml-auto text-xs underline max-md:min-h-11 max-md:min-w-11" onClick={() => setShowAllFixed((v) => !v)}>
+            {showAllFixed ? "Alle zuklappen" : "Alle anzeigen"}
           </button>
-        ) : null}
-        {!wide && !single ? (
-          <div role="tablist" aria-label="CVE-Ansicht" className="ml-auto flex gap-1">
-            {(
-              [
-                ["open", "Offen"],
-                ["fixed", "Gefixt"],
-                ["all", "Alle"],
-              ] as const
-            ).map(([t, label]) => (
-              <button
-                key={t}
-                role="tab"
-                type="button"
-                aria-selected={tab === t}
-                onClick={() => {
-                  setTab(t);
-                  if (t !== "all") setFilter(null);
-                }}
-                className={`min-h-8 rounded-xs px-3 text-sm font-medium max-md:min-h-11 ${tab === t ? "bg-accent text-bg" : "bg-sunk text-fg hover:bg-surface"}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        {!wide && single && !filter ? (
-          <div role="tablist" aria-label="CVE-Ansicht" className="ml-auto flex gap-1">
-            {(["open", "fixed", "all"] as const).map((t) => (
-              <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => setTab(t)} className={`min-h-8 rounded-xs px-3 text-sm font-medium max-md:min-h-11 ${tab === t ? "bg-accent text-bg" : "bg-sunk text-fg hover:bg-surface"}`}>
-                {t === "open" ? "Offen" : t === "fixed" ? "Gefixt" : "Alle"}
-              </button>
-            ))}
-          </div>
         ) : null}
       </div>
 
-      {twoCols ? (
-        <div className="grid grid-cols-2 gap-4">
+      <div key={tile} className="tab-fade">
+        {grouped ? (
+          <>
+            {tile === "reboot" ? (
+              <p role="note" className="mb-2 flex items-center gap-2 text-sm text-fg2">
+                <span className="text-warn">
+                  <Icon name="reboot" size={14} />
+                </span>
+                Ein Neustart behebt alle diese CVEs.
+              </p>
+            ) : null}
+            <GroupedList
+              kind={tile}
+              hostId={host.id}
+              state={groups}
+              q={q}
+              lvl={lvl}
+              expandAll={showAllFixed}
+              proxmox={host.is_proxmox}
+              onOpen={setDetail}
+              empty={tile === "reboot" ? "Kein Neustart nötig: kein Fix wartet auf einen Neustart." : "Noch keine gefixten CVEs gespeichert."}
+            />
+          </>
+        ) : (
           <CveList
-            title="Offen und Neustart nötig"
-            state={left}
-            running={running}
+            title={TILE_META[tile].word}
+            state={list}
             proxmox={host.is_proxmox}
+            variant={tile === "open" ? "open" : "plain"}
             onOpen={setDetail}
-            onMore={() => setLimits((l) => ({ ...l, left: l.left + PAGE }))}
-            empty="Nichts offen: kein Fix fehlt und kein Neustart ist nötig."
-            tall
+            onMore={() => setLimit((l) => l + PAGE)}
+            empty={tile === "open" ? (notice.restricted ? "Keine offenen CVEs bekannt, aber die Quelle ist unvollständig." : "Nichts offen.") : host.is_proxmox ? "Setze CVEs auf die Watchlist, dann erscheinen sie hier als „manuell prüfen“." : "Keine Einträge für diese Auswahl."}
           />
-          <CveList
-            title="Gefixt"
-            state={right}
-            running={running}
-            proxmox={host.is_proxmox}
-            onOpen={setDetail}
-            onMore={() => setLimits((l) => ({ ...l, right: l.right + PAGE }))}
-            empty="Noch keine gefixten CVEs gespeichert."
-            tall
-          />
-        </div>
-      ) : (
-        <div key={`${tab}-${filter}`} className="tab-fade">
-          <CveList
-            title={single ? (filter ? CVE_STATUS[filter === "open" ? "vulnerable" : (FILTER_STATUS[filter] as CveStatus)].label : "Alle CVEs") : tab === "open" ? "Offen und Neustart nötig" : "Gefixt"}
-            state={single ? solo : tab === "open" ? left : right}
-            running={running}
-            proxmox={host.is_proxmox}
-            onOpen={setDetail}
-            onMore={() => setLimits((l) => (single ? { ...l, single: l.single + PAGE } : tab === "open" ? { ...l, left: l.left + PAGE } : { ...l, right: l.right + PAGE }))}
-            empty={host.is_proxmox ? "Setze CVEs auf die Watchlist, dann erscheinen sie hier als „manuell prüfen“." : "Keine Einträge für diese Auswahl."}
-            tall={wide}
-          />
-        </div>
-      )}
+        )}
+      </div>
 
       <Dialog open={detail !== null} title={detail?.cve_id ?? "CVE"} onClose={() => setDetail(null)}>
-        {detail ? <Detail c={detail} host={host} running={running} busy={busy === detail.cve_id} onReview={(v) => void toggleReview(detail, v)} /> : null}
+        {detail ? <Detail c={detail} host={host} running={running ?? null} busy={busy === detail.cve_id} onReview={(v) => void toggleReview(detail, v)} /> : null}
       </Dialog>
     </section>
   );
 }
 
-function CveList({
-  title,
-  state,
-  running,
-  proxmox,
-  onOpen,
-  onMore,
-  empty,
-  tall,
-}: {
-  title: string;
-  state: ReturnType<typeof useApi<HostCvesResponse>>;
-  running: string | null;
-  proxmox: boolean;
-  onOpen: (c: HostCve) => void;
-  onMore: () => void;
-  empty: string;
-  tall: boolean;
-}) {
-  const items = useMemo(() => state.data?.items ?? [], [state.data]);
-  const total = state.data?.total ?? 0;
-  const rowH = useNarrow() ? ROW_H_TOUCH : ROW_H;
+function openSub(withFix: number, restricted: boolean): string {
+  const base = withFix > 0 ? `${withFix} davon mit Fix im Archiv` : "Fix noch nicht verfügbar";
+  return restricted ? `${base} · kann unvollständig sein` : base;
+}
+
+function TileButton({ t, n, active, loaded, onPick, line, sub, warn }: { t: Tile; n: number; active: boolean; loaded: boolean; onPick: (t: Tile) => void; line: React.ReactNode; sub: string | null; warn: boolean }) {
+  const m = TILE_META[t];
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onPick(t)}
+      className={`flex min-w-0 flex-col gap-0.5 rounded-xs border bg-surface px-3 py-2 text-left hover:bg-sunk max-md:min-h-11 max-md:w-56 max-md:shrink-0 ${active ? `border-2 ${TONE_BORDER[m.tone]} bg-sunk` : "border-line"}`}
+    >
+      <span className={`flex items-center gap-1.5 text-sm font-semibold ${TONE_TEXT[m.tone]}`}>
+        <Icon name={warn ? "warn" : m.icon} size={16} />
+        {m.word}
+        {active ? (
+          <span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium text-fg2">
+            <Icon name="ok" size={14} /> Angezeigt
+          </span>
+        ) : null}
+      </span>
+      <span className="text-2xl font-semibold leading-none tabular-nums text-fg">{loaded ? n.toLocaleString("de-DE") : "…"}</span>
+      <span className="text-xs text-fg2">{line}</span>
+      {sub ? <span className="text-xs text-fg3">{sub}</span> : null}
+    </button>
+  );
+}
+
+/** Virtualisierte, dichte Zeilenliste mit fester Höhe und eigener Bildlaufleiste. */
+function VirtualRows({ items, rowH, height, label, render }: { items: HostCve[]; rowH: number; height: string; label: string; render: (c: HostCve, style: React.CSSProperties | undefined) => React.ReactNode }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState(0);
   const [viewH, setViewH] = useState(480);
@@ -376,36 +401,70 @@ function CveList({
   const virtual = items.length > VIRTUAL_FROM;
   const first = virtual ? Math.max(0, Math.floor(scroll / rowH) - 8) : 0;
   const last = virtual ? Math.min(items.length, Math.ceil((scroll + viewH) / rowH) + 8) : items.length;
+  return (
+    <div ref={scroller} onScroll={(e) => setScroll(e.currentTarget.scrollTop)} tabIndex={0} role="region" aria-label={label} className="overflow-y-auto overflow-x-hidden rounded-xs border border-line bg-surface" style={{ height }}>
+      <ul className="m-0 list-none p-0" style={virtual ? { position: "relative", height: items.length * rowH } : undefined}>
+        {items.slice(first, last).map((c, i) => render(c, virtual ? { position: "absolute", top: (first + i) * rowH, left: 0, right: 0 } : undefined))}
+      </ul>
+    </div>
+  );
+}
+
+/** Spaltenraster der Zeilen: ID | Level | Text | [Status] | [Fix-Version] | Seit | Details. */
+function gridCols(variant: "open" | "plain" | "group"): string {
+  const fix = "minmax(8rem,11rem)";
+  const status = "9.5rem";
+  const cols = ["9.5rem", "6.5rem", "minmax(0,1fr)"];
+  if (variant === "open") cols.push(status);
+  if (variant === "group") cols.push(fix);
+  if (variant === "plain") cols.push(status, fix);
+  cols.push("5.5rem", "1.5rem");
+  return cols.join(" ");
+}
+
+function ListHead({ variant }: { variant: "open" | "plain" | "group" }) {
+  return (
+    <div className="mb-px hidden items-center gap-2 px-2 text-xs font-semibold text-fg3 md:grid" style={{ gridTemplateColumns: gridCols(variant) }}>
+      <span>CVE</span>
+      <span>Level</span>
+      <span>Beschreibung</span>
+      {variant !== "group" ? <span>Status</span> : null}
+      {variant !== "open" ? <span>Fix-Version</span> : null}
+      <span>Seit</span>
+      <span className="sr-only">Details</span>
+    </div>
+  );
+}
+
+const LIST_H = "clamp(17rem, calc(100dvh - 26rem), 48rem)";
+
+function CveList({ title, state, proxmox, variant, onOpen, onMore, empty }: { title: string; state: ReturnType<typeof useApi<HostCvesResponse>>; proxmox: boolean; variant: "open" | "plain"; onOpen: (c: HostCve) => void; onMore: () => void; empty: string }) {
+  const items = useMemo(() => state.data?.items ?? [], [state.data]);
+  const total = state.data?.total ?? 0;
+  const rowH = useNarrow() ? ROW_H_TOUCH : ROW_H;
   const rest = total - items.length;
   const loading = !state.data;
-
   return (
     <div className="min-w-0">
       <h3 className="mb-1 flex items-baseline gap-2 text-sm font-semibold">
-        {title} <span className="tabular-nums text-xs font-normal text-fg3">{loading ? "…" : total}</span>
+        {title} <span className="tabular-nums text-xs font-normal text-fg3">{loading ? "…" : total.toLocaleString("de-DE")}</span>
       </h3>
-      {/* Feste Höhe passend zum Fenster; innen scrollbar (kein Seitenscroll beim Durchsehen). */}
-      <div
-        ref={scroller}
-        onScroll={(e) => setScroll(e.currentTarget.scrollTop)}
-        tabIndex={0}
-        role="region"
-        aria-label={`${title}, Liste`}
-        className="overflow-y-auto overflow-x-hidden rounded-xs border border-line bg-surface"
-        style={{ height: tall ? "clamp(17rem, calc(100dvh - 22rem), 48rem)" : "clamp(14rem, 60dvh, 36rem)" }}
-      >
-        {loading ? (
-          <div className="p-3 text-xs text-fg3">Lädt …</div>
-        ) : items.length === 0 ? (
-          <p className="p-3 text-sm text-fg2">{empty}</p>
-        ) : (
-          <ul className="m-0 list-none p-0" style={virtual ? { position: "relative", height: items.length * rowH } : undefined}>
-            {items.slice(first, last).map((c, i) => (
-              <Row key={c.cve_id} c={c} h={rowH} running={running} proxmox={proxmox} onOpen={onOpen} style={virtual ? { position: "absolute", top: (first + i) * rowH, left: 0, right: 0 } : undefined} />
-            ))}
-          </ul>
-        )}
-      </div>
+      <ListHead variant={variant} />
+      {loading ? (
+        <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3" style={{ height: LIST_H }}>
+          Lädt …
+        </div>
+      ) : items.length === 0 ? (
+        <p className="rounded-xs border border-line bg-surface p-3 text-sm text-fg2">{empty}</p>
+      ) : (
+        <VirtualRows
+          items={items}
+          rowH={rowH}
+          height={LIST_H}
+          label={`${title}, Liste`}
+          render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} variant={variant} proxmox={proxmox} onOpen={onOpen} style={style} />}
+        />
+      )}
       {rest > 0 ? (
         <button type="button" className="mt-1 text-xs underline max-md:min-h-11 max-md:min-w-11" onClick={onMore}>
           {rest} weitere anzeigen
@@ -415,37 +474,133 @@ function CveList({
   );
 }
 
-function Row({ c, h, running, proxmox, onOpen, style }: { c: HostCve; h: number; running: string | null; proxmox: boolean; onOpen: (c: HostCve) => void; style?: React.CSSProperties }) {
-  const state = hostState(c, running, proxmox);
-  const text = c.description ?? c.reason;
+function GroupedList({ kind, hostId, state, q, lvl, expandAll, proxmox, onOpen, empty }: { kind: "reboot" | "fixed"; hostId: number; state: ReturnType<typeof useApi<HostCveGroupsResponse>>; q: string; lvl: string; expandAll: boolean; proxmox: boolean; onOpen: (c: HostCve) => void; empty: string }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const groups = state.data?.groups ?? [];
+  if (!state.data) return <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3">Lädt …</div>;
+  if (groups.length === 0) return <p className="rounded-xs border border-line bg-surface p-3 text-sm text-fg2">{empty}</p>;
+  const key = (g: { fix_version: string | null }) => g.fix_version ?? "";
+  // Neustart: bei nur einer Gruppe steht sie sofort offen; Gefixt bleibt eingeklappt.
+  const isOpen = (g: { fix_version: string | null }) => open[key(g)] ?? (expandAll || (kind === "reboot" && groups.length === 1));
   return (
-    <li style={{ height: h, ...style }} className="flex items-center gap-2 border-b border-line px-2 text-xs last:border-b-0 max-md:flex-wrap max-md:content-center max-md:gap-x-2 max-md:gap-y-0">
-      <Link
-        href={`/cves/${c.cve_id}`}
-        className="mono inline-flex shrink-0 items-center font-medium max-md:min-h-11"
-        onPointerEnter={() => prefetchApi(`/cves/${c.cve_id}`)}
-        onFocus={() => prefetchApi(`/cves/${c.cve_id}`)}
-      >
-        {c.cve_id}
-      </Link>
+    <div className="space-y-1">
+      {groups.map((g) => {
+        const o = isOpen(g);
+        const id = `grp-${kind}-${key(g).replace(/[^a-zA-Z0-9]/g, "_") || "none"}`;
+        return (
+          <div key={key(g)} className="rounded-xs border border-line bg-surface">
+            <h3 className="m-0">
+              <button
+                type="button"
+                aria-expanded={o}
+                aria-controls={id}
+                onClick={() => setOpen((cur) => ({ ...cur, [key(g)]: !o }))}
+                className="flex min-h-8 w-full items-center gap-2 px-2 text-left text-sm font-semibold hover:bg-sunk max-md:min-h-11"
+              >
+                <span aria-hidden="true" className={`inline-flex transition-transform duration-100 ${o ? "" : "-rotate-90"}`}>
+                  <NavIcon name="chevron" size={14} />
+                </span>
+                <span>
+                  {g.fix_version ? (
+                    <>
+                      Behoben in <Mono>{g.fix_version}</Mono>: {g.count.toLocaleString("de-DE")} {g.count === 1 ? "CVE" : "CVEs"}
+                    </>
+                  ) : (
+                    groupTitle(null, g.count)
+                  )}
+                </span>
+              </button>
+            </h3>
+            <div id={id} hidden={!o}>
+              {o ? <GroupItems hostId={hostId} kind={kind} fix={g.fix_version} count={g.count} q={q} lvl={lvl} proxmox={proxmox} onOpen={onOpen} /> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GroupItems({ hostId, kind, fix, count, q, lvl, proxmox, onOpen }: { hostId: number; kind: "reboot" | "fixed"; fix: string | null; count: number; q: string; lvl: string; proxmox: boolean; onOpen: (c: HostCve) => void }) {
+  const [limit, setLimit] = useState(GROUP_PAGE);
+  // Einträge ohne Fix-Version haben keinen Gruppenfilter; sie stehen in der Statusliste.
+  const fv = fix ? `&fix_version=${encodeURIComponent(fix)}` : "";
+  const path = `/hosts/${hostId}/cves?status=${TILE_STATUS[kind]}${fv}&sort=level&dir=desc&limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}${lvl}`;
+  const s = useApi<HostCvesResponse>(path, 60_000, LIVE, undefined, { keepPrevious: true });
+  const rowH = useNarrow() ? ROW_H_TOUCH : ROW_H;
+  const items = s.data?.items ?? [];
+  const rest = (s.data?.total ?? count) - items.length;
+  if (!s.data) return <div className="border-t border-line p-2 text-xs text-fg3">Lädt …</div>;
+  const h = `${Math.min(Math.max(items.length, 1), 12) * rowH + 2}px`;
+  return (
+    <div className="border-t border-line p-1">
+      <ListHead variant="group" />
+      <VirtualRows
+        items={items}
+        rowH={rowH}
+        height={h}
+        label={`${fix ?? "Ohne Fix-Version"}, Liste`}
+        render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} variant="group" proxmox={proxmox} onOpen={onOpen} style={style} />}
+      />
+      {rest > 0 ? (
+        <button type="button" className="mt-1 text-xs underline max-md:min-h-11 max-md:min-w-11" onClick={() => setLimit((l) => l + GROUP_PAGE)}>
+          {rest} weitere anzeigen
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number; variant: "open" | "plain" | "group"; proxmox: boolean; onOpen: (c: HostCve) => void; style?: React.CSSProperties }) {
+  const full = c.description ?? c.reason;
+  const text = shortText(full) || c.reason;
+  const narrow = h > ROW_H;
+  const st = CVE_STATUS[c.status];
+  const statusLabel = proxmox && c.status === "unknown" ? (c.reviewed_at ? "Unbekannt: geprüft" : "Unbekannt: manuell prüfen") : c.status === "vulnerable" || c.status === "fix_pending" ? openStatusWord(c) : shortLabel(c.status);
+  const lvlTone = c.level >= 8 ? "text-crit" : c.level >= 5 ? "text-warn" : "text-fg2";
+  const link = (
+    <Link href={`/cves/${c.cve_id}`} className="mono inline-flex items-center gap-1 font-medium max-md:min-h-11" onPointerEnter={() => prefetchApi(`/cves/${c.cve_id}`)} onFocus={() => prefetchApi(`/cves/${c.cve_id}`)}>
+      {c.cve_id}
       {c.watched ? <Marker>Watchlist</Marker> : null}
-      <span className="hidden min-w-0 flex-1 truncate text-fg3 md:block" title={text}>
+    </Link>
+  );
+  const more = (
+    <button type="button" onClick={() => onOpen(c)} aria-label={`Details zu ${c.cve_id}`} className="inline-flex size-6 shrink-0 items-center justify-center rounded-xs border border-control text-fg2 hover:bg-sunk max-md:size-11">
+      <span aria-hidden="true">⋯</span>
+    </button>
+  );
+  const fixCell = c.fix_version ? <Mono>{c.fix_version}</Mono> : <span className="text-fg3">–</span>;
+  if (narrow) {
+    // Mobil gestapelt: Zeile 1 ID, Level, Details; Zeile 2 Status und Fix-Stand.
+    return (
+      <li style={{ height: h, ...style }} className="flex flex-wrap content-center items-center gap-x-2 border-b border-line px-2 text-xs">
+        {link}
+        <span className={`font-medium ${lvlTone}`}>{levelWord(c.level)}</span>
+        <span className="ml-auto">{more}</span>
+        <span className="basis-full truncate text-fg3" title={full}>
+          {[variant !== "group" ? statusLabel : null, c.fix_version, `seit ${since(c.published_at)}`].filter(Boolean).join(" · ")}
+        </span>
+      </li>
+    );
+  }
+  return (
+    <li style={{ height: h, gridTemplateColumns: gridCols(variant), ...style }} className="grid items-center gap-2 border-b border-line px-2 text-xs last:border-b-0">
+      {link}
+      <span className={`font-medium ${lvlTone}`} title={c.level ? `Level ${c.level}/10` : undefined}>
+        {levelWord(c.level)}
+        {c.level ? <span className="ml-1 tabular-nums text-fg3">{c.level}</span> : null}
+      </span>
+      <span className="min-w-0 truncate text-fg2" title={full}>
         {text}
       </span>
-      <span className="ml-auto min-w-0 max-w-[14rem] shrink truncate text-fg2 max-md:order-last max-md:ml-0 max-md:max-w-none max-md:basis-full max-md:text-fg3" title={state}>
-        {state}
-      </span>
-      <span className="shrink-0 max-md:ml-auto">
-        <StatusBadge info={CVE_STATUS[c.status]} label={proxmox && c.status === "unknown" ? (c.reviewed_at ? "Unbekannt: geprüft" : "Unbekannt: manuell prüfen") : shortLabel(c.status)} />
-      </span>
-      <button
-        type="button"
-        onClick={() => onOpen(c)}
-        aria-label={`Details zu ${c.cve_id}`}
-        className="inline-flex size-6 shrink-0 items-center justify-center rounded-xs border border-control text-fg2 hover:bg-sunk max-md:size-11"
-      >
-        <span aria-hidden="true">⋯</span>
-      </button>
+      {variant !== "group" ? (
+        <span className="min-w-0">
+          <StatusBadge info={st} label={statusLabel} />
+        </span>
+      ) : null}
+      {variant === "plain" || variant === "group" ? <span className="min-w-0 whitespace-nowrap">{fixCell}</span> : null}
+      <span className="tabular-nums text-fg3">{since(c.published_at)}</span>
+      {more}
     </li>
   );
 }

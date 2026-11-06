@@ -12,7 +12,7 @@ import { Icon } from "@/components/Icons";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
-import { feedSummary } from "@/components/FeedStatus";
+import { feedNotice } from "@/lib/hostCves";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 
@@ -47,7 +47,7 @@ export default function HostDetailPage() {
 
   const info = HOST_STATUS[h.status];
   const newer = h.newest_kernel && h.running_kernel && h.newest_kernel !== h.running_kernel;
-  const feed = feedSummary(feeds.data);
+  const notice = feedNotice(feeds.data, h.os_id, h.os_codename, h.cve_source_issue ?? null);
 
   return (
     <>
@@ -65,7 +65,7 @@ export default function HostDetailPage() {
       </div>
 
       {/* Die CVE-Lage steht oben und über die volle Breite (zwei Spalten ab 1280 px), damit sie ohne Seitenscroll sichtbar ist. */}
-      <HostCves host={h} initialFilter={initialFilter} feedWarning={feed && !feed.ok ? feed.label : null} />
+      <HostCves host={h} initialFilter={initialFilter} notice={notice} />
 
       {/* Ab 1600 px: Updates und Verlauf links, Stand rechts (DOM-Reihenfolge bleibt Stand zuerst). */}
       <div className="wide:grid wide:grid-cols-[minmax(0,1fr)_26rem] wide:gap-x-8">

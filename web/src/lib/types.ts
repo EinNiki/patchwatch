@@ -89,6 +89,19 @@ export interface HostCve {
   /** Fix-Version und Name der zuständigen Quelle. */
   fix_version: string | null;
   source: string | null;
+  /** Seit wann die CVE öffentlich bekannt ist. */
+  published_at: string | null;
+}
+
+export interface CveGroup {
+  /** `null`: Eintrag ohne Fix-Version. */
+  fix_version: string | null;
+  count: number;
+}
+
+export interface HostCveGroupsResponse {
+  groups: CveGroup[];
+  total: number;
 }
 
 export interface HostCvesResponse {
@@ -97,6 +110,8 @@ export interface HostCvesResponse {
   total: number;
   /** Zähler je Zustand für den ganzen Host (unabhängig von Filter und Suche). */
   counts: Record<CveStatus, number>;
+  /** Offene CVEs, für die eine Quelle bereits eine Fix-Version kennt (im Archiv, nicht installiert). */
+  open_with_fix: number;
   /** Warum die Bewertung eingeschränkt ist (Quelle unvollständig/veraltet), sonst null. */
   issue: string | null;
   host: {
