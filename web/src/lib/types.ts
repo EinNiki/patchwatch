@@ -207,6 +207,10 @@ export interface Feed {
   last_error: string | null;
   last_error_at: string | null;
   consecutive_failures: number;
+  /** Fehlläufe in Folge, Zeitpunkt des nächsten Versuchs und der Fehler als verständlicher Text. */
+  failed_runs?: number;
+  next_attempt_at?: string | null;
+  error_text?: string | null;
   /** Nur bei state "incomplete": Fortschritt des Rückstandsabbaus. */
   backfill: { pages_done: number; runs: number; next_offset: number; pages_per_run: number | null; since: string; progress: string; initial?: boolean; position_pages?: number; est_pages?: number | null; target?: string } | null;
 }

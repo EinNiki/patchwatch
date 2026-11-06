@@ -270,10 +270,7 @@ async fn fetch_watched(
             r = &mut fetch => return r,
             () = tokio::time::sleep(tick) => {
                 if ctx.progress.idle() > stall {
-                    return Err(FeedError::Network(format!(
-                        "Lauf ohne Fortschritt seit {} Minuten abgebrochen",
-                        stall.as_secs().div_ceil(60)
-                    )));
+                    return Err(FeedError::Stalled(stall.as_secs().div_ceil(60)));
                 }
             }
         }

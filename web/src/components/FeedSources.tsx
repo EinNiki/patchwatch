@@ -163,10 +163,11 @@ export function FeedSources() {
                   </td>
                   <td className={`max-w-[24rem] max-md:max-w-none ${f.last_error || f.backfill ? "" : "max-md:hidden"}`}>
                     {f.backfill ? <div className="text-warn">{f.backfill.progress}</div> : null}
+                    {f.enabled && f.next_attempt_at ? <div className="text-xs text-fg3">Nächster Versuch: {absTime(f.next_attempt_at)}</div> : null}
                     {f.last_error ? (
                       <span className="text-warn">
-                        {f.last_error}
-                        {f.consecutive_failures > 0 ? <span className="text-fg3"> ({f.consecutive_failures}× in Folge)</span> : null}
+                        {f.error_text ?? f.last_error}
+                        {(f.failed_runs ?? f.consecutive_failures) > 0 ? <span className="text-fg3"> ({f.failed_runs ?? f.consecutive_failures}× in Folge)</span> : null}
                       </span>
                     ) : f.backfill ? null : (
                       <span className="text-fg3">–</span>

@@ -19,6 +19,9 @@ struct FeedDb {
     consecutive_failures: i32,
     /// Offener Rückstandsabbau (siehe `cve::Backfill`).
     backfill: Option<Value>,
+    /// Fehlläufe in Folge (Wiederholungsleiter) und frühester nächster Versuch danach.
+    retry_step: i32,
+    next_attempt_at: Option<DateTime<Utc>>,
 }
 
 /// Fortschritt eines Rückstandsabbaus oder Erstabrufs für die Feed-Tabelle.
@@ -47,15 +50,18 @@ fn backfill_view(raw: &Value, pages_per_run: Option<u32>) -> Option<BackfillView
     let position = b.next_offset / crate::cve::ubuntu::PAGE as u32;
     let runs = format!("{} {}", b.runs, if b.runs == 1 { "Lauf" } else { "Läufe" });
     let progress = if b.initial {
-        let of = b.est_pages.map_or(format!("{position} Seiten"), |m| {
-            format!("{position} von ca. {m} Seiten")
-        });
+        // Die Gesamtzahl ist nur eine Schätzung (die Liste ändert sich laufend) und so gekennzeichnet.
+        let of = b
+            .est_pages
+            .map_or(format!("Seite {position} (Gesamtzahl unbekannt)"), |m| {
+                format!("Seite {position} von etwa {m} (Schätzung)")
+            });
         let horizon = if b.target.starts_with("1970") {
             "gesamte Liste".to_owned()
         } else {
             format!("Horizont ab {}", b.target.get(..10).unwrap_or(&b.target))
         };
-        format!("Erstabruf läuft, {of} ({horizon}; {runs} bisher{per})")
+        format!("Erstabruf läuft: {of}; {horizon}; {runs} seit Beginn{per}")
     } else {
         format!(
             "Rückstand wird abgebaut: {} Seiten in {} geladen{per}",
@@ -111,8 +117,46 @@ pub struct FeedRow {
     last_error: Option<String>,
     last_error_at: Option<DateTime<Utc>>,
     consecutive_failures: i32,
+    /// Fehlläufe in Folge (setzt sich mit dem nächsten erfolgreichen Lauf zurück).
+    failed_runs: i32,
+    /// Wann der nächste Abruf frühestens stattfindet (nach Fehllauf: Wiederholungsleiter).
+    next_attempt_at: Option<DateTime<Utc>>,
+    /// Letzter Fehler in verständlichem Text, bei Bedarf mit dem nächsten Versuch.
+    error_text: Option<String>,
     /// Fortschritt, solange der Feed unvollständig ist.
     backfill: Option<BackfillView>,
+}
+
+/// Fehlertext für Menschen: was die Quelle gemeldet hat und wann es weitergeht.
+fn plain_error(raw: &str, label: &str, next_in: Option<Duration>) -> String {
+    let m = raw.strip_prefix("Lauf unterbrochen: ").unwrap_or(raw);
+    let what = if m == "HTTP 429" {
+        format!("{label} drosselt (429, zu viele Anfragen)")
+    } else if let Some(code) = m.strip_prefix("HTTP ") {
+        format!("{label} meldet {code}")
+    } else if m.starts_with("Netzwerkfehler") {
+        format!("Verbindung zu {label} fehlgeschlagen")
+    } else if m.starts_with("Lauf ohne Fortschritt") {
+        format!("Abruf von {label} hing und wurde abgebrochen")
+    } else {
+        m.to_owned()
+    };
+    let interrupted = if raw.starts_with("Lauf unterbrochen: ") {
+        ", Lauf unterbrochen (bisherige Seiten bleiben gespeichert)"
+    } else {
+        ""
+    };
+    match next_in {
+        Some(d) if d >= Duration::minutes(1) => {
+            let n = (d.num_seconds() + 59) / 60;
+            format!(
+                "{what}{interrupted}, nächster Versuch in {n} {}",
+                if n == 1 { "Minute" } else { "Minuten" }
+            )
+        }
+        Some(_) => format!("{what}{interrupted}, nächster Versuch gleich"),
+        None => format!("{what}{interrupted}"),
+    }
 }
 
 /// Zustand eines Feeds; ein Feed ist nie "ok", solange der letzte Abruf fehlschlug, er zu lange her ist oder er abgeschaltet ist.
@@ -139,7 +183,7 @@ fn classify(
 pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<FeedRow>>> {
     let sources = sources::list(&st).await?;
     let rows: Vec<FeedDb> = sqlx::query_as(
-        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill FROM feed_state",
+        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill, retry_step, next_attempt_at FROM feed_state",
     )
     .fetch_all(&st.pool)
     .await?;
@@ -156,11 +200,27 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             last_error_at: None,
             consecutive_failures: 0,
             backfill: None,
+            retry_step: 0,
+            next_attempt_at: None,
         };
         let f = f.unwrap_or(&empty);
         let interval = crate::schedule::feed_interval_minutes(&st.pool, &src.id, default).await;
         // Ohne Erfolg seit 3 Intervallen gilt ein Feed auch dann als veraltet, wenn kein Fehler gespeichert wurde.
         let (state, stale_since) = classify(f, src.enabled, now, Duration::minutes(3 * interval));
+        // Nächster Versuch: nach einem Fehllauf die Leiter, sonst letzter Versuch + Intervall (höchstens so lange).
+        let by_interval = f.last_attempt_at.map(|t| t + Duration::minutes(interval));
+        let next_attempt_at = if src.enabled {
+            match (f.next_attempt_at, by_interval) {
+                (Some(n), Some(i)) => Some(n.min(i)),
+                (n, i) => n.or(i),
+            }
+        } else {
+            None
+        };
+        let error_text = f
+            .last_error
+            .as_deref()
+            .map(|e| plain_error(e, &src.label, next_attempt_at.map(|n| n - now)));
         out.push(FeedRow {
             kind_type: src.kind.clone(),
             label: src.label.clone(),
@@ -187,6 +247,9 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             last_error: f.last_error.clone(),
             last_error_at: f.last_error_at,
             consecutive_failures: f.consecutive_failures,
+            failed_runs: f.retry_step,
+            next_attempt_at,
+            error_text,
             backfill: f.backfill.as_ref().and_then(|b| {
                 backfill_view(
                     b,
@@ -561,6 +624,8 @@ mod tests {
                 last_error_at: None,
                 consecutive_failures: failures,
                 backfill: None,
+                retry_step: 0,
+                next_attempt_at: None,
             },
             now,
         )
@@ -598,5 +663,25 @@ mod tests {
         f.backfill = marker;
         assert_eq!(classify(&f, true, now, max).0, "incomplete");
         assert_eq!(classify(&f, false, now, max).0, "disabled");
+    }
+
+    #[test]
+    fn plain_error_text_names_source_status_and_next_attempt() {
+        let m =
+            |raw: &str, mins: Option<i64>| plain_error(raw, "Ubuntu", mins.map(Duration::minutes));
+        assert_eq!(
+            m("HTTP 503", Some(12)),
+            "Ubuntu meldet 503, nächster Versuch in 12 Minuten"
+        );
+        assert_eq!(
+            m("HTTP 429", Some(1)),
+            "Ubuntu drosselt (429, zu viele Anfragen), nächster Versuch in 1 Minute"
+        );
+        assert!(m("Lauf unterbrochen: HTTP 503", Some(2)).contains("Lauf unterbrochen"));
+        assert!(
+            m("Netzwerkfehler: timeout", None).starts_with("Verbindung zu Ubuntu fehlgeschlagen")
+        );
+        assert!(m("HTTP 503", Some(0)).ends_with("nächster Versuch gleich"));
+        assert!(m("Lauf ohne Fortschritt seit 30 Minuten abgebrochen", None).contains("hing"));
     }
 }
