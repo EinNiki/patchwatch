@@ -28,7 +28,11 @@ impl AppState {
     pub fn new(pool: PgPool, cfg: Config) -> anyhow::Result<Self> {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(20))
-            .user_agent(concat!("patchwatch-server/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                "patchwatch-server/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/EinNiki/patchwatch)"
+            ))
             .build()?;
         Ok(Self {
             pool,

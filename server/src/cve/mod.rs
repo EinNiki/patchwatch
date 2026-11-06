@@ -128,6 +128,8 @@ pub enum FetchOutcome {
         records: Vec<Record>,
         state: FeedState,
         interrupted: Option<String>,
+        /// Wunsch der Gegenseite (`Retry-After`) für den nächsten Versuch, falls der Abbruch eine Drosselung war.
+        retry_after: Option<std::time::Duration>,
     },
 }
 
@@ -177,6 +179,8 @@ pub struct FetchCtx {
     pub hosts: Vec<HostRef>,
     /// Nur Anreicherungsquellen (NVD): bereits bekannte CVEs ohne Daten dieser Quelle, Watchlist zuerst.
     pub enrich: Vec<String>,
+    /// Lebenszeichen für den Watchdog des Schedulers (Fortschritt melden mit `progress.beat()`).
+    pub progress: Heartbeat,
 }
 
 /// Gemeinsame Schnittstelle aller Feeds; weitere Quellen (Red Hat, Alpine …) kommen als eigener Adapter dazu.
@@ -277,5 +281,33 @@ mod tests {
             assert_eq!(SourceStatus::parse(s.as_str()), s);
         }
         assert_eq!(SourceStatus::parse("quatsch"), SourceStatus::Unknown);
+    }
+}
+
+/// Lebenszeichen eines laufenden Abrufs: Quellen melden damit Fortschritt (z. B. eine geladene Seite). Der
+/// Scheduler gibt einen Lauf frei, wenn das letzte Lebenszeichen zu lange zurückliegt.
+#[derive(Debug, Clone)]
+pub struct Heartbeat(std::sync::Arc<std::sync::Mutex<std::time::Instant>>);
+
+impl Default for Heartbeat {
+    fn default() -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(
+            std::time::Instant::now(),
+        )))
+    }
+}
+
+impl Heartbeat {
+    pub fn beat(&self) {
+        if let Ok(mut t) = self.0.lock() {
+            *t = std::time::Instant::now();
+        }
+    }
+
+    /// Zeit seit dem letzten Lebenszeichen.
+    pub fn idle(&self) -> std::time::Duration {
+        self.0
+            .lock()
+            .map_or(std::time::Duration::ZERO, |t| t.elapsed())
     }
 }

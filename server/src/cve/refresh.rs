@@ -2,7 +2,9 @@
 //! und im UI sichtbar ("veraltet seit …"); ein Feed wird nie stillschweigend als gesund gewertet.
 
 use super::http::jitter;
-use super::{ingest, reeval, sources, CveSource, FeedState, FetchCtx, FetchOutcome, Record};
+use super::{
+    ingest, reeval, sources, CveSource, FeedError, FeedState, FetchCtx, FetchOutcome, Record,
+};
 use crate::state::AppState;
 use anyhow::Result;
 use std::time::Duration;
@@ -89,6 +91,7 @@ async fn context(state: &AppState, id: &str, kind: &str) -> Result<FetchCtx> {
         watch_missing,
         hosts,
         enrich,
+        progress: super::Heartbeat::default(),
     })
 }
 
@@ -113,7 +116,12 @@ async fn gate_hosts(state: &AppState, kind: Option<&str>) {
     }
 }
 
-async fn record_failure(state: &AppState, name: &str, error: &str) -> Result<()> {
+async fn record_failure(
+    state: &AppState,
+    name: &str,
+    error: &str,
+    retry_after: Option<Duration>,
+) -> Result<()> {
     let msg: String = error.chars().take(500).collect();
     let failures: i32 = sqlx::query_scalar(
         "UPDATE feed_state SET last_error = $2, last_error_at = now(), consecutive_failures = consecutive_failures + 1 \
@@ -123,6 +131,7 @@ async fn record_failure(state: &AppState, name: &str, error: &str) -> Result<()>
     .bind(&msg)
     .fetch_one(&state.pool)
     .await?;
+    schedule_retry(&mut *state.pool.acquire().await?, name, retry_after).await?;
     // Einmalige Meldung beim Überschreiten der Schwelle, nicht bei jedem weiteren Fehlschlag.
     if failures == ALERT_AFTER_FAILURES {
         sqlx::query("INSERT INTO events (kind, payload) VALUES ('feed_failing', $1)")
@@ -135,6 +144,44 @@ async fn record_failure(state: &AppState, name: &str, error: &str) -> Result<()>
     }
     // Ab dem 3. Fehlschlag in Folge gilt die Quelle als dauerhaft fehlerhaft und ist nicht mehr nutzbar.
     gate_hosts(state, None).await;
+    Ok(())
+}
+
+/// Wartezeiten nach dem 1., 2., 3. und 4. Fehllauf in Folge (Minuten); danach gilt wieder das normale Intervall.
+const RETRY_LADDER_MINUTES: [i64; 4] = [2, 5, 10, 30];
+
+/// Wartezeit bis zum nächsten Versuch nach dem `step`-ten Fehllauf in Folge (ab 1). `None` = normales Intervall.
+/// Eine ausdrückliche Bitte der Quelle (`Retry-After`) verlängert die Leiter, verkürzt sie aber nie.
+fn retry_gap(step: i32, retry_after: Option<Duration>) -> Option<chrono::Duration> {
+    let ladder = usize::try_from(step - 1)
+        .ok()
+        .and_then(|i| RETRY_LADDER_MINUTES.get(i))
+        .map(|m| chrono::Duration::minutes(*m));
+    let asked = retry_after.and_then(|d| chrono::Duration::from_std(d).ok());
+    match (ladder, asked) {
+        (Some(l), Some(a)) => Some(l.max(a)),
+        (l, a) => l.or(a),
+    }
+}
+
+/// Zählt einen Fehllauf und legt den nächsten Versuch nach der Leiter fest (Erfolg setzt beides zurück).
+async fn schedule_retry(
+    conn: &mut sqlx::PgConnection,
+    name: &str,
+    retry_after: Option<Duration>,
+) -> Result<()> {
+    let step: i32 = sqlx::query_scalar(
+        "UPDATE feed_state SET retry_step = retry_step + 1 WHERE source = $1 RETURNING retry_step",
+    )
+    .bind(name)
+    .fetch_one(&mut *conn)
+    .await?;
+    let at = retry_gap(step, retry_after).map(|g| chrono::Utc::now() + g);
+    sqlx::query("UPDATE feed_state SET next_attempt_at = $2 WHERE source = $1")
+        .bind(name)
+        .bind(at)
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 
@@ -205,6 +252,34 @@ pub async fn refresh_source(state: &AppState, id: &str, src: &dyn CveSource) -> 
     out
 }
 
+/// Führt den Abruf mit Watchdog aus: meldet die Quelle länger als `stall_timeout_secs` keinen Fortschritt, wird der
+/// Lauf abgebrochen (und damit die Sperre freigegeben), statt die Quelle dauerhaft als "läuft" zu blockieren.
+async fn fetch_watched(
+    state: &AppState,
+    src: &dyn CveSource,
+    feed_state: &FeedState,
+    ctx: &FetchCtx,
+) -> Result<FetchOutcome, FeedError> {
+    let stall = Duration::from_secs(state.cfg.cve.stall_timeout_secs);
+    let tick = (stall / 4).clamp(Duration::from_millis(100), Duration::from_secs(10));
+    ctx.progress.beat();
+    let fetch = src.fetch(&state.http, feed_state, ctx);
+    tokio::pin!(fetch);
+    loop {
+        tokio::select! {
+            r = &mut fetch => return r,
+            () = tokio::time::sleep(tick) => {
+                if ctx.progress.idle() > stall {
+                    return Err(FeedError::Network(format!(
+                        "Lauf ohne Fortschritt seit {} Minuten abgebrochen",
+                        stall.as_secs().div_ceil(60)
+                    )));
+                }
+            }
+        }
+    }
+}
+
 async fn refresh_source_locked(state: &AppState, id: &str, src: &dyn CveSource) -> Result<Outcome> {
     // `kind` ist der Typ der Quelle (steht in cve_source_status.source), `name` die stabile ID für Feed-Zustand und Meldungen.
     let kind = src.name();
@@ -212,11 +287,12 @@ async fn refresh_source_locked(state: &AppState, id: &str, src: &dyn CveSource) 
     let feed_state = load_state(state, name).await?;
     let ctx = context(state, id, kind).await?;
 
-    match src.fetch(&state.http, &feed_state, &ctx).await {
+    match fetch_watched(state, src, &feed_state, &ctx).await {
         Ok(FetchOutcome::NotModified) => {
             // Nichts Neues, aber ein vollständiger, erfolgreicher Abruf: die Quelle ist wieder frisch.
             let until = usable_until(state, name).await;
-            sqlx::query("UPDATE feed_state SET last_success_at = now(), last_error = NULL, consecutive_failures = 0, usable_until = $2 WHERE source = $1")
+            sqlx::query("UPDATE feed_state SET last_success_at = now(), last_error = NULL, consecutive_failures = 0, usable_until = $2, \
+                 retry_step = 0, next_attempt_at = NULL WHERE source = $1")
                 .bind(name)
                 .bind(until)
                 .execute(&state.pool)
@@ -233,11 +309,26 @@ async fn refresh_source_locked(state: &AppState, id: &str, src: &dyn CveSource) 
             records,
             state: new_state,
             interrupted,
-        }) => store(state, kind, id, records, new_state, Some(interrupted)).await,
+            retry_after,
+        }) => {
+            store(
+                state,
+                kind,
+                id,
+                records,
+                new_state,
+                Some((interrupted, retry_after)),
+            )
+            .await
+        }
         Err(e) => {
             let msg = e.to_string();
             tracing::warn!(source = name, error = %msg, "Feed-Abruf fehlgeschlagen, alter Stand bleibt erhalten");
-            record_failure(state, name, &msg).await?;
+            let hint = match &e {
+                FeedError::Throttled { retry_after, .. } => *retry_after,
+                _ => None,
+            };
+            record_failure(state, name, &msg, hint).await?;
             Ok(Outcome::Failed(msg))
         }
     }
@@ -253,7 +344,7 @@ async fn store(
     name: &str,
     records: Vec<Record>,
     new_state: FeedState,
-    partial: Option<Option<String>>,
+    partial: Option<(Option<String>, Option<Duration>)>,
 ) -> Result<Outcome> {
     let enrich = sources::enrich_only(kind);
     let records = if enrich {
@@ -267,7 +358,7 @@ async fn store(
         Err(e) => {
             drop(tx);
             let msg = format!("Speichern fehlgeschlagen: {e}");
-            record_failure(state, name, &msg).await?;
+            record_failure(state, name, &msg, None).await?;
             return Ok(Outcome::Failed(msg));
         }
     };
@@ -286,7 +377,7 @@ async fn store(
             sqlx::query(
                 "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
                  last_success_at = now(), last_error = NULL, consecutive_failures = 0, usable_until = $6, \
-                 covered_since = COALESCE($7, covered_since) WHERE source = $1",
+                 retry_step = 0, next_attempt_at = NULL, covered_since = COALESCE($7, covered_since) WHERE source = $1",
             )
             .bind(name)
             .bind(&new_state.etag)
@@ -298,7 +389,7 @@ async fn store(
             .execute(&mut *tx)
             .await?;
         }
-        Some(interrupted) => {
+        Some((interrupted, retry_after)) => {
             // Fortschritt zählt nicht als Fehlschlag (kein Alarm); ein Abbruch mittendrin bleibt aber sichtbar.
             sqlx::query(
                 "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
@@ -313,6 +404,16 @@ async fn store(
             .bind(interrupted.as_deref().map(|m| format!("Lauf unterbrochen: {m}")))
             .execute(&mut *tx)
             .await?;
+            if interrupted.is_some() {
+                // Ein Abbruch mittendrin wartet nach der Leiter (2/5/10/30 Min.), nicht ein volles Intervall.
+                schedule_retry(&mut tx, name, *retry_after).await?;
+            } else {
+                // Seitenlimit erreicht, kein Fehler: weiter im normalen Takt.
+                sqlx::query("UPDATE feed_state SET retry_step = 0, next_attempt_at = NULL WHERE source = $1")
+                    .bind(name)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
     }
     tx.commit().await?;
@@ -377,18 +478,23 @@ async fn fail_unbuildable(state: &AppState, name: &str, e: &anyhow::Error) -> St
             .bind(name)
             .execute(&state.pool)
             .await;
-        let _ = record_failure(state, name, &msg).await;
+        let _ = record_failure(state, name, &msg, None).await;
     }
     msg
 }
 
 /// Fällig ist eine Quelle, wenn der letzte Versuch länger als ihr Intervall zurückliegt (oder es noch keinen gab).
+/// Nach einem Fehllauf gilt stattdessen `next_attempt_at` (Wiederholungsleiter); das normale Intervall bleibt die
+/// Obergrenze der Wartezeit.
 fn is_due(
     last_attempt: Option<chrono::DateTime<chrono::Utc>>,
+    next_attempt: Option<chrono::DateTime<chrono::Utc>>,
     interval_minutes: i64,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
-    last_attempt.is_none_or(|t| now - t >= chrono::Duration::minutes(interval_minutes))
+    let interval_over =
+        last_attempt.is_none_or(|t| now - t >= chrono::Duration::minutes(interval_minutes));
+    interval_over || next_attempt.is_some_and(|n| now >= n)
 }
 
 /// Hintergrund-Scheduler: prüft alle 30 s, welche Quellen nach ihrem eigenen Intervall fällig sind.
@@ -411,15 +517,19 @@ pub async fn run(state: AppState) {
                     state.cfg.cve.interval_minutes as i64,
                 )
                 .await;
-                let last: Option<chrono::DateTime<chrono::Utc>> =
-                    sqlx::query_scalar("SELECT last_attempt_at FROM feed_state WHERE source = $1")
-                        .bind(&name)
-                        .fetch_optional(&state.pool)
-                        .await
-                        .ok()
-                        .flatten()
-                        .flatten();
-                if !is_due(last, minutes, chrono::Utc::now()) {
+                let (last, next): (
+                    Option<chrono::DateTime<chrono::Utc>>,
+                    Option<chrono::DateTime<chrono::Utc>>,
+                ) = sqlx::query_as(
+                    "SELECT last_attempt_at, next_attempt_at FROM feed_state WHERE source = $1",
+                )
+                .bind(&name)
+                .fetch_optional(&state.pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or((None, None));
+                if !is_due(last, next, minutes, chrono::Utc::now()) {
                     continue;
                 }
                 match built {
@@ -442,14 +552,53 @@ pub async fn run(state: AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_due;
+    use super::{is_due, retry_gap};
     use chrono::{Duration, Utc};
+    use std::time::Duration as Std;
 
     #[test]
     fn due_after_interval() {
         let now = Utc::now();
-        assert!(is_due(None, 60, now));
-        assert!(!is_due(Some(now - Duration::minutes(59)), 60, now));
-        assert!(is_due(Some(now - Duration::minutes(60)), 60, now));
+        assert!(is_due(None, None, 60, now));
+        assert!(!is_due(Some(now - Duration::minutes(59)), None, 60, now));
+        assert!(is_due(Some(now - Duration::minutes(60)), None, 60, now));
+    }
+
+    #[test]
+    fn due_follows_retry_time_but_never_waits_longer_than_interval() {
+        let now = Utc::now();
+        let last = Some(now - Duration::minutes(3));
+        // Leiter: erst nach `next_attempt_at` fällig, nicht erst nach dem vollen Intervall.
+        assert!(!is_due(last, Some(now + Duration::minutes(2)), 60, now));
+        assert!(is_due(last, Some(now - Duration::seconds(1)), 60, now));
+        // Das Intervall bleibt die Obergrenze (z. B. 5 Min. Intervall, 30 Min. Leiter).
+        assert!(is_due(
+            Some(now - Duration::minutes(6)),
+            Some(now + Duration::minutes(24)),
+            5,
+            now
+        ));
+    }
+
+    #[test]
+    fn retry_ladder_grows_then_falls_back_to_interval() {
+        let m = |s| retry_gap(s, None).map(|d| d.num_minutes());
+        assert_eq!(
+            [m(1), m(2), m(3), m(4), m(5), m(9)],
+            [Some(2), Some(5), Some(10), Some(30), None, None]
+        );
+        // Retry-After verlängert die Wartezeit, verkürzt sie nie.
+        assert_eq!(
+            retry_gap(1, Some(Std::from_secs(600))).map(|d| d.num_minutes()),
+            Some(10)
+        );
+        assert_eq!(
+            retry_gap(4, Some(Std::from_secs(60))).map(|d| d.num_minutes()),
+            Some(30)
+        );
+        assert_eq!(
+            retry_gap(7, Some(Std::from_secs(300))).map(|d| d.num_minutes()),
+            Some(5)
+        );
     }
 }

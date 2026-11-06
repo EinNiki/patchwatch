@@ -123,6 +123,12 @@ pub struct CveConfig {
     pub ubuntu_max_pages: u32,
     pub ubuntu_max_page_bytes: u64,
     pub debian_max_bytes: u64,
+    /// Pause zwischen zwei Ubuntu-Seiten in Millisekunden (Umgebungsvariable
+    /// `PATCHWATCH_CVE_UBUNTU_PAGE_PAUSE_MS`): höchstens eine Anfrage gleichzeitig, dazwischen Luft für die Quelle.
+    pub ubuntu_page_pause_ms: u64,
+    /// Ein Abruf ohne Fortschritt (keine Seite geladen) länger als so viele Sekunden gilt als hängend und wird
+    /// freigegeben (`PATCHWATCH_CVE_STALL_TIMEOUT_SECS`).
+    pub stall_timeout_secs: u64,
     pub request_timeout_secs: u64,
     pub retries: u32,
     pub retry_base_delay_ms: u64,
@@ -143,6 +149,8 @@ impl Default for CveConfig {
             ubuntu_max_pages: 100,
             ubuntu_max_page_bytes: 32 * 1024 * 1024,
             debian_max_bytes: 200 * 1024 * 1024,
+            ubuntu_page_pause_ms: 500,
+            stall_timeout_secs: 30 * 60,
             request_timeout_secs: 120,
             retries: 3,
             retry_base_delay_ms: 2000,
@@ -336,6 +344,12 @@ impl Config {
         if let Some(v) = s("CVE_UBUNTU_MAX_PAGES") {
             c.cve.ubuntu_max_pages = v.parse().context("CVE_UBUNTU_MAX_PAGES")?;
         }
+        if let Some(v) = s("CVE_UBUNTU_PAGE_PAUSE_MS") {
+            c.cve.ubuntu_page_pause_ms = v.parse().context("CVE_UBUNTU_PAGE_PAUSE_MS")?;
+        }
+        if let Some(v) = s("CVE_STALL_TIMEOUT_SECS") {
+            c.cve.stall_timeout_secs = v.parse().context("CVE_STALL_TIMEOUT_SECS")?;
+        }
         if let Some(v) = s("CVE_UBUNTU_HORIZON_DAYS") {
             c.cve.ubuntu_horizon_days = v.parse().context("CVE_UBUNTU_HORIZON_DAYS")?;
         }
@@ -387,6 +401,12 @@ impl Config {
         }
         if self.cve.ubuntu_horizon_days > 36_500 {
             bail!("cve.ubuntu_horizon_days (PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS) darf höchstens 36500 sein");
+        }
+        if self.cve.ubuntu_page_pause_ms > 60_000 {
+            bail!("cve.ubuntu_page_pause_ms (PATCHWATCH_CVE_UBUNTU_PAGE_PAUSE_MS) darf höchstens 60000 sein");
+        }
+        if !(1..=86_400).contains(&self.cve.stall_timeout_secs) {
+            bail!("cve.stall_timeout_secs (PATCHWATCH_CVE_STALL_TIMEOUT_SECS) muss zwischen 1 und 86400 liegen");
         }
         if !(1..=2000).contains(&self.cve.ubuntu_max_pages) {
             bail!("cve.ubuntu_max_pages (PATCHWATCH_CVE_UBUNTU_MAX_PAGES) muss zwischen 1 und 2000 liegen");

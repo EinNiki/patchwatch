@@ -29,6 +29,8 @@ pub struct Ubuntu {
     /// Horizont des Erstabrufs in Tagen (0 = gesamte Liste).
     horizon_days: u32,
     max_pages: u32,
+    /// Pause zwischen zwei Seiten: höchstens eine Anfrage gleichzeitig, dazwischen Luft für die Quelle.
+    page_pause: Duration,
     lim: Limits,
 }
 
@@ -38,6 +40,7 @@ impl Ubuntu {
             base: c.ubuntu_url.trim_end_matches('/').to_owned(),
             horizon_days: c.ubuntu_horizon_days,
             max_pages: c.ubuntu_max_pages,
+            page_pause: Duration::from_millis(c.ubuntu_page_pause_ms),
             lim: Limits {
                 max_bytes: c.ubuntu_max_page_bytes,
                 timeout: Duration::from_secs(c.request_timeout_secs),
@@ -259,6 +262,10 @@ impl CveSource for Ubuntu {
         let mut est_pages = resume.and_then(|b| b.est_pages);
 
         'pages: for i in 0..self.max_pages as usize {
+            if i > 0 && !self.page_pause.is_zero() {
+                tokio::time::sleep(self.page_pause).await;
+            }
+            ctx.progress.beat();
             let url = page_url(&self.base, PAGE, start_offset + i * PAGE);
             // Eine Seite wird ganz oder gar nicht übernommen; so zeigt der Fortschritt nie über Daten hinaus,
             // die wirklich gespeichert werden.
@@ -273,6 +280,7 @@ impl CveSource for Ubuntu {
                 Err(e) => return Err(e),
             };
             pages_fetched += 1;
+            ctx.progress.beat();
             records.extend(page.records);
             newest = newest.max(page.newest);
             // Erstabruf: einmal die Gesamtzahl der Seiten bis zum Horizont schätzen ("N von M Seiten").
@@ -371,6 +379,10 @@ impl CveSource for Ubuntu {
             return Ok(FetchOutcome::Partial {
                 records,
                 state: new_state,
+                retry_after: match &interrupted {
+                    Some(FeedError::Throttled { retry_after, .. }) => *retry_after,
+                    _ => None,
+                },
                 interrupted: interrupted.map(|e| e.to_string()),
             });
         }
