@@ -188,18 +188,16 @@ const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at
     count(h.*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \
     FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id LEFT JOIN host_cve_status h ON h.cve_id = c.id";
 
-pub async fn list(
-    _: Admin,
-    State(st): State<AppState>,
-    Query(q): Query<ListQuery>,
-) -> ApiResult<Json<Vec<CveOut>>> {
-    let limit = q.limit.unwrap_or(100).clamp(1, 500);
-    let offset = q.offset.unwrap_or(0).max(0);
-    let all_releases = match q.releases.as_deref() {
-        None | Some("mine") => false,
-        Some("all") => true,
-        Some(_) => return Err(ApiError::BadRequest("releases: mine oder all".into())),
-    };
+/// Ergebnis der Filterprüfung: gültige Parameter und die WHERE-Klausel (mit festen, geprüften Texten).
+struct Built<'a> {
+    distro: Option<&'a str>,
+    pattern: Option<String>,
+    filter: String,
+}
+
+/// Prüft die Filterparameter und baut die WHERE-Klausel der Liste. Die Liste und die Zählung "wie viele passen bei
+/// Umfang alle" benutzen genau diese Funktion; nur `all_releases` unterscheidet sich.
+fn build_filter(q: &ListQuery, all_releases: bool) -> ApiResult<Built<'_>> {
     let distro = match q.distro.as_deref() {
         None | Some("") => None,
         Some(d @ ("debian" | "ubuntu" | "osv")) => Some(d),
@@ -223,30 +221,6 @@ pub async fn list(
         Some("open") => Ok(Some("open")),
         Some(_) => Err(ApiError::BadRequest(format!("{name}: fixed oder open"))),
     };
-    // Beobachtete CVEs stehen immer oben; danach gilt die gewählte Sortierung (feste Texte, nie Nutzereingabe).
-    let dir = match q.dir.as_deref() {
-        None | Some("") | Some("desc") => "DESC",
-        Some("asc") => "ASC",
-        Some(_) => return Err(ApiError::BadRequest("dir: asc oder desc".into())),
-    };
-    let nulls = if dir == "DESC" {
-        "NULLS LAST"
-    } else {
-        "NULLS FIRST"
-    };
-    let order = match q.sort.as_deref() {
-        None | Some("") | Some("latest") => {
-            format!("c.published_at {dir} {nulls}, c.id {dir}")
-        }
-        Some("level") => format!("{LEVEL_SQL} {dir}, c.published_at DESC NULLS LAST, c.id DESC"),
-        Some("updated") => format!("c.updated_at {dir}, c.id {dir}"),
-        Some(_) => {
-            return Err(ApiError::BadRequest(
-                "sort: latest, level oder updated".into(),
-            ))
-        }
-    };
-    let outer_order = order.replace("c.", "p.");
     let debian_fix = fix_state(&q.debian, split_debian, "debian")?;
     let ubuntu_fix = fix_state(&q.ubuntu, split_ubuntu, "ubuntu")?;
     // Postgres kann kein NUL in Text speichern oder vergleichen (sonst 500); Steuerzeichen sind in einer Suche sinnlos.
@@ -324,6 +298,77 @@ pub async fn list(
     } else {
         format!("WHERE {}", conds.join(" AND "))
     };
+    Ok(Built {
+        distro,
+        pattern,
+        filter,
+    })
+}
+
+/// Trefferzahl der aktuellen Filter je Umfang: `mine` (Releases auf meinen Hosts) und `all` (alle Releases). Für den
+/// Leer-Zustand ("3 CVEs passen, wenn Releases ohne Host mitzählen"); benutzt dieselbe Filterlogik wie die Liste.
+pub async fn scope_count(
+    _: Admin,
+    State(st): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> ApiResult<Json<Value>> {
+    let mut out = serde_json::Map::new();
+    for (name, all) in [("mine", false), ("all", true)] {
+        let b = build_filter(&q, all)?;
+        let sql = format!(
+            "SELECT count(*) FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id {}",
+            b.filter
+        );
+        let mut query = sqlx::query_scalar::<_, i64>(&sql);
+        if let Some(p) = &b.pattern {
+            query = query.bind(p);
+        }
+        out.insert(name.into(), query.fetch_one(&st.pool).await?.into());
+    }
+    Ok(Json(Value::Object(out)))
+}
+
+pub async fn list(
+    _: Admin,
+    State(st): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> ApiResult<Json<Vec<CveOut>>> {
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
+    let offset = q.offset.unwrap_or(0).max(0);
+    let all_releases = match q.releases.as_deref() {
+        None | Some("mine") => false,
+        Some("all") => true,
+        Some(_) => return Err(ApiError::BadRequest("releases: mine oder all".into())),
+    };
+    // Beobachtete CVEs stehen immer oben; danach gilt die gewählte Sortierung (feste Texte, nie Nutzereingabe).
+    let dir = match q.dir.as_deref() {
+        None | Some("") | Some("desc") => "DESC",
+        Some("asc") => "ASC",
+        Some(_) => return Err(ApiError::BadRequest("dir: asc oder desc".into())),
+    };
+    let nulls = if dir == "DESC" {
+        "NULLS LAST"
+    } else {
+        "NULLS FIRST"
+    };
+    let order = match q.sort.as_deref() {
+        None | Some("") | Some("latest") => {
+            format!("c.published_at {dir} {nulls}, c.id {dir}")
+        }
+        Some("level") => format!("{LEVEL_SQL} {dir}, c.published_at DESC NULLS LAST, c.id DESC"),
+        Some("updated") => format!("c.updated_at {dir}, c.id {dir}"),
+        Some(_) => {
+            return Err(ApiError::BadRequest(
+                "sort: latest, level oder updated".into(),
+            ))
+        }
+    };
+    let outer_order = order.replace("c.", "p.");
+    let Built {
+        distro,
+        pattern,
+        filter,
+    } = build_filter(&q, all_releases)?;
     // Erst die Seite (Filter, Sortierung, LIMIT) bestimmen, danach nur für diese Zeilen Zähler und KEV-Flag bilden.
     // Eine Aggregation über alle CVEs vor dem LIMIT kostete ~190 ms bei 20 000 CVEs (siehe docs/perf.md).
     // Die Beschreibung wird für die Liste gekürzt (erst für die Zeilen der Seite, sonst wird sie für alle CVEs entpackt);

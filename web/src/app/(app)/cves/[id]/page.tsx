@@ -7,7 +7,7 @@ import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { CVE_STATUS } from "@/lib/status";
 import type { CveDetail } from "@/lib/types";
-import { distroName, DistroChip, Marker } from "@/components/DistroChip";
+import { ChipLegend, distroName, DistroChip, Marker } from "@/components/DistroChip";
 import { NavIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -64,7 +64,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
             </div>
             {other.length > 0 ? (
               <details className="mb-2">
-                <summary className="cursor-pointer font-semibold text-fg2">Alle Releases ({other.length} weitere)</summary>
+                <summary className="cursor-pointer font-semibold text-fg2">Releases ohne Host ({other.length}, zählen nicht für den Filter)</summary>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {other.map((x) => (
                     <DistroChip key={`${x.source}/${x.release}`} d={x} />
@@ -72,6 +72,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               </details>
             ) : null}
+            <ChipLegend allScope={false} />
           </>
         )}
       </section>

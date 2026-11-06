@@ -4859,3 +4859,107 @@ async fn hybrid_delete_and_recreate_source_imports_again(pool: PgPool) {
     assert_eq!(row["state"], "ok");
     assert_eq!(row["bulk"]["complete"], true);
 }
+
+// ---------- Filter und Chips: Umfang sichtbar, Trefferzahl bei "Alle Releases" ----------
+
+impl FilterEnv {
+    async fn scope_count(&self, query: &str) -> (i64, i64) {
+        let r = call(
+            &self.app,
+            Method::GET,
+            &format!("/api/v1/cves/scope-count?x=1{query}"),
+            &hdr(&self.h),
+            None,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{query}: {}", r.json);
+        (
+            r.json["mine"].as_i64().unwrap(),
+            r.json["all"].as_i64().unwrap(),
+        )
+    }
+}
+
+/// Wie CVE-2026-98930: bookworm offen (läuft auf keinem Host), forky/sid/trixie gefixt (trixie läuft auf einem Host).
+/// "Debian offen" findet die CVE nur im Umfang "alle", die Chips tragen das Merkmal `mine`, und die Zählung für den
+/// Leer-Zustand nennt die Treffer bei "Alle Releases" mit derselben Filterlogik wie die Liste.
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_open_release_outside_scope_is_found_only_with_scope_all(pool: PgPool) {
+    let e = filter_env(pool).await;
+    for (rel, st) in [
+        ("bookworm", "vulnerable"),
+        ("forky", "fixed"),
+        ("sid", "fixed"),
+        ("trixie", "fixed"),
+    ] {
+        e.row("CVE-2026-98930", "debian", rel, "linux", st).await;
+    }
+    e.host_uses(
+        "deb1",
+        "CVE-2026-98930",
+        "debian",
+        "trixie",
+        "linux",
+        "fixed",
+    )
+    .await;
+    // Zweite CVE: wirklich offen im eigenen Release, muss in beiden Umfängen erscheinen.
+    e.row("CVE-2026-98931", "debian", "trixie", "linux", "vulnerable")
+        .await;
+
+    // Umfang "meine Releases": kein Treffer für die CVE (trixie ist gefixt), die andere CVE ja.
+    assert_eq!(e.ids("&debian=open").await, vec!["CVE-2026-98931"]);
+    // Umfang "alle": beide.
+    assert_eq!(
+        e.ids("&debian=open&releases=all").await,
+        vec!["CVE-2026-98930", "CVE-2026-98931"]
+    );
+    // Die Zählung für den Leer-Zustand benutzt dieselbe Logik: mine = Liste, all = Liste bei Umfang alle.
+    assert_eq!(e.scope_count("&debian=open").await, (1, 2));
+    // Anzeige: nur der Chip trixie zählt (mine), die anderen sind gekennzeichnet und gehören nicht zur Liste.
+    let list = e.list("&releases=all&q=CVE-2026-98930").await;
+    let chips = list[0]["distros"].as_array().unwrap();
+    let mine: Vec<(&str, bool)> = chips
+        .iter()
+        .map(|c| (c["release"].as_str().unwrap(), c["mine"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(
+        mine,
+        vec![
+            ("bookworm", false),
+            ("forky", false),
+            ("sid", false),
+            ("trixie", true)
+        ]
+    );
+}
+
+/// Leer-Zustand: Filter ohne Treffer im Umfang "meine Releases" meldet, wie viele bei "alle" passen; ohne Treffer
+/// auch dort steht 0 da (kein Angebot ohne Wirkung).
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_scope_count_tells_how_many_match_with_all_releases(pool: PgPool) {
+    let e = filter_env(pool).await;
+    for i in 0..3 {
+        let id = format!("CVE-2026-9700{i}");
+        e.row(&id, "debian", "bookworm", "linux", "vulnerable")
+            .await;
+        e.row(&id, "debian", "trixie", "linux", "fixed").await;
+        e.host_uses("deb1", &id, "debian", "trixie", "linux", "fixed")
+            .await;
+    }
+    assert_eq!(e.scope_count("&debian=open").await, (0, 3));
+    assert!(e.ids("&debian=open").await.is_empty());
+    assert_eq!(e.ids("&debian=open&releases=all").await.len(), 3);
+    // Ein Filter, der auch im weiten Umfang nichts findet.
+    assert_eq!(e.scope_count("&ubuntu=open").await, (0, 0));
+    // Ungültige Werte werden wie in der Liste abgelehnt.
+    let r = call(
+        &e.app,
+        Method::GET,
+        "/api/v1/cves/scope-count?debian=kaputt",
+        &hdr(&e.h),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+}

@@ -13,7 +13,7 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { NavIcon } from "@/components/Icons";
 import { useFlash } from "@/lib/useFlash";
 import { Button, Field, TextInput } from "@/components/Controls";
-import { DistroChip } from "@/components/DistroChip";
+import { ChipLegend, DistroChip } from "@/components/DistroChip";
 import { PageHeader } from "@/components/PageHeader";
 import { FeedSources } from "@/components/FeedSources";
 
@@ -93,6 +93,11 @@ function CveView() {
   if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
   const listPath = `/cves?${qs}`;
   const cves = useApi<CveListItem[]>(listPath, 60_000, ["host_cve_status", "report_received"], undefined, { keepPrevious: true });
+  // Leere Liste mit Umfang „meine Releases“: wie viele CVEs würden bei „Alle Releases“ passen (gleiche Filterlogik).
+  const countQs = new URLSearchParams(qs);
+  for (const k of ["limit", "sort", "dir"]) countQs.delete(k);
+  const emptyHere = cves.data?.length === 0 && !allReleases;
+  const scopeCount = useApi<{ mine: number; all: number }>(emptyHere ? `/cves/scope-count?${countQs}` : null);
   // Sofortige Rückmeldung beim Filtern: die bisherige Liste bleibt stehen und wird abgedunkelt, bis die neue da ist.
   const updating = cves.stale || qInput !== q;
   // Beim ersten Aufbau erscheinen zuerst 30 Zeilen, der Rest folgt in kleinen Schritten: kein langer Task, die Seite
@@ -386,6 +391,11 @@ function CveView() {
                   Aktive Filter: {chips.length > 0 ? chips.map((c) => c.label).join(", ") : "keine"}. Umfang: {allReleases ? "alle Releases" : "nur Releases, die auf deinen Hosts laufen"}.
                 </span>
                 {!allReleases ? <span className="block">Debian- und Ubuntu-Filter („gefixt“, „offen“) gelten nur für Releases deiner Hosts, solange der Umfang so eingestellt ist.</span> : null}
+                {!allReleases && scopeCount.data && scopeCount.data.all > 0 ? (
+                  <span className="mt-1 block font-semibold text-fg" data-testid="scope-count">
+                    {scopeCount.data.all} {scopeCount.data.all === 1 ? "CVE passt" : "CVEs passen"}, wenn Releases ohne Host mitzählen.
+                  </span>
+                ) : null}
                 <span className="mt-2 flex flex-wrap gap-3">
                   {!allReleases ? (
                     <button type="button" onClick={() => setParam("releases", "all")} className="text-accent underline max-md:min-h-11">
@@ -442,8 +452,9 @@ function CveView() {
           </>
         )}
         <p className="mt-4 text-xs text-fg3">
-          Details zur Bewertung je Host stehen in der Host-Ansicht (<Link href="/">Hosts</Link>). Gestrichelte Chips zeigen Releases, die auf keinem deiner Hosts laufen.
+          Details zur Bewertung je Host stehen in der Host-Ansicht (<Link href="/">Hosts</Link>). 
         </p>
+        <ChipLegend allScope={allReleases} />
       </section>
     </>
   );
@@ -524,9 +535,9 @@ function Distros({ c, allReleases }: { c: CveListItem; allReleases: boolean }) {
     <div className="flex flex-col items-start gap-1 max-md:flex-row max-md:flex-wrap wide:flex-row wide:flex-wrap">
       {c.distros.length === 0 ? <span className="text-fg3">Kein Release auf deinen Hosts</span> : null}
       {c.distros.map((d) => (
-        <DistroChip key={`${d.source}/${d.release}`} d={d} />
+        <DistroChip key={`${d.source}/${d.release}`} d={d} allScope={allReleases} />
       ))}
-      {more ? <OtherReleases id={c.id} /> : null}
+      {more ? <OtherReleases id={c.id} allScope={allReleases} /> : null}
       {!allReleases && c.hidden_releases > 0 ? (
         <Button aria-expanded={more} onClick={() => setMore(!more)} className="!h-(--chip-h) !min-h-(--chip-h) !rounded-xs !border-line !px-1.5 !py-0 !text-xs !font-normal !text-fg2 max-md:!min-h-11">
           {more ? "Weniger anzeigen" : `+ ${c.hidden_releases} weitere Releases`}
@@ -538,13 +549,13 @@ function Distros({ c, allReleases }: { c: CveListItem; allReleases: boolean }) {
 }
 
 /** Lädt erst beim Aufklappen die Detaildaten, damit nicht jede der 100 Zeilen einen eigenen Abruf-Hook trägt. */
-function OtherReleases({ id }: { id: string }) {
+function OtherReleases({ id, allScope }: { id: string; allScope: boolean }) {
   const detail = useApi<CveDetail>(`/cves/${id}`);
   const others = detail.data?.distros.filter((d) => !d.mine) ?? [];
   return (
     <>
       {others.map((d) => (
-        <DistroChip key={`${d.source}/${d.release}`} d={d} />
+        <DistroChip key={`${d.source}/${d.release}`} d={d} allScope={allScope} />
       ))}
       {detail.error ? <span className="text-crit">{detail.error}</span> : null}
     </>

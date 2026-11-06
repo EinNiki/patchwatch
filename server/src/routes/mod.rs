@@ -67,6 +67,7 @@ pub fn router(state: AppState) -> Router {
             put(hosts::review).delete(hosts::unreview),
         )
         .route("/cves", get(cves::list))
+        .route("/cves/scope-count", get(cves::scope_count))
         .route("/cves/{id}", get(cves::detail))
         .route("/watchlist", get(cves::watchlist))
         .route("/watchlist/{id}", put(cves::watch).delete(cves::unwatch))
