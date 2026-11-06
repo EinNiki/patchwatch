@@ -16,6 +16,7 @@ const PAGES = [
   ["host-detail", "/hosts/host:web-01"],
   ["host-debian", "/hosts/host:db-01"],
   ["host-proxmox", "/hosts/host:pve-01"],
+  ["host-reboot", "/hosts/host:db-02?cve=reboot"],
   ["cves", "/cves"],
   ["cve-detail", "/cves/CVE-2024-1086"],
   ["agents", "/agents"],
@@ -92,34 +93,40 @@ for (const scheme of schemes) {
         }
       }
 
-      // Host-Detail: CVE-Lage ohne Seitenscroll sichtbar (≥ 1280 px: Zusammenfassung + zwei Spalten mit je ≥ 8 Zeilen,
-      // darunter Tabs mit genau einer Liste). Spalten mit weniger als 8 Einträgen sind ausgenommen.
-      if (name === "host-detail" || name === "host-debian") {
+      // Host-Detail: Satz, Balken, Kacheln und eine aktive Liste. Ab 1440 px sind Kopf, Kacheln und ≥ 10 Zeilen der
+      // aktiven Liste ohne Seitenscroll sichtbar; auf allen Breiten genau eine Liste, keine Tabs, Kacheln vorhanden.
+      if (name === "host-detail" || name === "host-debian" || name === "host-reboot") {
         const cve = await page.evaluate(() => {
-          const bar = document.querySelector('[aria-label="Zusammenfassung und Filter"]');
+          const tiles = document.querySelector('[aria-label="CVE-Zustände"]');
           const lists = [...document.querySelectorAll('[role=region][aria-label$=", Liste"]')];
           const visibleRows = (l) => [...l.querySelectorAll("li")].filter((li) => li.getBoundingClientRect().bottom <= window.innerHeight).length;
-          const total = (l) => l.querySelectorAll("li").length;
           return {
-            totals: lists.map(total),
-            bar: bar ? Math.round(bar.getBoundingClientRect().bottom) : null,
+            tiles: tiles ? Math.round(tiles.getBoundingClientRect().bottom) : null,
+            tileButtons: tiles ? tiles.querySelectorAll("button").length : 0,
+            sentence: Boolean(document.querySelector("main p[aria-live=polite]")?.textContent?.trim()),
+            bar: Boolean(document.querySelector('main [role=img][aria-label^="Verteilung"]')),
             lists: lists.length,
+            totals: lists.map((l) => l.querySelectorAll("li").length),
             rows: lists.map(visibleRows),
             tabs: document.querySelectorAll('[role=tablist][aria-label="CVE-Ansicht"] [role=tab]').length,
+            pressed: document.querySelectorAll('[aria-label="CVE-Zustände"] [aria-pressed=true], main button[aria-pressed=true]').length,
             ih: window.innerHeight,
           };
         });
-        if (cve.bar === null) fail(name, w, scheme, "CVE-Zusammenfassung fehlt");
-        else if (w >= 1280) {
-          if (cve.bar > cve.ih) fail(name, w, scheme, "CVE-Zusammenfassung nicht ohne Seitenscroll sichtbar");
-          if (cve.lists !== 2) fail(name, w, scheme, `erwartet zwei CVE-Spalten, gefunden ${cve.lists}`);
-          cve.rows.forEach((n, i) => {
-            if (n < Math.min(8, cve.totals[i])) fail(name, w, scheme, `nur ${n} CVE-Zeilen ohne Seitenscroll sichtbar (≥ 8 erwartet)`);
-          });
-          if (cve.tabs > 0) fail(name, w, scheme, "Tabs ab 1280 px nicht erwartet");
-        } else {
-          if (cve.lists !== 1) fail(name, w, scheme, `unter 1280 px genau eine CVE-Liste erwartet, gefunden ${cve.lists}`);
-          if (cve.tabs !== 3) fail(name, w, scheme, `erwartet 3 Tabs (Offen · Gefixt · Alle), gefunden ${cve.tabs}`);
+        if (cve.tiles === null) fail(name, w, scheme, "CVE-Kacheln fehlen");
+        else {
+          if (cve.tileButtons < 4) fail(name, w, scheme, `erwartet 4 Kacheln, gefunden ${cve.tileButtons}`);
+          if (!cve.sentence) fail(name, w, scheme, "Zusammenfassungssatz fehlt");
+          if (!cve.bar) fail(name, w, scheme, "Balken fehlt");
+          if (cve.lists !== 1) fail(name, w, scheme, `genau eine aktive CVE-Liste erwartet, gefunden ${cve.lists}`);
+          if (cve.tabs > 0) fail(name, w, scheme, "Tabs nicht erwartet");
+          if (cve.pressed < 1) fail(name, w, scheme, "keine Kachel als aktiv markiert");
+          if (w >= 1440) {
+            if (cve.tiles > cve.ih) fail(name, w, scheme, "Kacheln nicht ohne Seitenscroll sichtbar");
+            cve.rows.forEach((n, i) => {
+              if (n < Math.min(10, cve.totals[i])) fail(name, w, scheme, `nur ${n} CVE-Zeilen ohne Seitenscroll sichtbar (≥ 10 erwartet)`);
+            });
+          }
         }
       }
 

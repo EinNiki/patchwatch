@@ -274,6 +274,19 @@ Feed-Zustand je Quelle („veraltet seit …“).
   Releases, die auf deinen Hosts laufen („+ n weitere Releases“ bzw. „Alle Releases“ blendet den Rest ein). Filter:
   Distribution sowie „Debian gefixt, Ubuntu offen“ und umgekehrt. `/cves/<ID>` zeigt Quellen-Links, letzte Änderung und
   betroffene Hosts.
+- **Host-Detail, CVE-Lage**: ein Satz als Entscheidungshilfe („Nach dem Neustart auf 7.0.0-42.42 sind noch 81 CVEs
+  offen, 2894 werden behoben.“; ohne nötigen Neustart „81 CVEs offen, kein Fix installiert.“; ohne offene „Keine
+  offenen CVEs.“), ein gestapelter Balken und vier Kacheln: **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
+  Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**, **Nicht betroffen**; „Unbekannt“
+  als kleiner Zähler. Jede Kachel zeigt Zahl, Wort, Icon und eine Zeile, die aktive ist per Rahmen und Haken markiert. Es
+  steht immer nur **eine** Liste da (Standard „Offen“): nach Level (hoch zuerst), dann Alter sortiert; „Neustart nötig“ und
+  „Gefixt“ sind nach Fix-Version gruppiert (neueste zuerst, „Gefixt“ eingeklappt, „Alle anzeigen“ klappt alles auf).
+  Suche (CVE-ID und Text) und Level-Filter gelten für die aktive Liste. Die Kernel-Zeile zeigt laufenden und neuesten
+  installierten Kernel; „Befehl kopieren“ legt `sudo reboot` in die Zwischenablage und führt nichts aus. Beim Scrollen
+  bleibt eine verkürzte Leiste mit den Zählern stehen. Ein Eintrag ohne Fix-Version zählt nie als „Fix installiert“.
+  Ist die zuständige Quelle eingeschränkt, steht über der Liste ein Hinweis (z. B. „Ubuntu: Offene Fälle nicht vollständig
+  geladen (API überlastet, seit 22:08) …“), die Kachel „Offen“ trägt ein Warnsymbol und „kann unvollständig sein“; nie
+  „alles gut“. Proxmox-Hosts bleiben „unbekannt, manuell prüfen“ (nie grün).
 - **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, letztem Report und Check-in; „Jetzt aktualisieren“,
   „Token erneuern“, Löschen mit Bestätigung. „Agent hinzufügen“ zeigt den Token einmalig und einen Installationsbefehl
   **ohne** Token (`install.sh` fragt ihn ohne Echo ab).

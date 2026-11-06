@@ -11,7 +11,7 @@ const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE ?? "pl
 const axe = readFileSync(process.env.AXE_JS ?? "node_modules/axe-core/axe.min.js", "utf8");
 
 const PAGES = [
-  "/", "/hosts/host:web-01", "/hosts/host:db-01", "/hosts/host:pve-01", "/cves", "/cves/CVE-2024-1086", "/agents", "/notifications",
+  "/", "/hosts/host:web-01", "/hosts/host:db-01", "/hosts/host:pve-01", "/hosts/host:db-02?cve=reboot", "/hosts/host:db-02?cve=fixed", "/cves", "/cves/CVE-2024-1086", "/agents", "/notifications",
   "/notifications/ntfy", "/notifications/matrix", "/notifications/discord", "/notifications/browser", "/settings",
 ];
 const viewports = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
@@ -46,6 +46,14 @@ for (const scheme of ["light", "dark"]) {
       await page.waitForTimeout(500);
       await scan(page, `${p} ${vpName}/${scheme}`);
     }
+    // Host-Ansicht mit sichtbarer kompakter Leiste (nach dem Scrollen) und einer aufgeklappten Gefixt-Gruppe
+    await page.goto(`${base}/hosts/${ids["db-02"]}?cve=fixed`);
+    await page.waitForLoadState("networkidle");
+    await page.locator("main h3 button[aria-expanded]").first().click();
+    await page.waitForTimeout(400);
+    await page.mouse.wheel(0, 500);
+    await page.waitForTimeout(400);
+    await scan(page, `/hosts db-02 gruppe offen, gescrollt ${vpName}/${scheme}`);
     // Zustände mit Dialog bzw. Menü
     await page.goto(`${base}/agents`);
     await page.getByRole("button", { name: "Agent hinzufügen" }).first().click();
