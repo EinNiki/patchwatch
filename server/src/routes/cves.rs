@@ -7,7 +7,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 /// CVE-ID wie `CVE-2024-1086`.
 pub fn valid_cve_id(id: &str) -> bool {
@@ -83,8 +83,10 @@ pub struct SourceRow {
 }
 
 /// Ein Chip je (Quelle, Release): der ungünstigste Status über alle Pakete.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, sqlx::FromRow)]
 pub struct Distro {
+    #[serde(skip)]
+    cve_id: String,
     source: String,
     release: String,
     status: String,
@@ -94,104 +96,58 @@ pub struct Distro {
     /// Release läuft auf mindestens einem Host.
     mine: bool,
     /// Anzahl Pakete dieser Quelle/Release.
-    packages: usize,
+    packages: i64,
 }
 
-/// Rang für „ungünstigster Status zuerst“.
-fn severity(status: &str) -> u8 {
-    match status {
-        "vulnerable" => 0,
-        "fix_pending" => 1,
-        "unknown" => 2,
-        "fixed" => 3,
-        _ => 4,
-    }
-}
+/// Rang für „ungünstigster Status zuerst“ (SQL; Chip-Status = kleinster Rang aller Pakete).
+const SEVERITY_SQL: &str = "CASE s.status WHEN 'vulnerable' THEN 0 WHEN 'fix_pending' THEN 1 WHEN 'unknown' THEN 2 WHEN 'fixed' THEN 3 ELSE 4 END";
+/// Release läuft auf mindestens einem Host (Umfang „meine Releases“).
+const MINE_SQL: &str =
+    "s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL AND os_codename <> '')";
 
-/// Fasst Quellenzeilen je (Quelle, Release) zusammen; Sortierung: Quelle, Release.
+/// Die EINE Definition der Chips (Quelle, Release) einer CVE: Anzeige (Liste, Detail) und Filter lesen beide dieses
+/// SQL, damit ein Chip, der „gefixt“ zeigt, vom Filter „gefixt“ gefunden wird (und umgekehrt).
 ///
-/// `used`: (Quelle, Release, Paket), auf die sich die Bewertung der Hosts stützt. Für Releases, die auf einem Host laufen,
-/// zählen nur diese Pakete; sonst färbt z. B. `linux-nvidia` den Chip rot, obwohl der Host `linux` nutzt.
-fn collapse(
-    rows: Vec<SourceRow>,
-    mine: &HashSet<String>,
-    used: &HashSet<(String, String, String)>,
-) -> Vec<Distro> {
-    let mut by: BTreeMap<(String, String), Distro> = BTreeMap::new();
-    let has_used =
-        |source: &str, release: &str| used.iter().any(|(s, r, _)| s == source && r == release);
-    for r in rows {
-        if mine.contains(&r.release)
-            && has_used(&r.source, &r.release)
-            && !used.contains(&(r.source.clone(), r.release.clone(), r.package.clone()))
-        {
-            continue;
-        }
-        // Anreicherungsquellen (NVD, CISA KEV) führen Release "*": kein Distributions-Chip.
-        if r.release == "*" {
-            continue;
-        }
-        let key = (r.source.clone(), r.release.clone());
-        match by.get_mut(&key) {
-            Some(d) => {
-                d.packages += 1;
-                if severity(&r.status) < severity(&d.status) {
-                    d.status = r.status;
-                    d.package = r.package;
-                    d.fix_version = r.fix_version;
-                }
-                d.updated_at = d.updated_at.max(r.updated_at);
-            }
-            None => {
-                let m = mine.contains(&r.release);
-                by.insert(
-                    key,
-                    Distro {
-                        source: r.source,
-                        release: r.release,
-                        status: r.status,
-                        package: r.package,
-                        fix_version: r.fix_version,
-                        updated_at: r.updated_at,
-                        mine: m,
-                        packages: 1,
-                    },
-                );
-            }
-        }
+/// Ein Chip fasst alle Pakete der Quelle/Release zusammen: der ungünstigste Status gewinnt (Rang `SEVERITY_SQL`, bei
+/// Gleichstand das erste Paket alphabetisch). Für Releases, die auf einem Host laufen, zählen nur die Pakete, auf die
+/// sich die Bewertung der Hosts stützt (`host_cve_status.sources`); sonst färbt z. B. `linux-nvidia` den Chip rot,
+/// obwohl der Host `linux` nutzt. Anreicherungsquellen (NVD, CISA KEV) führen Release `*` und haben keinen Chip.
+/// `ids` beschränkt auf die CVEs des Parameters `$1` (Anzeige), `source` auf eine Quelle (Filter); beides nur
+/// Einschränkungen der Menge, nie der Definition. Mengenbasiert statt je CVE korreliert: ~0,2 s statt ~2 s bei 20 000 CVEs.
+fn chips_sql(ids: bool, source: Option<&str>) -> String {
+    let mut s_cond = vec!["s.release <> '*'".to_owned()];
+    if ids {
+        s_cond.push("s.cve_id = ANY($1)".into());
     }
-    by.into_values().collect()
+    if let Some(src) = source {
+        s_cond.push(format!("s.source = '{src}'"));
+    }
+    let hs_cond = if ids { "WHERE hs.cve_id = ANY($1)" } else { "" };
+    let s_cond = s_cond.join(" AND ");
+    format!(
+        "SELECT DISTINCT ON (s.cve_id, s.source, s.release) s.cve_id, s.source, s.release, s.package, s.status, \
+         s.fix_version, max(s.updated_at) OVER w AS updated_at, ({MINE_SQL}) AS mine, (count(*) OVER w)::int8 AS packages \
+         FROM cve_source_status s \
+         LEFT JOIN (SELECT hs.cve_id, u->>'source' AS source, u->>'release' AS release, array_agg(DISTINCT u->>'package') AS pkgs \
+                    FROM host_cve_status hs CROSS JOIN LATERAL jsonb_array_elements(hs.sources) u {hs_cond} GROUP BY 1, 2, 3) ud \
+                ON ud.cve_id = s.cve_id AND ud.source = s.source AND ud.release = s.release \
+         WHERE {s_cond} AND NOT ({MINE_SQL} AND ud.pkgs IS NOT NULL AND NOT (s.package = ANY(ud.pkgs))) \
+         WINDOW w AS (PARTITION BY s.cve_id, s.source, s.release) \
+         ORDER BY s.cve_id, s.source, s.release, {SEVERITY_SQL}, s.package"
+    )
 }
 
-/// Quellenzeilen, auf die sich die Host-Bewertungen der CVEs stützen (siehe `collapse`).
-async fn used_packages(
-    st: &AppState,
-    ids: &[String],
-) -> ApiResult<HashMap<String, HashSet<(String, String, String)>>> {
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT DISTINCT h.cve_id, s->>'source', s->>'release', s->>'package' \
-         FROM host_cve_status h CROSS JOIN LATERAL jsonb_array_elements(h.sources) s WHERE h.cve_id = ANY($1)",
-    )
-    .bind(ids)
-    .fetch_all(&st.pool)
-    .await?;
-    let mut out: HashMap<String, HashSet<(String, String, String)>> = HashMap::new();
-    for (cve, source, release, package) in rows {
-        out.entry(cve)
-            .or_default()
-            .insert((source, release, package));
+/// Chips der angegebenen CVEs (siehe `chips_sql`), je CVE nach Quelle und Release sortiert.
+async fn chips_for(st: &AppState, ids: &[String]) -> ApiResult<HashMap<String, Vec<Distro>>> {
+    let rows: Vec<Distro> = sqlx::query_as(&chips_sql(true, None))
+        .bind(ids)
+        .fetch_all(&st.pool)
+        .await?;
+    let mut out: HashMap<String, Vec<Distro>> = HashMap::new();
+    for d in rows {
+        out.entry(d.cve_id.clone()).or_default().push(d);
     }
     Ok(out)
-}
-
-/// Releases (Codenamen), die auf mindestens einem Host laufen.
-async fn my_releases(st: &AppState) -> ApiResult<HashSet<String>> {
-    let rows: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT os_codename FROM hosts WHERE os_codename IS NOT NULL AND os_codename <> ''",
-    )
-    .fetch_all(&st.pool)
-    .await?;
-    Ok(rows.into_iter().collect())
 }
 
 /// Quellen-Links je Quelle (feste Vorlagen; die CVE-ID ist vorher validiert).
@@ -312,11 +268,6 @@ pub async fn list(
     // Die Filter werden als Konstanten in die Abfrage geschrieben (nur geprüfte Werte aus den festen Listen oben, nie
     // Nutzertext): Mit Parametern wählt der Planer einen generischen Plan und braucht für "Debian offen" ~0,5 s statt ~0,1 s.
     // Nutzertext (Suche) bleibt ein gebundener Parameter.
-    let in_scope = if all_releases {
-        "true"
-    } else {
-        "s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL)"
-    };
     let mut conds: Vec<String> = Vec::new();
     if q.watchlist == Some(true) {
         conds.push("w.cve_id IS NOT NULL".into());
@@ -337,8 +288,14 @@ pub async fn list(
             "(c.id ILIKE $1 OR c.description ILIKE $1)".into()
         });
     }
-    let exists = |source: &str, statuses: &str| {
-        format!("EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.source = '{source}'{statuses} AND {in_scope})")
+    // Filter und Anzeige benutzen dieselben Chips (`chips_sql`) und denselben Umfang: „meine Releases“ (Standard)
+    // oder „alle“. `statuses` sind feste Texte, nie Nutzereingabe.
+    let scope_cond = if all_releases { "" } else { " AND ch.mine" };
+    let chip_exists = |source: &str, statuses: &str| {
+        format!(
+            "c.id IN (SELECT ch.cve_id FROM ({}) ch WHERE ch.source = '{source}'{statuses}{scope_cond})",
+            chips_sql(false, Some(source))
+        )
     };
     // Wer gezielt sucht, findet jede CVE; die Einschränkung gilt nur für die ungefilterte Liste.
     if !all_releases && pattern.is_none() {
@@ -346,18 +303,18 @@ pub async fn list(
         // „nicht betroffen“ ist, oder eine Bewertung eines Hosts) sowie beobachtete CVEs.
         conds.push(format!(
             "(w.cve_id IS NOT NULL OR EXISTS (SELECT 1 FROM host_cve_status x WHERE x.cve_id = c.id) \
-             OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.status <> 'not_affected' AND {in_scope}))"
+             OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.status <> 'not_affected' AND {MINE_SQL}))"
         ));
     }
     if let Some(d) = distro {
-        conds.push(exists(d, ""));
+        conds.push(chip_exists(d, ""));
     }
     for (source, state) in [("debian", debian_fix), ("ubuntu", ubuntu_fix)] {
         match state {
-            Some("fixed") => conds.push(exists(source, " AND s.status = 'fixed'")),
-            Some("open") => conds.push(exists(
+            Some("fixed") => conds.push(chip_exists(source, " AND ch.status = 'fixed'")),
+            Some("open") => conds.push(chip_exists(
                 source,
-                " AND s.status IN ('vulnerable','fix_pending')",
+                " AND ch.status IN ('vulnerable','fix_pending')",
             )),
             _ => {}
         }
@@ -396,31 +353,11 @@ pub async fn list(
     }
 
     let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
-    let sources: Vec<(String, SourceRow)> = sqlx::query_as::<_, SourceWithCve>(
-        "SELECT cve_id, source, release, package, status, fix_version, updated_at FROM cve_source_status \
-         WHERE cve_id = ANY($1) ORDER BY cve_id, source, release, package",
-    )
-    .bind(&ids)
-    .fetch_all(&st.pool)
-    .await?
-    .into_iter()
-    .map(SourceWithCve::split)
-    .collect();
-    let mine = my_releases(&st).await?;
-    let used = used_packages(&st, &ids).await?;
-    let no_used = HashSet::new();
-    let mut per_cve: HashMap<String, Vec<SourceRow>> = HashMap::new();
-    for (cve, row) in sources {
-        per_cve.entry(cve).or_default().push(row);
-    }
+    let mut per_cve = chips_for(&st, &ids).await?;
     let out = rows
         .into_iter()
         .map(|cve| {
-            let all = collapse(
-                per_cve.remove(&cve.id).unwrap_or_default(),
-                &mine,
-                used.get(&cve.id).unwrap_or(&no_used),
-            );
+            let all = per_cve.remove(&cve.id).unwrap_or_default();
             let total = all.len();
             let distros: Vec<Distro> = all
                 .into_iter()
@@ -440,33 +377,6 @@ pub async fn list(
         })
         .collect();
     Ok(Json(out))
-}
-
-#[derive(sqlx::FromRow)]
-struct SourceWithCve {
-    cve_id: String,
-    source: String,
-    release: String,
-    package: String,
-    status: String,
-    fix_version: Option<String>,
-    updated_at: DateTime<Utc>,
-}
-
-impl SourceWithCve {
-    fn split(self) -> (String, SourceRow) {
-        (
-            self.cve_id,
-            SourceRow {
-                source: self.source,
-                release: self.release,
-                package: self.package,
-                status: self.status,
-                fix_version: self.fix_version,
-                updated_at: self.updated_at,
-            },
-        )
-    }
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -509,7 +419,6 @@ pub async fn detail(
     .bind(&id)
     .fetch_all(&st.pool)
     .await?;
-    let mine = my_releases(&st).await?;
     let last_change = sources
         .iter()
         .map(|s| s.updated_at)
@@ -520,22 +429,10 @@ pub async fn detail(
         .into_iter()
         .filter_map(|s| source_link(s, &id).map(|u| serde_json::json!({ "source": s, "url": u })))
         .collect();
-    let used = used_packages(&st, std::slice::from_ref(&id)).await?;
-    let distros = collapse(
-        sources
-            .iter()
-            .map(|s| SourceRow {
-                source: s.source.clone(),
-                release: s.release.clone(),
-                package: s.package.clone(),
-                status: s.status.clone(),
-                fix_version: s.fix_version.clone(),
-                updated_at: s.updated_at,
-            })
-            .collect(),
-        &mine,
-        used.get(&id).unwrap_or(&HashSet::new()),
-    );
+    let distros = chips_for(&st, std::slice::from_ref(&id))
+        .await?
+        .remove(&id)
+        .unwrap_or_default();
     Ok(Json(serde_json::json!({
         "cve": cve, "sources": sources, "distros": distros, "links": links,
         "last_change_at": last_change, "hosts": hosts,

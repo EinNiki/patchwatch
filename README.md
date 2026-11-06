@@ -216,6 +216,23 @@ für neue Bewertungen aber nicht mehr erzeugt. Der Fix-Filter „offen“ der CV
 Grün (kein offener CVE-Befund) zeigt ein Host nur, wenn alle zuständigen Quellen nutzbar sind (siehe nächster
 Abschnitt); sonst „CVE-Lage unbekannt“ mit Begründung.
 
+### Filter
+
+Die CVE-Seite filtert je Distribution (Debian, Ubuntu) nach „gefixt“, „offen“ oder „egal“. Filter und Anzeige benutzen
+**dieselbe Definition der Chips** (`chips_sql` in `server/src/routes/cves.rs`): ein Chip je (Quelle, Release), sein Status ist der
+ungünstigste aller Pakete (verwundbar, dann Fix angekündigt, unbekannt, gefixt); bei Releases, die auf einem Host laufen, zählen
+nur die Pakete, auf die sich die Bewertung der Hosts stützt.
+
+- **gefixt** = mindestens ein Release der Distribution im aktuellen Umfang hat einen Chip „gefixt“.
+- **offen** = mindestens ein Release im aktuellen Umfang hat einen Chip „verwundbar“ oder „Fix angekündigt“.
+- **egal** = keine Bedingung. Debian und Ubuntu sind mit **UND** verknüpft.
+- **Umfang** (im Filterbereich, gilt für Anzeige und Filter gleich): „Releases auf meinen Hosts“ (Standard) oder „Alle
+  Releases“. Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird im Standardumfang nicht als „gefixt“ gefunden;
+  sie erscheint dort nur hinter „+ n weitere Releases“. Findet ein Filter nichts, nennt die Seite die aktiven Filter und
+  bietet an, den Umfang auf „Alle Releases“ zu stellen oder die Filter zurückzusetzen.
+- Der Filter hängt am **Typ** der Quelle (`debian`, `ubuntu`), nicht an ihrer stabilen ID; abgeschaltete oder gelöschte Quellen
+  behalten ihre Daten, die weiter angezeigt und gefiltert werden.
+
 ### Grenzen der CVE-Bewertung
 
 - **Proxmox-Kernel (`-pve`) haben keine belastbare CVE-Quelle.** Sie werden immer als **UNKNOWN** bewertet („manuell

@@ -3480,3 +3480,396 @@ async fn pages_are_paced_and_requests_identify_the_project(pool: PgPool) {
         "{uas:?}"
     );
 }
+
+// ---------- CVE-Liste: Filter "gefixt/offen" und Anzeige benutzen dieselben Chips ----------
+
+struct FilterEnv {
+    app: Router,
+    h: Vec<(String, String)>,
+    pool: PgPool,
+}
+
+async fn filter_env(pool: PgPool) -> FilterEnv {
+    let st = setup(
+        pool.clone(),
+        &["debian", "ubuntu"],
+        "",
+        "http://127.0.0.1:9",
+    )
+    .await;
+    let app = patchwatch_server::router(st);
+    let h = login(&app, &pool).await;
+    // Zwei Hosts: Debian trixie und Ubuntu noble.
+    for (name, code) in [("deb1", "trixie"), ("ubu1", "noble")] {
+        let id = add_host(&pool, name).await;
+        sqlx::query("UPDATE hosts SET os_codename = $2 WHERE id = $1")
+            .bind(id)
+            .bind(code)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    FilterEnv { app, h, pool }
+}
+
+impl FilterEnv {
+    /// Zeile der Quellentabelle (`source_id` ist die stabile ID, `source` der Typ).
+    async fn row(&self, cve: &str, source: &str, release: &str, package: &str, status: &str) {
+        self.row_id(cve, source, source, release, package, status)
+            .await;
+    }
+
+    async fn row_id(
+        &self,
+        cve: &str,
+        source: &str,
+        source_id: &str,
+        release: &str,
+        package: &str,
+        status: &str,
+    ) {
+        sqlx::query("INSERT INTO cves (id) VALUES ($1) ON CONFLICT DO NOTHING")
+            .bind(cve)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO cve_source_status (cve_id, source, release, package, status, source_id) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(cve)
+            .bind(source)
+            .bind(release)
+            .bind(package)
+            .bind(status)
+            .bind(source_id)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+
+    /// Bewertung eines Hosts, die sich auf dieses Paket stützt.
+    async fn host_uses(
+        &self,
+        host: &str,
+        cve: &str,
+        source: &str,
+        release: &str,
+        package: &str,
+        status: &str,
+    ) {
+        sqlx::query("INSERT INTO host_cve_status (host_id, cve_id, status, reason, sources) SELECT id, $2, $3, 'test', $4 FROM hosts WHERE name = $1")
+            .bind(host)
+            .bind(cve)
+            .bind(status)
+            .bind(json!([{"source": source, "release": release, "package": package}]))
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+
+    async fn list(&self, query: &str) -> Vec<Value> {
+        let r = call(
+            &self.app,
+            Method::GET,
+            &format!("/api/v1/cves?limit=500{query}"),
+            &hdr(&self.h),
+            None,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{query}");
+        r.json.as_array().unwrap().clone()
+    }
+
+    async fn ids(&self, query: &str) -> Vec<String> {
+        let mut v: Vec<String> = self
+            .list(query)
+            .await
+            .iter()
+            .map(|c| c["id"].as_str().unwrap().to_owned())
+            .collect();
+        v.sort();
+        v
+    }
+}
+
+fn chip(c: &Value, source: &str, release: &str) -> Option<String> {
+    c["distros"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["source"] == source && d["release"] == release)
+        .map(|d| d["status"].as_str().unwrap().to_owned())
+}
+
+/// Reale Beobachtung: eine CVE mit zwei gefixten Debian-Releases wird von `debian=fixed` gefunden, wenn eines davon
+/// auf einem Host läuft; läuft keines davon auf einem Host, gehört die CVE nur zum Umfang "alle Releases".
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_debian_fixed_finds_cve_with_two_fixed_releases_by_scope(pool: PgPool) {
+    let e = filter_env(pool).await;
+    // A: trixie (läuft) und bookworm (läuft nicht) gefixt.
+    e.row("CVE-2026-30001", "debian", "trixie", "linux", "fixed")
+        .await;
+    e.row("CVE-2026-30001", "debian", "bookworm", "linux", "fixed")
+        .await;
+    // C: nur die Releases ohne eigenen Host sind gefixt, trixie ist verwundbar.
+    e.row("CVE-2026-30003", "debian", "trixie", "linux", "vulnerable")
+        .await;
+    e.row("CVE-2026-30003", "debian", "forky", "linux", "fixed")
+        .await;
+    e.row("CVE-2026-30003", "debian", "sid", "linux", "fixed")
+        .await;
+    assert_eq!(e.ids("&debian=fixed").await, ["CVE-2026-30001"]);
+    // Umfang "alle": beide Releases ohne eigenen Host zählen, die CVE C ist jetzt dabei.
+    assert_eq!(
+        e.ids("&debian=fixed&releases=all").await,
+        ["CVE-2026-30001", "CVE-2026-30003"]
+    );
+    // Anzeige im selben Umfang: C zeigt im Standard nur trixie (verwundbar), mit "alle" auch forky und sid gefixt.
+    let mine = e.list("&q=CVE-2026-30003").await;
+    assert_eq!(
+        chip(&mine[0], "debian", "trixie").as_deref(),
+        Some("vulnerable")
+    );
+    assert_eq!(chip(&mine[0], "debian", "forky"), None);
+    assert_eq!(mine[0]["hidden_releases"], 2);
+    let all = e.list("&q=CVE-2026-30003&releases=all").await;
+    assert_eq!(chip(&all[0], "debian", "forky").as_deref(), Some("fixed"));
+}
+
+/// Debian gefixt + Ubuntu egal / offen, und eine unpassende Kombination ohne Treffer. UND zwischen den Distros.
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_combinations_use_and_between_distros(pool: PgPool) {
+    let e = filter_env(pool).await;
+    e.row("CVE-2026-30001", "debian", "trixie", "linux", "fixed")
+        .await;
+    e.row("CVE-2026-30001", "ubuntu", "noble", "linux", "fixed")
+        .await;
+    e.row("CVE-2026-30002", "debian", "trixie", "linux", "fixed")
+        .await;
+    e.row("CVE-2026-30002", "ubuntu", "noble", "linux", "vulnerable")
+        .await;
+    e.row("CVE-2026-30006", "debian", "trixie", "linux", "vulnerable")
+        .await;
+    e.row("CVE-2026-30006", "ubuntu", "noble", "linux", "fix_pending")
+        .await;
+    // "egal" ist keine Bedingung.
+    assert_eq!(
+        e.ids("&debian=fixed").await,
+        ["CVE-2026-30001", "CVE-2026-30002"]
+    );
+    assert_eq!(
+        e.ids("&debian=fixed&ubuntu=").await,
+        ["CVE-2026-30001", "CVE-2026-30002"]
+    );
+    assert_eq!(e.ids("&debian=fixed&ubuntu=open").await, ["CVE-2026-30002"]);
+    assert_eq!(e.ids("&debian=open&ubuntu=open").await, ["CVE-2026-30006"]);
+    assert_eq!(
+        e.ids("&debian=open&ubuntu=fixed").await,
+        Vec::<String>::new()
+    );
+    // Alt-URL bleibt ein Alias.
+    assert_eq!(
+        e.ids("&split=debian_fixed_ubuntu_open").await,
+        ["CVE-2026-30002"]
+    );
+}
+
+/// Ein Chip, der "gefixt" zeigt, wird vom Filter "gefixt" gefunden, und ein roter Chip nicht: bei Releases mit eigenem
+/// Host zählen nur die Pakete, auf die sich die Bewertung stützt (linux), nicht z. B. linux-nvidia.
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_and_chip_agree_for_used_packages(pool: PgPool) {
+    let e = filter_env(pool).await;
+    // D: genutztes Paket gefixt, ein anderes Kernel-Paket verwundbar -> Chip "gefixt".
+    e.row("CVE-2026-30004", "ubuntu", "noble", "linux", "fixed")
+        .await;
+    e.row(
+        "CVE-2026-30004",
+        "ubuntu",
+        "noble",
+        "linux-nvidia",
+        "vulnerable",
+    )
+    .await;
+    e.host_uses(
+        "ubu1",
+        "CVE-2026-30004",
+        "ubuntu",
+        "noble",
+        "linux",
+        "not_affected",
+    )
+    .await;
+    // E: genutztes Paket verwundbar, ein anderes gefixt -> Chip "verwundbar".
+    e.row("CVE-2026-30005", "ubuntu", "noble", "linux", "vulnerable")
+        .await;
+    e.row("CVE-2026-30005", "ubuntu", "noble", "linux-aws", "fixed")
+        .await;
+    e.host_uses(
+        "ubu1",
+        "CVE-2026-30005",
+        "ubuntu",
+        "noble",
+        "linux",
+        "vulnerable",
+    )
+    .await;
+    let all = e.list("").await;
+    let status = |id: &str| {
+        chip(
+            all.iter().find(|c| c["id"] == id).unwrap(),
+            "ubuntu",
+            "noble",
+        )
+        .unwrap()
+    };
+    assert_eq!(status("CVE-2026-30004"), "fixed");
+    assert_eq!(status("CVE-2026-30005"), "vulnerable");
+    assert_eq!(e.ids("&ubuntu=fixed").await, ["CVE-2026-30004"]);
+    assert_eq!(e.ids("&ubuntu=open").await, ["CVE-2026-30005"]);
+}
+
+/// Anzeige und Filter liefern für jede Kombination dieselbe CVE-Liste (Filter = Chips der Anzeige).
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_result_equals_list_of_cves_whose_chips_match(pool: PgPool) {
+    let e = filter_env(pool).await;
+    let cases = [
+        ("CVE-2026-31001", "fixed", "fixed", "vulnerable"),
+        ("CVE-2026-31002", "vulnerable", "fixed", "fixed"),
+        ("CVE-2026-31003", "fix_pending", "vulnerable", "fixed"),
+        ("CVE-2026-31004", "unknown", "not_affected", "fix_pending"),
+        ("CVE-2026-31005", "fixed", "fixed", "fixed"),
+    ];
+    for (id, trixie, bookworm, noble) in cases {
+        e.row(id, "debian", "trixie", "linux", trixie).await;
+        e.row(id, "debian", "bookworm", "linux", bookworm).await;
+        e.row(id, "ubuntu", "noble", "linux", noble).await;
+    }
+    // Mehrere Pakete je Release, wobei der Host nur eines nutzt: Chip und Filter müssen übereinstimmen.
+    for (id, used, other) in [
+        ("CVE-2026-31006", "fixed", "vulnerable"),
+        ("CVE-2026-31007", "vulnerable", "fixed"),
+    ] {
+        e.row(id, "debian", "trixie", "linux", used).await;
+        e.row(id, "debian", "trixie", "linux-6.12", other).await;
+        e.host_uses("deb1", id, "debian", "trixie", "linux", "vulnerable")
+            .await;
+        e.row(id, "ubuntu", "noble", "linux", used).await;
+        e.row(id, "ubuntu", "noble", "linux-aws", other).await;
+        e.host_uses("ubu1", id, "ubuntu", "noble", "linux", "vulnerable")
+            .await;
+    }
+    for scope in ["", "&releases=all"] {
+        let all = e.list(scope).await;
+        for d in ["", "fixed", "open"] {
+            for u in ["", "fixed", "open"] {
+                let want = |c: &Value, src: &str, f: &str| {
+                    f.is_empty()
+                        || c["distros"].as_array().unwrap().iter().any(|x| {
+                            x["source"] == src
+                                && match f {
+                                    "fixed" => x["status"] == "fixed",
+                                    _ => {
+                                        x["status"] == "vulnerable" || x["status"] == "fix_pending"
+                                    }
+                                }
+                        })
+                };
+                let mut expect: Vec<String> = all
+                    .iter()
+                    .filter(|c| want(c, "debian", d) && want(c, "ubuntu", u))
+                    .map(|c| c["id"].as_str().unwrap().to_owned())
+                    .collect();
+                expect.sort();
+                let got = e.ids(&format!("{scope}&debian={d}&ubuntu={u}")).await;
+                assert_eq!(got, expect, "Umfang '{scope}' debian={d} ubuntu={u}");
+            }
+        }
+    }
+}
+
+/// Stabile Quellen-IDs, abgeschaltete und gelöschte Quellen: der Filter hängt am Typ der Quelle, nicht an ihrer ID,
+/// und alte Daten bleiben sichtbar und filterbar.
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_works_with_stable_source_ids_and_disabled_sources(pool: PgPool) {
+    let e = filter_env(pool).await;
+    e.row_id(
+        "CVE-2026-32001",
+        "debian",
+        "debian-a1b2c3d4",
+        "trixie",
+        "linux",
+        "fixed",
+    )
+    .await;
+    e.row_id(
+        "CVE-2026-32001",
+        "debian",
+        "debian-a1b2c3d4",
+        "bookworm",
+        "linux",
+        "fixed",
+    )
+    .await;
+    assert_eq!(e.ids("&debian=fixed").await, ["CVE-2026-32001"]);
+    // Quelle abgeschaltet bzw. gelöscht: vorhandene Daten bleiben erhalten und werden weiter gefunden.
+    sqlx::query("UPDATE cve_sources SET enabled = false WHERE id = 'debian'")
+        .execute(&e.pool)
+        .await
+        .unwrap();
+    assert_eq!(e.ids("&debian=fixed").await, ["CVE-2026-32001"]);
+    sqlx::query("UPDATE cve_sources SET deleted_at = now() WHERE id = 'debian'")
+        .execute(&e.pool)
+        .await
+        .unwrap();
+    assert_eq!(e.ids("&debian=fixed").await, ["CVE-2026-32001"]);
+    let c = &e.list("&q=CVE-2026-32001").await[0];
+    assert_eq!(chip(c, "debian", "trixie").as_deref(), Some("fixed"));
+}
+
+/// Ungültige Werte werden mit 400 abgelehnt, Sonderzeichen in der Suche stürzen nie ab.
+#[sqlx::test(migrations = "./migrations")]
+async fn filter_rejects_bad_values_and_survives_special_characters(pool: PgPool) {
+    let e = filter_env(pool).await;
+    e.row("CVE-2026-33001", "debian", "trixie", "linux", "fixed")
+        .await;
+    for bad in [
+        "&debian=nix",
+        "&ubuntu=1%27%20OR%201=1",
+        "&releases=jeder",
+        "&debian=FIXED",
+    ] {
+        let r = call(
+            &e.app,
+            Method::GET,
+            &format!("/api/v1/cves?x=1{bad}"),
+            &hdr(&e.h),
+            None,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    for q in [
+        "%27",
+        "%25",
+        "_",
+        "%5C",
+        "%C3%A9%F0%9F%A6%80",
+        "CVE-",
+        "%22%3B%20DROP%20TABLE%20cves%3B--",
+        "a%00b",
+        "%0A",
+    ] {
+        let r = call(
+            &e.app,
+            Method::GET,
+            &format!("/api/v1/cves?debian=fixed&q={q}"),
+            &hdr(&e.h),
+            None,
+        )
+        .await;
+        assert!(
+            r.status == StatusCode::OK || r.status == StatusCode::BAD_REQUEST,
+            "q={q}: {}",
+            r.status
+        );
+    }
+    assert_eq!(count(&e.pool, "SELECT count(*) FROM cves").await, 1);
+}

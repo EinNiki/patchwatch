@@ -346,11 +346,12 @@ function CveView() {
             <input type="checkbox" checked={onlyWatch} onChange={(e) => setWatchFilter(e.target.checked)} className="size-4 accent-(--accent) max-md:size-5" />
             nur Watchlist
           </label>
-          <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
-            <input type="checkbox" checked={allReleases} onChange={(e) => setParam("releases", e.target.checked ? "all" : null)} className="size-4 accent-(--accent) max-md:size-5" />
-            <span>
-              Alle Releases <span className="text-fg3 max-lg:hidden">(auch ohne eigenen Host)</span>
-            </span>
+          <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
+            Umfang (Anzeige und Filter)
+            <select value={allReleases ? "all" : "mine"} onChange={(e) => setParam("releases", e.target.value === "all" ? "all" : null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
+              <option value="mine">Releases auf meinen Hosts</option>
+              <option value="all">Alle Releases</option>
+            </select>
           </label>
         </div>
 
@@ -380,7 +381,22 @@ function CveView() {
         ) : cves.data.length === 0 ? (
           <Empty title={filtered ? "Keine passenden CVEs" : "Noch keine CVE-Daten"}>
             {filtered ? (
-              "Ändere die Suche oder die Filter. Ohne „Alle Releases“ erscheinen nur CVEs, die deine Hosts betreffen (und die Watchlist)."
+              <>
+                <span className="block">
+                  Aktive Filter: {chips.length > 0 ? chips.map((c) => c.label).join(", ") : "keine"}. Umfang: {allReleases ? "alle Releases" : "nur Releases, die auf deinen Hosts laufen"}.
+                </span>
+                {!allReleases ? <span className="block">Debian- und Ubuntu-Filter („gefixt“, „offen“) gelten nur für Releases deiner Hosts, solange der Umfang so eingestellt ist.</span> : null}
+                <span className="mt-2 flex flex-wrap gap-3">
+                  {!allReleases ? (
+                    <button type="button" onClick={() => setParam("releases", "all")} className="text-accent underline max-md:min-h-11">
+                      Umfang auf „Alle Releases“ stellen
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={resetAll} className="text-accent underline max-md:min-h-11">
+                    Filter zurücksetzen
+                  </button>
+                </span>
+              </>
             ) : (
               <>
                 Sobald ein Feed erfolgreich abgerufen wurde, erscheinen die CVEs hier. Prüfe den Feed-Zustand oben oder rufe die Feeds mit „Jetzt
