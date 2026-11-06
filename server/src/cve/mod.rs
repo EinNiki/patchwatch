@@ -135,6 +135,12 @@ pub enum FetchOutcome {
 pub enum FeedError {
     Network(String),
     Http(u16),
+    /// Quelle ist überlastet oder drosselt (429, 5xx). `retry_after` ist der (bereits gedeckelte) Wunsch der
+    /// Gegenseite aus dem Header `Retry-After`, falls vorhanden.
+    Throttled {
+        status: u16,
+        retry_after: Option<std::time::Duration>,
+    },
     TooLarge(u64),
     /// Antwort hat nicht das erwartete Format (Quelle hat das Format geändert?).
     Format(String),
@@ -144,7 +150,7 @@ impl fmt::Display for FeedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Network(m) => write!(f, "Netzwerkfehler: {m}"),
-            Self::Http(c) => write!(f, "HTTP {c}"),
+            Self::Http(c) | Self::Throttled { status: c, .. } => write!(f, "HTTP {c}"),
             Self::TooLarge(n) => write!(f, "Antwort größer als das Limit von {n} Bytes"),
             Self::Format(m) => write!(f, "unerwartetes Format: {m}"),
         }

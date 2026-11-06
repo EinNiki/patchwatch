@@ -66,6 +66,7 @@ impl Nvd {
                 timeout: Duration::from_secs(c.request_timeout_secs),
                 attempts: 1,
                 base_delay: Duration::from_millis(c.retry_base_delay_ms),
+                retry_after_cap: super::http::RETRY_AFTER_CAP,
             },
             // Tests setzen eine winzige Retry-Basis und brauchen keine Pausen; in Betrieb gilt immer die Rate-Limit-Pause.
             pause: if c.retry_base_delay_ms < 100 {

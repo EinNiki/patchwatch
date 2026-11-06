@@ -15,6 +15,30 @@ pub struct Limits {
     pub timeout: Duration,
     pub attempts: u32,
     pub base_delay: Duration,
+    /// Obergrenze für eine Wartezeit aus `Retry-After` (und für jede einzelne Backoff-Pause).
+    pub retry_after_cap: Duration,
+}
+
+/// Standard-Obergrenze für `Retry-After`: 15 Minuten.
+pub const RETRY_AFTER_CAP: Duration = Duration::from_secs(15 * 60);
+
+/// Liest `Retry-After` (Sekunden oder HTTP-Datum) und deckelt den Wert. Unlesbares oder Vergangenes ergibt `None`
+/// bzw. 0 s; die Obergrenze verhindert, dass eine Quelle uns beliebig lange blockiert.
+pub fn parse_retry_after(
+    value: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    cap: Duration,
+) -> Option<Duration> {
+    let v = value.trim();
+    let d = if let Ok(secs) = v.parse::<u64>() {
+        Duration::from_secs(secs)
+    } else {
+        let at = chrono::DateTime::parse_from_rfc2822(v).ok()?;
+        (at.with_timezone(&chrono::Utc) - now)
+            .to_std()
+            .unwrap_or(Duration::ZERO)
+    };
+    Some(d.min(cap))
 }
 
 /// Kleiner Zufallsanteil ohne zusätzliche Abhängigkeit (Jitter für Backoff und Scheduler).
@@ -35,7 +59,7 @@ pub fn backoff(base: Duration, n: u32) -> Duration {
 }
 
 fn retryable(e: &FeedError) -> bool {
-    matches!(e, FeedError::Network(_)) || matches!(e, FeedError::Http(c) if *c == 429 || *c >= 500)
+    matches!(e, FeedError::Network(_) | FeedError::Throttled { .. })
 }
 
 async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
@@ -53,7 +77,19 @@ async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
         });
     }
     if !status.is_success() {
-        return Err(FeedError::Http(status.as_u16()));
+        let code = status.as_u16();
+        if code == 429 || code >= 500 {
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| parse_retry_after(v, chrono::Utc::now(), lim.retry_after_cap));
+            return Err(FeedError::Throttled {
+                status: code,
+                retry_after,
+            });
+        }
+        return Err(FeedError::Http(code));
     }
     if resp.content_length().is_some_and(|n| n > lim.max_bytes) {
         return Err(FeedError::TooLarge(lim.max_bytes));
@@ -83,7 +119,15 @@ pub async fn execute(make: impl Fn() -> RequestBuilder, lim: Limits) -> Result<F
     let mut last = FeedError::Network("kein Versuch".into());
     for attempt in 0..lim.attempts.max(1) {
         if attempt > 0 {
-            tokio::time::sleep(backoff(lim.base_delay, attempt - 1)).await;
+            // Die Gegenseite bestimmt die Pause, wenn sie eine nennt; sonst exponentiell mit Jitter. Beides gedeckelt.
+            let wait = match &last {
+                FeedError::Throttled {
+                    retry_after: Some(d),
+                    ..
+                } => *d,
+                _ => backoff(lim.base_delay, attempt - 1),
+            };
+            tokio::time::sleep(wait.min(lim.retry_after_cap)).await;
         }
         match once(make(), lim).await {
             Ok(f) => return Ok(f),
@@ -143,9 +187,45 @@ mod tests {
     #[test]
     fn retry_classification() {
         assert!(retryable(&FeedError::Network("x".into())));
-        assert!(retryable(&FeedError::Http(503)));
-        assert!(retryable(&FeedError::Http(429)));
         assert!(!retryable(&FeedError::Http(404)));
+        assert!(retryable(&FeedError::Throttled {
+            status: 503,
+            retry_after: None
+        }));
         assert!(!retryable(&FeedError::TooLarge(1)));
+    }
+
+    #[test]
+    fn retry_after_seconds_date_garbage_and_cap() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-06T17:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let cap = RETRY_AFTER_CAP;
+        assert_eq!(
+            parse_retry_after("120", now, cap),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            parse_retry_after(" 7 ", now, cap),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            parse_retry_after("Fri, 06 Nov 2026 17:05:00 GMT", now, cap),
+            Some(Duration::from_secs(300))
+        );
+        // Datum in der Vergangenheit: sofort wieder erlaubt.
+        assert_eq!(
+            parse_retry_after("Fri, 06 Nov 2026 16:00:00 GMT", now, cap),
+            Some(Duration::ZERO)
+        );
+        // Deckel bei 15 Minuten, auch bei absurden Werten.
+        assert_eq!(parse_retry_after("86400", now, cap), Some(cap));
+        assert_eq!(
+            parse_retry_after("Sat, 07 Nov 2026 17:00:00 GMT", now, cap),
+            Some(cap)
+        );
+        assert_eq!(parse_retry_after("bald", now, cap), None);
+        assert_eq!(parse_retry_after("", now, cap), None);
+        assert_eq!(parse_retry_after("-5", now, cap), None);
     }
 }

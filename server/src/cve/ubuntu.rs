@@ -43,6 +43,7 @@ impl Ubuntu {
                 timeout: Duration::from_secs(c.request_timeout_secs),
                 attempts: c.retries,
                 base_delay: Duration::from_millis(c.retry_base_delay_ms),
+                retry_after_cap: super::http::RETRY_AFTER_CAP,
             },
         }
     }
