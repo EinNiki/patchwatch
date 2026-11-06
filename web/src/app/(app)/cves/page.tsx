@@ -454,7 +454,7 @@ function CveView() {
         <p className="mt-4 text-xs text-fg3">
           Details zur Bewertung je Host stehen in der Host-Ansicht (<Link href="/">Hosts</Link>). 
         </p>
-        <ChipLegend allScope={allReleases} />
+        <ChipLegend />
       </section>
     </>
   );

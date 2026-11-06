@@ -5182,3 +5182,259 @@ async fn host_cves_incomplete_source_creates_no_new_fixed_entries(pool: PgPool) 
         r.json
     );
 }
+
+// ---------- Debian: Archiv und Security getrennt ----------
+
+fn tracker_with_suites() -> String {
+    json!({"linux": {
+        // A: Archiv unter der Fix-Version, Security darüber -> für Hosts mit Security gefixt
+        "CVE-2026-98432": {"description": "A", "releases": {
+            "trixie": {"status": "resolved", "fixed_version": "6.12.113-1", "urgency": "high",
+                       "repositories": {"trixie": "6.12.107-1", "trixie-security": "6.12.115-2"}},
+            "bookworm": {"status": "resolved", "fixed_version": "6.1.190-1", "urgency": "high",
+                       "repositories": {"bookworm": "6.1.176-1", "bookworm-security": "6.1.190-1"}}}},
+        // B: die Fix-Version steckt weder im Archiv noch in Security (z. B. nur in proposed-updates)
+        "CVE-2026-98433": {"description": "B", "releases": {
+            "trixie": {"status": "resolved", "fixed_version": "6.12.200-1", "urgency": "low",
+                       "repositories": {"trixie": "6.12.107-1", "trixie-security": "6.12.115-2"}}}},
+        // C: nicht betroffen
+        "CVE-2026-98434": {"description": "C", "releases": {
+            "trixie": {"status": "resolved", "fixed_version": "0", "urgency": "low",
+                       "repositories": {"trixie": "6.12.107-1", "trixie-security": "6.12.115-2"}}}},
+    }})
+    .to_string()
+}
+
+fn trixie_host(version: &str) -> K<'_> {
+    K {
+        host: "deb1",
+        os_id: "debian",
+        os_version: "13",
+        codename: "trixie",
+        release: "6.12.107+deb13-amd64",
+        package: "linux-image-6.12.107+deb13-amd64",
+        source: "linux-signed-amd64",
+        version,
+        newest_release: "6.12.107+deb13-amd64",
+        newest_version: version,
+        proxmox: false,
+    }
+}
+
+/// Suiten werden je Zeile gespeichert, der Chip-Status und die Filter "gefixt"/"offen" richten sich nach der neuen
+/// Definition (gefixt = Security oder Archiv enthält den Fix), die Hostbewertung bleibt unverändert, und der Host mit
+/// Archiv-Version unter dem Fix bekommt den Hinweis "Fix verfügbar über Security-Updates".
+#[sqlx::test(migrations = "./migrations")]
+async fn debian_suites_are_stored_and_drive_chip_filter_and_host_hint(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    mock.lock().unwrap().debian_body = tracker_with_suites();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["debian"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let hid = add_host(&pool, "deb1").await;
+    assert_eq!(
+        report(&app, &trixie_host("6.12.107-1")).await,
+        StatusCode::NO_CONTENT
+    );
+    refresh::refresh_all(&st).await;
+
+    // Rohdaten und gespeicherte Zeile: beide Suiten, je mit Version und Status.
+    let suites: Value = sqlx::query_scalar(
+        "SELECT suites FROM cve_source_status WHERE cve_id = 'CVE-2026-98432' AND source = 'debian' AND release = 'trixie'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        suites["trixie"],
+        json!({"version": "6.12.107-1", "status": "vulnerable"})
+    );
+    assert_eq!(
+        suites["trixie-security"],
+        json!({"version": "6.12.115-2", "status": "fixed"})
+    );
+
+    let cookies = login(&app, &pool).await;
+    let h = hdr(&cookies);
+    let one = call(&app, Method::GET, "/api/v1/cves/CVE-2026-98432", &h, None).await;
+    let chip_a = one.json["distros"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["release"] == "trixie")
+        .unwrap()
+        .clone();
+    assert_eq!(chip_a["status"], "fixed");
+    assert_eq!(chip_a["suites"]["trixie-security"]["status"], "fixed");
+    assert_eq!(chip_a["suites"]["trixie"]["status"], "vulnerable");
+
+    // Filter: A gefixt (Security hat den Fix), B offen (kein Archiv enthält die Fix-Version).
+    let ids = |q: &'static str| {
+        let app = app.clone();
+        let hh: Vec<(String, String)> = cookies.clone();
+        async move {
+            let r = call(
+                &app,
+                Method::GET,
+                &format!("/api/v1/cves?limit=100{q}"),
+                &hdr(&hh),
+                None,
+            )
+            .await;
+            let mut v: Vec<String> = r
+                .json
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["id"].as_str().unwrap().to_owned())
+                .collect();
+            v.sort();
+            v
+        }
+    };
+    assert_eq!(ids("&debian=fixed").await, ["CVE-2026-98432"]);
+    assert_eq!(ids("&debian=open").await, ["CVE-2026-98433"]);
+    let b = call(&app, Method::GET, "/api/v1/cves/CVE-2026-98433", &h, None).await;
+    let chip_b = b.json["distros"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["release"] == "trixie")
+        .unwrap();
+    assert_eq!(
+        chip_b["status"], "vulnerable",
+        "Fix weder im Archiv noch in Security"
+    );
+
+    // Hostbewertung unverändert (eval.rs): Archiv-Kernel unter der Fix-Version bleibt verwundbar, mit Hinweis.
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-98432").await.as_deref(),
+        Some("vulnerable")
+    );
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-98434").await.as_deref(),
+        Some("not_affected")
+    );
+    let list = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/hosts/{hid}/cves"),
+        &h,
+        None,
+    )
+    .await;
+    let a = list.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["cve_id"] == "CVE-2026-98432")
+        .unwrap();
+    assert_eq!(a["fix_hint"], "security", "{a}");
+    let b = list.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["cve_id"] == "CVE-2026-98433")
+        .unwrap();
+    assert!(
+        b["fix_hint"].is_null(),
+        "kein Fix in Security: kein Hinweis"
+    );
+
+    // Nach dem Installieren der Security-Version ist der Eintrag gefixt (nicht mehr "verfügbar").
+    assert_eq!(
+        report(&app, &trixie_host("6.12.115-2")).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        cve_status(&pool, hid, "CVE-2026-98432").await.as_deref(),
+        Some("fixed")
+    );
+}
+
+/// Bestehende Zeilen ohne Suiten bleiben unverändert (suites = NULL); der nächste Import füllt sie nach,
+/// ohne Änderungs-Ereignisse zu erzeugen und ohne Status oder Fix-Version anzufassen.
+#[sqlx::test(migrations = "./migrations")]
+async fn debian_suites_migration_keeps_rows_and_import_backfills_quietly(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    mock.lock().unwrap().debian_body = tracker_with_suites();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["debian"], "", &base).await;
+    refresh::refresh_all(&st).await;
+    let before: (String, Option<String>) = sqlx::query_as(
+        "SELECT status, fix_version FROM cve_source_status WHERE cve_id = 'CVE-2026-98432' AND release = 'trixie'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Zustand vor der Migration nachstellen: Zeilen ohne Suiten, Abruf-Validatoren leer.
+    sqlx::query("UPDATE cve_source_status SET raw = raw - 'suites' WHERE source = 'debian'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE feed_state SET etag = NULL, last_modified = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM cve_source_status WHERE suites IS NOT NULL"
+        )
+        .await,
+        0
+    );
+    let events_before = count(&pool, "SELECT count(*) FROM events").await;
+
+    refresh::refresh_all(&st).await;
+    let after: (String, Option<String>) = sqlx::query_as(
+        "SELECT status, fix_version FROM cve_source_status WHERE cve_id = 'CVE-2026-98432' AND release = 'trixie'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(before, after, "Status und Fix-Version bleiben");
+    assert!(
+        count(
+            &pool,
+            "SELECT count(*) FROM cve_source_status WHERE suites IS NOT NULL"
+        )
+        .await
+            > 0,
+        "nachgefüllt"
+    );
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM events").await,
+        events_before,
+        "stille Nachfüllung, keine Ereignisse"
+    );
+}
+
+/// Sonderzeichen in Release-/Paketnamen und Versionen stürzen weder Adapter noch API ab.
+#[sqlx::test(migrations = "./migrations")]
+async fn debian_suites_special_characters_do_not_crash(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    mock.lock().unwrap().debian_body = json!({"linux": {"CVE-2026-98440": {"description": "café 🔥 <script>", "releases": {
+        "trixie": {"status": "resolved", "fixed_version": "6.12.113-1", "urgency": "low",
+                   "repositories": {"trixie": "kaputt version ünï", "trixie-security": "6.12.115-2", "trixie 🔥": "x"}}}}}})
+    .to_string();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["debian"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    refresh::refresh_all(&st).await;
+    let cookies = login(&app, &pool).await;
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves/CVE-2026-98440",
+        &hdr(&cookies),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let s = &r.json["distros"][0]["suites"];
+    assert_eq!(
+        s["trixie"]["status"], "unknown",
+        "ungültige Version bleibt unbekannt, nie grün"
+    );
+}

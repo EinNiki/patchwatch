@@ -170,6 +170,9 @@ pub struct HostCveRow {
     fix_version: Option<String>,
     #[sqlx(skip)]
     source: Option<String>,
+    /// `security`: ein Fix ist in der Security-Suite von Debian erhältlich, aber auf diesem Host noch nicht installiert.
+    #[sqlx(skip)]
+    fix_hint: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -341,6 +344,31 @@ pub async fn cves(
             r
         })
         .collect();
+
+    // Hinweis "Fix verfügbar über Security-Updates": Debian führt je Suite eine Version; ist der Eintrag des Hosts
+    // verwundbar und enthält die Security-Suite den Fix, fehlt nur das Einspielen (die Bewertung selbst bleibt).
+    let mut items = items;
+    if host.os_id.as_deref() == Some("debian") {
+        let wanted: Vec<String> = items
+            .iter()
+            .filter(|i| i.status == "vulnerable" && i.fix_version.is_some())
+            .map(|i| i.cve_id.clone())
+            .collect();
+        if !wanted.is_empty() {
+            let secure: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT s.cve_id FROM cve_source_status s \
+                 WHERE s.source = 'debian' AND s.cve_id = ANY($1) AND s.release = $2 \
+                   AND EXISTS (SELECT 1 FROM jsonb_each(s.suites) e WHERE e.key LIKE '%-security' AND e.value->>'status' = 'fixed')",
+            )
+            .bind(&wanted)
+            .bind(host.os_codename.as_deref().unwrap_or(""))
+            .fetch_all(&st.pool)
+            .await?;
+            for i in items.iter_mut().filter(|i| secure.contains(&i.cve_id)) {
+                i.fix_hint = Some("security");
+            }
+        }
+    }
 
     // Hinweis "Bewertung eingeschränkt": die Quelle ist unvollständig, veraltet oder das Release nicht importiert.
     let issue = if host.is_proxmox {

@@ -136,6 +136,8 @@ export interface Distro {
   updated_at: string;
   mine: boolean;
   packages: number;
+  /** Debian: Status und Version je Suite (`trixie`, `trixie-security`); null, wenn noch nicht importiert. */
+  suites: Record<string, { version: string; status: string }> | null;
 }
 
 export interface CveListItem extends Cve {

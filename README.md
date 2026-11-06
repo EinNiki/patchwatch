@@ -213,6 +213,14 @@ für neue Bewertungen aber nicht mehr erzeugt. Der Fix-Filter „offen“ der CV
 „behoben“ nur veröffentlichte Fixes. Zeilen abgeschalteter oder gelöschter Quellen werden bei der Bewertung ignoriert
 (seit `0cd2c5e`, `reeval.rs`).
 
+**Debian: Archiv und Security.** Der Debian Security Tracker führt je Release EINEN Status und EINE Fix-Version und je Suite
+(`trixie`, `trixie-security`) die Version des Quellpakets. Der Adapter legt je Suite Version und Status ab
+(`cve_source_status.suites`): Suite-Version ≥ Fix-Version = gefixt, darunter verwundbar. Die Bewertung eines Hosts bleibt
+dieselbe Regel wie oben (Vergleich des laufenden Kernels mit der Fix-Version, `eval.rs` unverändert): Ein Host, dessen Kernel
+unter der Fix-Version liegt, ist **verwundbar**, auch wenn die Security-Suite den Fix schon enthält; die Host-Ansicht
+zeigt dann „Fix verfügbar über Security-Updates“, bis der Host die Version installiert hat. Ob ein Host das Security-Archiv
+aktiviert hat, ist nicht bekannt.
+
 Grün (kein offener CVE-Befund) zeigt ein Host nur, wenn alle zuständigen Quellen nutzbar sind (siehe nächster
 Abschnitt); sonst „CVE-Lage unbekannt“ mit Begründung.
 
@@ -223,8 +231,13 @@ Die CVE-Seite filtert je Distribution (Debian, Ubuntu) nach „gefixt“, „off
 ungünstigste aller Pakete (verwundbar, dann Fix angekündigt, unbekannt, gefixt); bei Releases, die auf einem Host laufen, zählen
 nur die Pakete, auf die sich die Bewertung der Hosts stützt.
 
-- **gefixt** = mindestens ein Release der Distribution im aktuellen Umfang hat einen Chip „gefixt“.
-- **offen** = mindestens ein Release im aktuellen Umfang hat einen Chip „verwundbar“ oder „Fix angekündigt“.
+- **gefixt** = mindestens ein Release der Distribution im aktuellen Umfang hat einen Chip „gefixt“. Bei Debian gilt ein
+  Release als gefixt, wenn die Security-Suite **oder** das Archiv die Fix-Version enthält; eine CVE, die nur im Archiv offen,
+  aber in Security gefixt ist, zählt als „gefixt“.
+- **offen** = mindestens ein Release im aktuellen Umfang hat einen Chip „verwundbar“ oder „Fix angekündigt“. Bei Debian:
+  weder Security noch Archiv enthält die Fix-Version (z. B. nur in einem Zwischenarchiv).
+- Chips außerhalb des Umfangs (Release läuft auf keinem deiner Hosts) sind gestrichelt und gedämpft; die Legende darüber
+  erscheint nur, wenn ein solcher Chip auf der Seite steht.
 - **egal** = keine Bedingung. Debian und Ubuntu sind mit **UND** verknüpft.
 - **Umfang** (im Filterbereich, gilt für Anzeige und Filter gleich): „Releases auf meinen Hosts“ (Standard) oder „Alle
   Releases“. Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird im Standardumfang nicht als „gefixt“ gefunden;

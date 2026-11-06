@@ -97,11 +97,17 @@ pub struct Distro {
     mine: bool,
     /// Anzahl Pakete dieser Quelle/Release.
     packages: i64,
+    /// Debian: Status und Version je Suite (Archiv, Security); `null`, wenn noch nicht importiert.
+    suites: Option<Value>,
 }
 
 /// Rang für „ungünstigster Status zuerst“ (SQL; Chip-Status = kleinster Rang aller Pakete).
-const SEVERITY_SQL: &str = "CASE s.status WHEN 'vulnerable' THEN 0 WHEN 'fix_pending' THEN 1 WHEN 'unknown' THEN 2 WHEN 'fixed' THEN 3 ELSE 4 END";
+const SEVERITY_SQL: &str = "CASE (CASE WHEN s.source = 'debian' AND s.status = 'fixed' AND s.suites IS NOT NULL AND NOT EXISTS (SELECT 1 FROM jsonb_each(s.suites) e WHERE e.value->>'status' = 'fixed') THEN 'vulnerable' ELSE s.status END) WHEN 'vulnerable' THEN 0 WHEN 'fix_pending' THEN 1 WHEN 'unknown' THEN 2 WHEN 'fixed' THEN 3 ELSE 4 END";
 /// Release läuft auf mindestens einem Host (Umfang „meine Releases“).
+/// Status des Chips: Debian führt EINEN Status je Release ("resolved" mit Fix-Version). Steckt diese Version weder im
+/// Archiv noch in Security (nur z. B. in einem Zwischenarchiv), ist der Fix für Hosts noch nicht erreichbar: offen.
+/// Ohne Suiten-Angabe (ältere Zeilen) bleibt der Status des Trackers. Anzeige und Filter lesen beide dies.
+const EFFECTIVE_STATUS_SQL: &str = "CASE WHEN s.source = 'debian' AND s.status = 'fixed' AND s.suites IS NOT NULL AND NOT EXISTS (SELECT 1 FROM jsonb_each(s.suites) e WHERE e.value->>'status' = 'fixed') THEN 'vulnerable' ELSE s.status END";
 const MINE_SQL: &str =
     "s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL AND os_codename <> '')";
 
@@ -125,8 +131,8 @@ fn chips_sql(ids: bool, source: Option<&str>) -> String {
     let hs_cond = if ids { "WHERE hs.cve_id = ANY($1)" } else { "" };
     let s_cond = s_cond.join(" AND ");
     format!(
-        "SELECT DISTINCT ON (s.cve_id, s.source, s.release) s.cve_id, s.source, s.release, s.package, s.status, \
-         s.fix_version, max(s.updated_at) OVER w AS updated_at, ({MINE_SQL}) AS mine, (count(*) OVER w)::int8 AS packages \
+        "SELECT DISTINCT ON (s.cve_id, s.source, s.release) s.cve_id, s.source, s.release, s.package, {EFFECTIVE_STATUS_SQL} AS status, \
+         s.fix_version, s.suites, max(s.updated_at) OVER w AS updated_at, ({MINE_SQL}) AS mine, (count(*) OVER w)::int8 AS packages \
          FROM cve_source_status s \
          LEFT JOIN (SELECT hs.cve_id, u->>'source' AS source, u->>'release' AS release, array_agg(DISTINCT u->>'package') AS pkgs \
                     FROM host_cve_status hs CROSS JOIN LATERAL jsonb_array_elements(hs.sources) u {hs_cond} GROUP BY 1, 2, 3) ud \

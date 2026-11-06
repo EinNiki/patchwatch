@@ -11,7 +11,7 @@ use crate::config::CveConfig;
 use async_trait::async_trait;
 use serde::de::{Deserializer, IgnoredAny, MapAccess, Visitor};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
@@ -49,6 +49,41 @@ struct DebRelease {
     status: String,
     fixed_version: Option<String>,
     urgency: Option<String>,
+    /// Version des Quellpakets je Suite (z. B. `trixie`, `trixie-security`), wie der Tracker sie führt.
+    #[serde(default)]
+    repositories: BTreeMap<String, String>,
+}
+
+/// Status je Suite. Der Tracker führt nur EINEN Status und EINE Fix-Version je Release; die Seite des Trackers leitet
+/// den Status je Suite aus dem Vergleich der Suite-Version mit der Fix-Version ab. Dasselbe geschieht hier:
+/// Suite-Version >= Fix-Version ist gefixt (Archiv UND Security getrennt), darunter verwundbar.
+fn suites(r: &DebRelease) -> Option<Value> {
+    if r.repositories.is_empty() {
+        return None;
+    }
+    let fix = r
+        .fixed_version
+        .as_deref()
+        .filter(|f| r.status == "resolved" && *f != "0")
+        .and_then(|f| f.parse::<debversion::Version>().ok());
+    let out: serde_json::Map<String, Value> = r
+        .repositories
+        .iter()
+        .map(|(suite, ver)| {
+            let status = match (r.status.as_str(), r.fixed_version.as_deref()) {
+                ("resolved", Some("0")) => "not_affected",
+                ("resolved", Some(_)) => match (&fix, ver.parse::<debversion::Version>()) {
+                    (Some(f), Ok(v)) if v >= *f => "fixed",
+                    (Some(_), Ok(_)) => "vulnerable",
+                    _ => "unknown",
+                },
+                ("open", _) => "vulnerable",
+                _ => "unknown",
+            };
+            (suite.clone(), json!({ "version": ver, "status": status }))
+        })
+        .collect();
+    Some(Value::Object(out))
 }
 
 fn map_status(r: &DebRelease) -> (SourceStatus, Option<String>) {
@@ -118,7 +153,13 @@ impl<'de> Visitor<'de> for RootVisitor {
                             package: pkg.clone(),
                             status,
                             fix_version,
-                            raw: json!({ "status": r.status, "fixed_version": r.fixed_version, "urgency": r.urgency }),
+                            raw: {
+                                let mut raw = json!({ "status": r.status, "fixed_version": r.fixed_version, "urgency": r.urgency });
+                                if let Some(su) = suites(r) {
+                                    raw["suites"] = su;
+                                }
+                                raw
+                            },
                         }
                     })
                     .collect();
@@ -269,6 +310,7 @@ mod tests {
             status: status.into(),
             fixed_version: fv.map(str::to_owned),
             urgency: None,
+            repositories: BTreeMap::new(),
         };
         assert_eq!(map_status(&r("resolved", None)).0, SourceStatus::Unknown);
         assert_eq!(
@@ -276,5 +318,96 @@ mod tests {
             SourceStatus::Unknown
         );
         assert_eq!(map_status(&r("neu", None)).0, SourceStatus::Unknown);
+    }
+
+    fn rel(status: &str, fv: Option<&str>, repos: &[(&str, &str)]) -> DebRelease {
+        DebRelease {
+            status: status.into(),
+            fixed_version: fv.map(str::to_owned),
+            urgency: None,
+            repositories: repos
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    fn st(v: &Value, suite: &str) -> String {
+        v[suite]["status"].as_str().unwrap_or("fehlt").to_owned()
+    }
+
+    /// Archiv unter der Fix-Version (verwundbar), Security darüber (gefixt): beide Suiten getrennt festgehalten.
+    #[test]
+    fn suites_archive_open_security_fixed() {
+        let v = suites(&rel(
+            "resolved",
+            Some("6.12.113-1"),
+            &[("trixie", "6.12.107-1"), ("trixie-security", "6.12.115-2")],
+        ))
+        .unwrap();
+        assert_eq!(st(&v, "trixie"), "vulnerable");
+        assert_eq!(st(&v, "trixie-security"), "fixed");
+        assert_eq!(v["trixie"]["version"], "6.12.107-1");
+    }
+
+    #[test]
+    fn suites_only_archive_only_security_equal_and_both_open() {
+        // nur Archiv (z. B. forky/sid): keine Security-Suite erfunden
+        let v = suites(&rel("resolved", Some("7.2.10-1"), &[("sid", "7.2.10-1")])).unwrap();
+        assert_eq!(st(&v, "sid"), "fixed");
+        assert!(v.get("sid-security").is_none());
+        // nur Security
+        let v = suites(&rel(
+            "resolved",
+            Some("1.0-1"),
+            &[("trixie-security", "1.0-2")],
+        ))
+        .unwrap();
+        assert_eq!(st(&v, "trixie-security"), "fixed");
+        assert!(v.get("trixie").is_none());
+        // beide gleich (beide gefixt)
+        let v = suites(&rel(
+            "resolved",
+            Some("1.0-1"),
+            &[("trixie", "1.0-1"), ("trixie-security", "1.0-1")],
+        ))
+        .unwrap();
+        assert_eq!(
+            (st(&v, "trixie"), st(&v, "trixie-security")),
+            ("fixed".into(), "fixed".into())
+        );
+        // beide offen (Tracker: open)
+        let v = suites(&rel(
+            "open",
+            None,
+            &[("trixie", "1.0-1"), ("trixie-security", "1.0-2")],
+        ))
+        .unwrap();
+        assert_eq!(
+            (st(&v, "trixie"), st(&v, "trixie-security")),
+            ("vulnerable".into(), "vulnerable".into())
+        );
+        // Fix nur in einem Zwischenarchiv: weder Archiv noch Security enthalten ihn
+        let v = suites(&rel(
+            "resolved",
+            Some("2.0-1"),
+            &[("trixie", "1.0-1"), ("trixie-security", "1.0-2")],
+        ))
+        .unwrap();
+        assert_eq!(
+            (st(&v, "trixie"), st(&v, "trixie-security")),
+            ("vulnerable".into(), "vulnerable".into())
+        );
+        // "0" = nie betroffen, kaputte Version = unbekannt, nie grün; ohne Suiten keine Angabe
+        let v = suites(&rel("resolved", Some("0"), &[("trixie", "1.0-1")])).unwrap();
+        assert_eq!(st(&v, "trixie"), "not_affected");
+        let v = suites(&rel(
+            "resolved",
+            Some("1.0-1"),
+            &[("trixie", "kaputt version")],
+        ))
+        .unwrap();
+        assert_eq!(st(&v, "trixie"), "unknown");
+        assert!(suites(&rel("resolved", Some("1.0-1"), &[])).is_none());
     }
 }

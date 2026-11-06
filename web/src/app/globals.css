@@ -561,3 +561,8 @@ summary {
     opacity: 1;
   }
 }
+
+/* Chip-Legende nur zeigen, wenn die Seite einen abgesetzten (außerhalb des Umfangs liegenden) Chip enthält. */
+main:has([data-outside="yes"]) .chip-legend {
+  display: flex;
+}

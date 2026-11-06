@@ -1,83 +1,76 @@
 import { Icon } from "./Icons";
 import type { IconName, Tone } from "@/lib/status";
-import { absTime } from "@/lib/format";
 import type { Distro } from "@/lib/types";
+import { chipTitle, distroName, STATUS, SUITE_WORD, suiteParts } from "@/lib/chips";
 
-const DISTRO_NAME: Record<string, string> = { debian: "Debian", ubuntu: "Ubuntu", osv: "OSV" };
-export const distroName = (source: string): string => DISTRO_NAME[source] ?? source;
+export { distroName };
 
-const STATUS: Record<string, { word: string; tone: Tone; icon: IconName; muted?: boolean }> = {
-  fixed: { word: "gefixt", tone: "ok", icon: "ok" },
-  not_affected: { word: "nicht betroffen", tone: "ok", icon: "ok", muted: true },
-  fix_pending: { word: "verwundbar, Fix in Arbeit", tone: "crit", icon: "crit" },
-  vulnerable: { word: "verwundbar", tone: "crit", icon: "crit" },
-  unknown: { word: "unbekannt", tone: "unknown", icon: "unknown" },
+const SUITE_TONE: Record<string, { tone: Tone; icon: IconName; muted?: boolean }> = {
+  fixed: { tone: "ok", icon: "ok" },
+  vulnerable: { tone: "crit", icon: "crit" },
+  not_affected: { tone: "ok", icon: "ok", muted: true },
+  unknown: { tone: "unknown", icon: "unknown" },
 };
 
 /**
  * Chip je Quelle und Release: Icon + Text + Farbe (nie nur Farbe). Release in Graustufe, Statuswort in der Statusfarbe,
- * Fix-Version in Mono, kein Trennzeichen. Umriss statt Fläche (viele Chips nebeneinander bleiben ruhig);
- * gestrichelt = Release läuft auf keinem Host.
+ * Fix-Version in Mono. Umriss statt Fläche; gestrichelt und gedämpft = Release läuft auf keinem deiner Hosts
+ * (außerhalb des Umfangs „meine Releases“). Debian zeigt Security und Archiv getrennt, wenn sie sich unterscheiden.
  */
 export function DistroChip({ d, allScope = false }: { d: Distro; allScope?: boolean }) {
   const s = STATUS[d.status] ?? STATUS.unknown!;
-  // Zählt für den aktuellen Umfang: Release läuft auf einem Host oder der Umfang ist „Alle Releases“.
-  const counts = allScope || d.mine;
-  const title = `${distroName(d.source)} ${d.release}: ${s.word}${d.fix_version ? ` ab ${d.fix_version}` : ""} (Paket ${d.package}${
-    d.packages > 1 ? ` und ${d.packages - 1} weitere` : ""
-  }, Stand ${absTime(d.updated_at)})${counts ? " – zählt für den Filter" : " – läuft auf keinem deiner Hosts, zählt nicht für den Filter"}`;
+  const outside = !allScope && !d.mine;
+  const parts = suiteParts(d);
   return (
     <span
-      title={title}
+      title={chipTitle(d, allScope)}
       className={`chip-fade inline-flex h-(--chip-h) items-center gap-1 whitespace-nowrap rounded-xs border pl-1 pr-1.5 text-xs ${
-        counts ? "border-line" : "border-dashed border-line bg-sunk"
+        outside ? "border-dashed border-line bg-sunk opacity-80" : "border-line"
       }`}
-      data-counts={counts ? "yes" : "no"}
+      data-outside={outside ? "yes" : "no"}
     >
-      <span className={s.muted ? "text-fg3" : TONE_TEXT[s.tone]}>
-        <Icon name={s.icon} />
-      </span>
+      {parts ? null : (
+        <span className={s.muted ? "text-fg3" : TONE_TEXT[s.tone]}>
+          <Icon name={s.icon} />
+        </span>
+      )}
       <span className="text-fg2">
         {distroName(d.source)} {d.release}
       </span>
-      <span className={`font-medium ${s.muted ? "text-fg3" : TONE_TEXT[s.tone]}`}>{s.word}</span>
-      {d.fix_version ? <span className="mono text-fg2">{d.fix_version}</span> : null}
-      <ScopeMark counts={counts} />
+      {parts ? (
+        parts.map((p, i) => {
+          const t = SUITE_TONE[p.status] ?? SUITE_TONE.unknown!;
+          return (
+            <span key={p.label || "x"} className="inline-flex items-center gap-1">
+              {i > 0 ? <span aria-hidden="true" className="text-fg3">·</span> : null}
+              <span className={t.muted ? "text-fg3" : TONE_TEXT[t.tone]}>
+                <Icon name={t.icon} />
+              </span>
+              {p.label ? <span className="text-fg2">{p.label}</span> : null}
+              <span className={`font-medium ${t.muted ? "text-fg3" : TONE_TEXT[t.tone]}`}>{SUITE_WORD[p.status] ?? p.status}</span>
+              {p.version ? <span className="mono text-fg2">{p.version}</span> : null}
+            </span>
+          );
+        })
+      ) : (
+        <>
+          <span className={`font-medium ${s.muted ? "text-fg3" : TONE_TEXT[s.tone]}`}>{s.word}</span>
+          {d.fix_version ? <span className="mono text-fg2">{d.fix_version}</span> : null}
+        </>
+      )}
     </span>
   );
 }
 
-/** Kennzeichnung „zählt“ (gefüllter Punkt) bzw. „zählt nicht“ (durchgestrichener Ring): Icon plus Text, nie nur Farbe. */
-export function ScopeMark({ counts }: { counts: boolean }) {
+/**
+ * Legende zu den Chips in einer Zeile. Sie erscheint nur, wenn auf der Seite ein abgesetzter Chip steht
+ * (`data-outside="yes"`), per CSS `:has()`.
+ */
+export function ChipLegend() {
   return (
-    <span className={`inline-flex items-center gap-0.5 border-l border-line pl-1 text-[0.6875rem] ${counts ? "text-fg2" : "text-fg3"}`}>
-      <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true" focusable="false">
-        {counts ? (
-          <circle cx="5" cy="5" r="3" fill="currentColor" />
-        ) : (
-          <>
-            <circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M2.5 7.5l5-5" stroke="currentColor" strokeWidth="1.2" />
-          </>
-        )}
-      </svg>
-      {counts ? "zählt" : "zählt nicht"}
-    </span>
-  );
-}
-
-/** Legende zu den Chips: erklärt Rahmen und Kennzeichnung (Umfang des Filters). */
-export function ChipLegend({ allScope }: { allScope: boolean }) {
-  return (
-    <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg3">
-      <span className="inline-flex items-center gap-1">
-        <span className="inline-block h-3 w-6 rounded-xs border border-line" aria-hidden="true" />
-        <ScopeMark counts /> Release läuft auf einem deiner Hosts{allScope ? " (bei „Alle Releases“ zählt jeder Chip)" : ""}
-      </span>
-      <span className="inline-flex items-center gap-1">
-        <span className="inline-block h-3 w-6 rounded-xs border border-dashed border-line bg-sunk" aria-hidden="true" />
-        <ScopeMark counts={false} /> läuft auf keinem deiner Hosts, zählt nicht für den Filter (außer bei „Alle Releases“)
-      </span>
+    <p className="chip-legend mt-2 hidden items-center gap-1.5 text-xs text-fg3" role="note">
+      <span className="inline-block h-3 w-6 rounded-xs border border-dashed border-line bg-sunk" aria-hidden="true" />
+      Gestrichelt: Release läuft auf keinem deiner Hosts
     </p>
   );
 }

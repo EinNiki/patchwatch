@@ -114,16 +114,17 @@ pub async fn ingest_with(
         .into_iter()
         .collect();
 
-    let existing: HashMap<(String, String, String), (String, Option<String>)> =
-        sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
-            "SELECT cve_id, release, package, status, fix_version FROM cve_source_status WHERE source = $1 AND cve_id = ANY($2)",
+    #[allow(clippy::type_complexity)]
+    let existing: HashMap<(String, String, String), (String, Option<String>, Option<Value>)> =
+        sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<Value>)>(
+            "SELECT cve_id, release, package, status, fix_version, raw->'suites' FROM cve_source_status WHERE source = $1 AND cve_id = ANY($2)",
         )
         .bind(source)
         .bind(&ids)
         .fetch_all(&mut *conn)
         .await?
         .into_iter()
-        .map(|(c, r, p, s, f)| ((c, r, p), (s, f)))
+        .map(|(c, r, p, s, f, su)| ((c, r, p), (s, f, su)))
         .collect();
 
     // Rows left behind by a deleted source of the same type (same status, so they would be skipped as
@@ -139,13 +140,20 @@ pub async fn ingest_with(
 
     let mut stats = IngestStats::default();
     let mut upserts: Vec<(&Record, &Entry)> = Vec::new();
+    let mut quiet: Vec<(&Record, &Entry)> = Vec::new();
     let mut by_cve: HashMap<&str, Vec<Change>> = HashMap::new();
     for r in &recs {
         for e in &r.entries {
             let key = (r.cve_id.clone(), e.release.clone(), e.package.clone());
             let old = existing.get(&key);
-            let same = old.is_some_and(|(s, f)| s == e.status.as_str() && *f == e.fix_version);
+            let same = old.is_some_and(|(s, f, _)| s == e.status.as_str() && *f == e.fix_version);
             if same {
+                // Suiten (Debian: Archiv/Security) nachziehen, ohne dass es als Änderung zählt (keine Ereignisse).
+                if e.raw.get("suites").is_some()
+                    && old.and_then(|(_, _, su)| su.as_ref()) != e.raw.get("suites")
+                {
+                    quiet.push((r, e));
+                }
                 continue;
             }
             stats.changed_rows += 1;
@@ -156,7 +164,7 @@ pub async fn ingest_with(
             by_cve.entry(r.cve_id.as_str()).or_default().push(Change {
                 release: e.release.clone(),
                 package: e.package.clone(),
-                from: old.map(|(s, _)| s.clone()),
+                from: old.map(|(s, _, _)| s.clone()),
                 to: e.status,
                 fix_version: e.fix_version.clone(),
             });
@@ -182,6 +190,40 @@ pub async fn ingest_with(
         .bind(chunk.iter().map(|r| r.priority.clone()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|r| r.published_at).collect::<Vec<_>>())
         .bind(chunk.iter().map(|r| r.updated_at).collect::<Vec<_>>())
+        .execute(&mut *conn)
+        .await?;
+    }
+    for chunk in quiet.chunks(BATCH) {
+        sqlx::query(
+            "UPDATE cve_source_status t SET raw = v.w::jsonb \
+             FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[]) AS v(c, r, p, w) \
+             WHERE t.source = $1 AND t.cve_id = v.c AND t.release = v.r AND t.package = v.p",
+        )
+        .bind(source)
+        .bind(
+            chunk
+                .iter()
+                .map(|(r, _)| r.cve_id.clone())
+                .collect::<Vec<_>>(),
+        )
+        .bind(
+            chunk
+                .iter()
+                .map(|(_, e)| e.release.clone())
+                .collect::<Vec<_>>(),
+        )
+        .bind(
+            chunk
+                .iter()
+                .map(|(_, e)| e.package.clone())
+                .collect::<Vec<_>>(),
+        )
+        .bind(
+            chunk
+                .iter()
+                .map(|(_, e)| e.raw.to_string())
+                .collect::<Vec<_>>(),
+        )
         .execute(&mut *conn)
         .await?;
     }

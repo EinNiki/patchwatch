@@ -64,7 +64,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
             </div>
             {other.length > 0 ? (
               <details className="mb-2">
-                <summary className="cursor-pointer font-semibold text-fg2">Releases ohne Host ({other.length}, zählen nicht für den Filter)</summary>
+                <summary className="cursor-pointer font-semibold text-fg2">Releases ohne Host ({other.length})</summary>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {other.map((x) => (
                     <DistroChip key={`${x.source}/${x.release}`} d={x} />
@@ -72,7 +72,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               </details>
             ) : null}
-            <ChipLegend allScope={false} />
+            <ChipLegend />
           </>
         )}
       </section>
