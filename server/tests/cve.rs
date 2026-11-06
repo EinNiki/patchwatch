@@ -5111,6 +5111,163 @@ async fn host_cves_lists_all_states_with_versions_and_counters(pool: PgPool) {
     assert_eq!(hosts.json[0]["cve_fixed"], 1);
 }
 
+/// Host-Ansicht: Gruppen nach Fix-Version stimmen mit den Einzelzeilen überein, Fix-Version-/Level-Filter,
+/// `open_with_fix`, Sortierung nach Level dann Alter, Sonderzeichen.
+#[sqlx::test(migrations = "./migrations")]
+async fn host_cve_groups_match_rows_and_filters(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-35.35")).await,
+        StatusCode::NO_CONTENT
+    );
+    let now = Utc::now() - Duration::minutes(10);
+    mock.lock().unwrap().ubuntu = vec![
+        ubuntu_cve("CVE-2026-30001", now, &[("noble", "needed", "")]),
+        ubuntu_cve(
+            "CVE-2026-30002",
+            now,
+            &[("noble", "released", "6.8.0-33.33")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-30003",
+            now,
+            &[("noble", "released", "6.8.0-33.33")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-30004",
+            now,
+            &[("noble", "released", "6.8.0-35.35")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-30005",
+            now,
+            &[("noble", "released", "6.8.0-30.30")],
+        ),
+        ubuntu_cve("CVE-2026-30006", now, &[("noble", "released", "6.8.0-9.9")]),
+    ];
+    refresh::refresh_all(&st).await;
+    let cookies = login(&app, &pool).await;
+    let h = hdr(&cookies);
+    let url = format!("/api/v1/hosts/{hid}/cves");
+
+    // Gruppen "Neustart nötig": neueste Version zuerst, Summe = Zähler = Einzelzeilen.
+    let g = call(
+        &app,
+        Method::GET,
+        &format!("{url}/groups?kind=reboot"),
+        &h,
+        None,
+    )
+    .await;
+    assert_eq!(g.status, StatusCode::OK);
+    let groups = g.json["groups"].as_array().unwrap();
+    let got: Vec<(String, u64)> = groups
+        .iter()
+        .map(|x| {
+            (
+                x["fix_version"].as_str().unwrap().to_string(),
+                x["count"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("6.8.0-35.35".to_string(), 1),
+            ("6.8.0-33.33".to_string(), 2)
+        ]
+    );
+    let all = call(
+        &app,
+        Method::GET,
+        &format!("{url}?status=fixed_installed_reboot_required"),
+        &h,
+        None,
+    )
+    .await;
+    assert_eq!(g.json["total"], all.json["total"]);
+    assert_eq!(all.json["counts"]["fixed_installed_reboot_required"], 3);
+    for (v, n) in &got {
+        let one = call(
+            &app,
+            Method::GET,
+            &format!("{url}?status=fixed_installed_reboot_required&fix_version={v}"),
+            &h,
+            None,
+        )
+        .await;
+        assert_eq!(one.json["total"].as_u64().unwrap(), *n, "{v}");
+        assert!(one.json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["fix_version"] == v.as_str()));
+    }
+    // dpkg-Reihenfolge: 9.9 < 30.30 bei "fixed".
+    let gf = call(
+        &app,
+        Method::GET,
+        &format!("{url}/groups?kind=fixed"),
+        &h,
+        None,
+    )
+    .await;
+    let fv: Vec<&str> = gf.json["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["fix_version"].as_str().unwrap())
+        .collect();
+    assert_eq!(fv, ["6.8.0-30.30", "6.8.0-9.9"]);
+    // Offen ohne Fix: nie als Fix installiert gezählt, open_with_fix = 0.
+    assert_eq!(all.json["open_with_fix"], 0);
+    assert!(all.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["published_at"].is_string()));
+
+    // Ungültige Gruppenart, Level-Filter, Sonderzeichen.
+    let bad = call(
+        &app,
+        Method::GET,
+        &format!("{url}/groups?kind=x;drop"),
+        &h,
+        None,
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let hi = call(&app, Method::GET, &format!("{url}?level_min=10"), &h, None).await;
+    assert_eq!(hi.status, StatusCode::OK);
+    assert!(hi.json["total"].as_u64().unwrap() <= 6);
+    for term in ["caf%C3%A9", "%F0%9F%94%A5", "100%25", "a_b", "'%3B--"] {
+        let r = call(
+            &app,
+            Method::GET,
+            &format!("{url}/groups?kind=fixed&q={term}"),
+            &h,
+            None,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{term}");
+        assert_eq!(r.json["total"], 0, "{term}");
+        let r = call(
+            &app,
+            Method::GET,
+            &format!("{url}?fix_version={term}"),
+            &h,
+            None,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{term}");
+        assert_eq!(r.json["total"], 0, "{term}");
+    }
+}
+
 /// Eine unvollständige Quelle erzeugt nie neue "gefixt"/"nicht betroffen"-Einträge; bereits Bekanntes bleibt stehen,
 /// der Host zeigt den Hinweis "Bewertung eingeschränkt".
 #[sqlx::test(migrations = "./migrations")]

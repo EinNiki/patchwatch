@@ -61,6 +61,7 @@ pub fn router(state: AppState) -> Router {
         .route("/hosts/{id}/rotate-token", post(hosts::rotate_token))
         .route("/hosts/{id}/history", get(hosts::history))
         .route("/hosts/{id}/cves", get(hosts::cves))
+        .route("/hosts/{id}/cves/groups", get(hosts::cve_groups))
         .route("/hosts/{id}/updates", get(hosts::updates))
         .route(
             "/hosts/{id}/cves/{cve}/review",

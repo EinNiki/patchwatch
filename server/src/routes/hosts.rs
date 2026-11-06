@@ -162,6 +162,8 @@ pub struct HostCveRow {
     /// Manuelle Prüfung (z. B. Proxmox); gilt nur für den Kernel, bei dem sie gesetzt wurde.
     reviewed_at: Option<DateTime<Utc>>,
     reviewed_by: Option<String>,
+    /// Seit wann die CVE öffentlich bekannt ist.
+    published_at: Option<DateTime<Utc>>,
     /// Priorität als Stufe 0–10 (0 = unbekannt).
     #[sqlx(skip)]
     level: u8,
@@ -188,6 +190,10 @@ pub struct CvesQuery {
     dir: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
+    /// Nur Einträge mit genau dieser Fix-Version (Gruppe aus `cves/groups`).
+    fix_version: Option<String>,
+    /// Mindest-Level 0–10 (Priorität).
+    level_min: Option<i64>,
 }
 
 const ALL_STATES: [&str; 6] = [
@@ -198,6 +204,9 @@ const ALL_STATES: [&str; 6] = [
     "fixed",
     "not_affected",
 ];
+
+/// Fix-Version der zuständigen Quelle eines Eintrags: die erste Angabe in `sources` mit Fix-Version (wie `cves`).
+const FIX_SQL: &str = "(SELECT e->>'fix_version' FROM jsonb_array_elements(s.sources) e WHERE e->>'fix_version' IS NOT NULL LIMIT 1)";
 
 /// Reihenfolge der Dringlichkeit: Neustart nötig vor offen, dann Fix angekündigt, unbekannt, gefixt, nicht betroffen.
 const RANK_SQL: &str =
@@ -256,7 +265,8 @@ pub async fn cves(
             }
         }
         Some("cve") => format!("s.cve_id {dir}"),
-        Some("level") => format!("{LEVEL_SQL} {dir}, s.cve_id DESC"),
+        // Level, dann Alter: bei gleichem Level steht die am längsten bekannte CVE zuerst.
+        Some("level") => format!("{LEVEL_SQL} {dir}, c.published_at ASC NULLS LAST, s.cve_id DESC"),
         Some("changed") => format!("s.computed_at {dir}, s.cve_id DESC"),
         Some(_) => return Err(ApiError::BadRequest("Ungültige Sortierung".into())),
     };
@@ -300,29 +310,48 @@ pub async fn cves(
         counts.insert(state.to_owned(), json!(n));
     }
 
-    let where_sql = "s.host_id = $1 AND ($2::text[] IS NULL OR s.status = ANY($2)) \
-         AND ($3::text IS NULL OR s.cve_id ILIKE $3 OR c.description ILIKE $3)";
+    let level_min = q.level_min.unwrap_or(0).clamp(0, 10);
+    let fix_filter = q
+        .fix_version
+        .as_deref()
+        .filter(|f| !f.is_empty() && f.len() <= 128);
+    let where_sql = format!(
+        "s.host_id = $1 AND ($2::text[] IS NULL OR s.status = ANY($2)) \
+         AND ($3::text IS NULL OR s.cve_id ILIKE $3 OR c.description ILIKE $3) \
+         AND ($4::text IS NULL OR {FIX_SQL} = $4) AND ({LEVEL_SQL}) >= $5"
+    );
     let total: i64 = sqlx::query_scalar(&format!(
         "SELECT count(*) FROM host_cve_status s JOIN cves c ON c.id = s.cve_id WHERE {where_sql}"
     ))
     .bind(id)
     .bind(&statuses)
     .bind(&pattern)
+    .bind(fix_filter)
+    .bind(level_min)
+    .fetch_one(&st.pool)
+    .await?;
+    // Offene mit Fix in einer Quelle (im Archiv erhältlich, auf dem Host nicht installiert).
+    let open_with_fix: i64 = sqlx::query_scalar(&format!(
+        "SELECT count(*) FROM host_cve_status s WHERE s.host_id = $1 AND s.status IN ('vulnerable', 'fix_pending') AND {FIX_SQL} IS NOT NULL"
+    ))
+    .bind(id)
     .fetch_one(&st.pool)
     .await?;
 
     let rows = sqlx::query_as::<_, HostCveRow>(&format!(
         "SELECT s.cve_id, s.status, s.reason, s.computed_at, s.sources, \
                 left(c.description, 300) AS description, c.priority, \
-                (w.cve_id IS NOT NULL) AS watched, m.reviewed_at, m.reviewed_by \
+                (w.cve_id IS NOT NULL) AS watched, m.reviewed_at, m.reviewed_by, c.published_at \
          FROM host_cve_status s JOIN cves c ON c.id = s.cve_id JOIN hosts h ON h.id = s.host_id \
          LEFT JOIN cve_watchlist w ON w.cve_id = s.cve_id \
          LEFT JOIN manual_reviews m ON m.host_id = s.host_id AND m.cve_id = s.cve_id AND m.kernel_version = h.running_kernel \
-         WHERE {where_sql} ORDER BY {order} LIMIT $4 OFFSET $5"
+         WHERE {where_sql} ORDER BY {order} LIMIT $6 OFFSET $7"
     ))
     .bind(id)
     .bind(&statuses)
     .bind(&pattern)
+    .bind(fix_filter)
+    .bind(level_min)
     .bind(limit)
     .bind(offset)
     .fetch_all(&st.pool)
@@ -380,7 +409,7 @@ pub async fn cves(
             .and_then(|os| issues.for_host(os, host.os_codename.as_deref()))
     };
     Ok(Json(json!({
-        "items": items, "total": total, "counts": counts, "issue": issue,
+        "items": items, "total": total, "counts": counts, "open_with_fix": open_with_fix, "issue": issue,
         "host": {
             "is_proxmox": host.is_proxmox, "running_kernel": host.running_kernel,
             "running_kernel_version": host.kernel_package_version,
@@ -388,6 +417,70 @@ pub async fn cves(
             "reboot_needed": host.reboot_needed,
         },
     })))
+}
+
+#[derive(Deserialize)]
+pub struct GroupsQuery {
+    /// `reboot` (Neustart nötig) oder `fixed` (gefixt).
+    kind: String,
+    q: Option<String>,
+    level_min: Option<i64>,
+}
+
+/// Einträge nach Fix-Version gruppiert (`reboot` oder `fixed`): `{groups: [{fix_version, count}], total}`, neueste Version
+/// zuerst (dpkg-Reihenfolge). Einträge ohne Fix-Version stehen in einer Gruppe mit `fix_version: null`.
+pub async fn cve_groups(
+    _: Admin,
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    Query(q): Query<GroupsQuery>,
+) -> ApiResult<Json<Value>> {
+    let status = match q.kind.as_str() {
+        "reboot" => "fixed_installed_reboot_required",
+        "fixed" => "fixed",
+        _ => return Err(ApiError::BadRequest("Ungültige Gruppenart".into())),
+    };
+    let pattern =
+        q.q.as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| {
+                format!(
+                    "%{}%",
+                    t.replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                )
+            });
+    let level_min = q.level_min.unwrap_or(0).clamp(0, 10);
+    let rows: Vec<(Option<String>, i64)> = sqlx::query_as(&format!(
+        "SELECT {FIX_SQL} AS fix, count(*) FROM host_cve_status s JOIN cves c ON c.id = s.cve_id \
+         WHERE s.host_id = $1 AND s.status = $2 AND ($3::text IS NULL OR s.cve_id ILIKE $3 OR c.description ILIKE $3) \
+           AND ({LEVEL_SQL}) >= $4 GROUP BY 1"
+    ))
+    .bind(id)
+    .bind(status)
+    .bind(&pattern)
+    .bind(level_min)
+    .fetch_all(&st.pool)
+    .await?;
+    let mut groups: Vec<(Option<String>, i64)> = rows;
+    // Neueste Fix-Version zuerst; was sich nicht als dpkg-Version lesen lässt, steht hinten.
+    groups.sort_by(|a, b| {
+        let pa =
+            a.0.as_deref()
+                .and_then(|v| v.parse::<debversion::Version>().ok());
+        let pb =
+            b.0.as_deref()
+                .and_then(|v| v.parse::<debversion::Version>().ok());
+        pb.cmp(&pa).then_with(|| a.0.cmp(&b.0))
+    });
+    let total: i64 = groups.iter().map(|g| g.1).sum();
+    let groups: Vec<Value> = groups
+        .into_iter()
+        .map(|(f, n)| json!({ "fix_version": f, "count": n }))
+        .collect();
+    Ok(Json(json!({ "groups": groups, "total": total })))
 }
 
 #[derive(sqlx::FromRow)]
