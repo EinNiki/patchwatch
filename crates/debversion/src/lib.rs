@@ -190,6 +190,12 @@ mod tests {
     fn ordering_table() {
         let cases = [
             ("1.0", "1.0", Equal),
+            // Ubuntu-Kernel (mit dpkg --compare-versions gegengeprüft): numerisch, nicht textlich.
+            ("7.0.0-39.39", "7.0.0-42.42", Less),
+            ("7.0.0-100.100", "7.0.0-42.42", Greater),
+            ("7.0.0-9.9", "7.0.0-10.10", Less),
+            ("1:7.0.0-1", "7.0.0-99", Greater),
+            ("7.0.0-42.42~rc1", "7.0.0-42.42", Less),
             ("1.0", "0:1.0", Equal),
             ("1.0-0", "1.0", Equal),
             ("1.0", "1.1", Less),
