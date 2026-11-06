@@ -103,6 +103,11 @@ function Schedules() {
         if (edit[`feed.${f.source}`] !== undefined) feed_intervals[f.source] = int(`Feed ${f.label}`, edit[`feed.${f.source}`]!, d.feed_interval_min_minutes, d.feed_interval_max_minutes);
       }
       if (Object.keys(feed_intervals).length) body.feed_intervals = feed_intervals;
+      const feed_bulk_intervals: Record<string, number> = {};
+      for (const f of d.feeds) {
+        if (f.bulk_interval_minutes !== null && edit[`bulk.${f.source}`] !== undefined) feed_bulk_intervals[f.source] = int(`Massendaten ${f.label}`, edit[`bulk.${f.source}`]!, d.feed_interval_min_minutes, d.feed_interval_max_minutes);
+      }
+      if (Object.keys(feed_bulk_intervals).length) body.feed_bulk_intervals = feed_bulk_intervals;
       if (edit.stale !== undefined) body.stale_after_hours = int("Meldet sich nicht", edit.stale, d.stale_after_min_hours, d.stale_after_max_hours);
       if (edit.retention !== undefined) body.report_retention_days = int("Aufbewahrung", edit.retention, d.report_retention_min_days, d.report_retention_max_days);
       if (["mode", "every", "at", "tz"].some((k) => edit[k] !== undefined)) {
@@ -132,6 +137,11 @@ function Schedules() {
           {d.feeds.map((f) => (
             <Field key={f.source} label={`${f.label} (Minuten)`}>
               <TextInput type="number" inputMode="numeric" min={d.feed_interval_min_minutes} max={d.feed_interval_max_minutes} value={val(`feed.${f.source}`, f.interval_minutes)} onChange={set(`feed.${f.source}`)} className={num} />
+            </Field>
+          ))}
+          {d.feeds.filter((f) => f.bulk_interval_minutes !== null).map((f) => (
+            <Field key={`bulk.${f.source}`} label={`${f.label}: Massendaten-Import (Minuten)`}>
+              <TextInput type="number" inputMode="numeric" min={d.feed_interval_min_minutes} max={d.feed_interval_max_minutes} value={val(`bulk.${f.source}`, f.bulk_interval_minutes ?? 1440)} onChange={set(`bulk.${f.source}`)} className={num} />
             </Field>
           ))}
         </div>

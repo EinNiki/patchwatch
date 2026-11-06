@@ -172,7 +172,7 @@ export interface Settings {
   stale_after_default_hours: number;
   stale_after_min_hours: number;
   stale_after_max_hours: number;
-  feeds: { source: string; label: string; interval_minutes: number; default_minutes: number }[];
+  feeds: { source: string; label: string; interval_minutes: number; default_minutes: number; bulk_interval_minutes: number | null; bulk_default_minutes: number | null }[];
   feed_interval_min_minutes: number;
   feed_interval_max_minutes: number;
   report_schedule: ReportSchedule & { last_run: string | null; due_now: boolean; next_run: string | null };
@@ -213,6 +213,41 @@ export interface Feed {
   error_text?: string | null;
   /** Nur bei state "incomplete": Fortschritt des Rückstandsabbaus. */
   backfill: { pages_done: number; runs: number; next_offset: number; pages_per_run: number | null; since: string; progress: string; initial?: boolean; position_pages?: number; est_pages?: number | null; target?: string } | null;
+  /** Nur Ubuntu im Hybridmodus: Massendaten je Release und stündlicher Abruf. */
+  bulk?: FeedBulk | null;
+}
+
+export interface FeedBulkRelease {
+  release: string;
+  state: "ok" | "error" | "stale" | "pending";
+  result_text: string;
+  imported_at: string | null;
+  verified_at: string | null;
+  bytes: number | null;
+  records: number | null;
+  status: number | null;
+  retry_after_secs: number | null;
+  next_attempt_at: string | null;
+  fresh_until: string | null;
+}
+
+export interface FeedBulk {
+  complete: boolean;
+  bulk_interval_minutes: number;
+  releases: FeedBulkRelease[];
+  hourly: {
+    last_run_at: string | null;
+    last_ok_at: string | null;
+    page_size: number;
+    max_page: number | null;
+    pages_last: number;
+    failures: number;
+    status: number | null;
+    retry_after_secs: number | null;
+    error_text: string | null;
+    next_attempt_at: string | null;
+    hint: string | null;
+  };
 }
 
 export interface Me {

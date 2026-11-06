@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
-import type { Feed } from "@/lib/types";
+import type { Feed, FeedBulk } from "@/lib/types";
 import type { StatusInfo } from "@/lib/status";
 import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -50,6 +50,41 @@ function suggestType(url: string): Feed["type"] | null {
   if (host === "osv.dev" || host === "api.osv.dev") return "osv";
   if (host === "www.cisa.gov" || host === "cisa.gov") return "cisa_kev";
   return null;
+}
+
+function size(bytes: number | null): string {
+  if (bytes === null) return "";
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** Ubuntu im Hybridmodus: je Release der Stand der Massendatei, dazu der stündliche Abruf der API. */
+function BulkDetails({ bulk }: { bulk: FeedBulk }) {
+  const h = bulk.hourly;
+  return (
+    <div className="mt-1 flex flex-col gap-1 text-xs">
+      {bulk.releases.map((r) => (
+        <div key={r.release} className={r.state === "ok" ? "text-fg2" : "text-warn"}>
+          <Mono>{r.release}</Mono>: {r.result_text}
+          {r.verified_at ? <> · geprüft {absTime(r.verified_at)}</> : null}
+          {r.imported_at ? <> · Import {absTime(r.imported_at)}</> : null}
+          {r.bytes !== null ? <> · {size(r.bytes)}</> : null}
+          {r.status !== null ? <> · Status {r.status}</> : null}
+          {r.retry_after_secs ? <> · Retry-After {r.retry_after_secs} s</> : null}
+          {r.state === "error" && r.next_attempt_at ? <> · nächster Versuch {absTime(r.next_attempt_at)}</> : null}
+        </div>
+      ))}
+      <div className={h.failures > 0 ? "text-warn" : "text-fg2"}>
+        Stündlicher Abruf: {h.last_ok_at ? `zuletzt erfolgreich ${absTime(h.last_ok_at)}` : "noch nicht erfolgreich"} · Seitengröße {h.page_size || "Standard"}
+        {h.max_page ? ` (Maximum ${h.max_page})` : ""}
+        {h.status !== null ? ` · Status ${h.status}` : ""}
+        {h.retry_after_secs ? ` · Retry-After ${h.retry_after_secs} s` : ""}
+        {h.next_attempt_at ? ` · nächster Versuch ${absTime(h.next_attempt_at)}` : ""}
+      </div>
+      {h.error_text ? <div className="text-warn">{h.error_text}</div> : null}
+      {h.hint ? <div className="text-warn">{h.hint}</div> : null}
+      {!bulk.complete ? <div className="text-warn">Nicht vollständig: nicht für jedes relevante Release liegt ein gültiger, frischer Import vor.</div> : null}
+    </div>
+  );
 }
 
 function message(e: unknown, fallback: string): string {
@@ -161,15 +196,16 @@ export function FeedSources() {
                   <td data-label="Intervall" className="whitespace-nowrap">
                     alle {f.interval_minutes} Min.
                   </td>
-                  <td className={`max-w-[24rem] max-md:max-w-none ${f.last_error || f.backfill ? "" : "max-md:hidden"}`}>
+                  <td className={`max-w-[24rem] max-md:max-w-none ${f.last_error || f.backfill || f.bulk ? "" : "max-md:hidden"}`}>
                     {f.backfill ? <div className="text-warn">{f.backfill.progress}</div> : null}
+                    {f.bulk ? <BulkDetails bulk={f.bulk} /> : null}
                     {f.enabled && f.next_attempt_at ? <div className="text-xs text-fg3">Nächster Versuch: {absTime(f.next_attempt_at)}</div> : null}
                     {f.last_error ? (
                       <span className="text-warn">
                         {f.error_text ?? f.last_error}
                         {(f.failed_runs ?? f.consecutive_failures) > 0 ? <span className="text-fg3"> ({f.failed_runs ?? f.consecutive_failures}× in Folge)</span> : null}
                       </span>
-                    ) : f.backfill ? null : (
+                    ) : f.backfill || f.bulk ? null : (
                       <span className="text-fg3">–</span>
                     )}
                   </td>
