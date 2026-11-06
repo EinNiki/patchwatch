@@ -7,6 +7,7 @@ pub mod ingest;
 pub mod kev;
 pub mod nvd;
 pub mod osv;
+pub mod oval;
 pub mod reeval;
 pub mod refresh;
 pub mod sources;
@@ -88,6 +89,78 @@ pub struct FeedState {
     pub backfill: Option<Backfill>,
     /// Horizont, bis zu dem der Erstabruf die Quelle vollständig geladen hat (nur Quellen mit Erstabruf-Abbau).
     pub covered_since: Option<String>,
+    /// Hybridmodus (Ubuntu): Zustand der Massendaten je Release und des stündlichen Abrufs.
+    pub bulk: Option<Bulk>,
+    /// Ein vorhandener Rückstandsabbau, solange der Hybridmodus aktiv ist (nie gelöscht, im Modus `api` zurück).
+    pub parked: Option<Backfill>,
+    /// Nur vom Adapter gesetzt: bis wann die Quelle nach diesem Lauf nutzbar ist (überschreibt die Standardregel).
+    pub usable_until: Option<DateTime<Utc>>,
+}
+
+/// Zustand der Massendaten (täglich) und des inkrementellen Abrufs (stündlich) einer Hybrid-Quelle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bulk {
+    #[serde(default)]
+    pub releases: std::collections::BTreeMap<String, BulkRelease>,
+    #[serde(default)]
+    pub incr: Incr,
+    /// Je Release mit gültigen Massendaten das Ende der Frische (`verified_at` + Frist). Nur Releases in dieser
+    /// Liste gelten für Hosts als nutzbar; fehlt ein Release, ist die CVE-Lage dort "unbekannt".
+    #[serde(default)]
+    pub ok: std::collections::BTreeMap<String, DateTime<Utc>>,
+    /// Alle relevanten Releases haben einen gültigen, frischen Import und der letzte Import keines Releases ist
+    /// fehlgeschlagen. Nur dann zeigt die Oberfläche "vollständig".
+    #[serde(default)]
+    pub complete: bool,
+    /// Relevante Releases des letzten Laufs (Hosts plus Konfiguration).
+    #[serde(default)]
+    pub relevant: Vec<String>,
+}
+
+/// Stand der Massendatei eines Releases.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BulkRelease {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    /// Letzter erfolgreicher Abruf (200 mit gültigem Inhalt oder 304).
+    pub verified_at: Option<DateTime<Utc>>,
+    /// Letzter Abruf mit neuem Inhalt (200).
+    pub imported_at: Option<DateTime<Utc>>,
+    pub bytes: Option<u64>,
+    pub records: Option<u32>,
+    /// Letzter Versuch und sein Ergebnis: `imported`, `not_modified` oder `error`.
+    pub checked_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_result: String,
+    pub last_error: Option<String>,
+    pub last_status: Option<u16>,
+    pub retry_after_secs: Option<u64>,
+    #[serde(default)]
+    pub failures: u32,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+}
+
+/// Stand des stündlichen Abrufs der ersten Seiten von `cves.json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Incr {
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub last_ok_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub last_status: Option<u16>,
+    pub retry_after_secs: Option<u64>,
+    /// Aktuelle Seitengröße (0 = Standard der Konfiguration) und gelerntes Maximum (nach HTTP 422).
+    #[serde(default)]
+    pub page_size: u32,
+    pub max_page: Option<u32>,
+    #[serde(default)]
+    pub failures: u32,
+    /// Fortschritt über Läufe, falls der Abstand zum bestätigten Cursor (`FeedState::cursor`) mehrere Läufe braucht:
+    /// neuester gesehener Zeitstempel und Offset der nächsten Seite.
+    pub pending: Option<String>,
+    #[serde(default)]
+    pub next_offset: u32,
+    #[serde(default)]
+    pub pages_last: u32,
 }
 
 /// Fortschritt eines Rückstandsabbaus (Catch-up nach einem Cursor oder Erstabruf bis zum Horizont). Die Lücke
@@ -131,6 +204,9 @@ pub enum FetchOutcome {
         /// Wunsch der Gegenseite (`Retry-After`) für den nächsten Versuch, falls der Abbruch eine Drosselung war.
         retry_after: Option<std::time::Duration>,
     },
+    /// Fehlschlag mit Zustand (Hybridquelle): nichts war nutzbar, aber die Einzelheiten (Fehler je Release, Seitengröße,
+    /// geparkter Rückstandsabbau) müssen erhalten bleiben. Zählt wie ein Fehler (Leiter, Alarm, nie nutzbar).
+    Failed { state: FeedState, error: FeedError },
 }
 
 #[derive(Debug)]
@@ -184,6 +260,8 @@ pub struct FetchCtx {
     pub enrich: Vec<String>,
     /// Lebenszeichen für den Watchdog des Schedulers (Fortschritt melden mit `progress.beat()`).
     pub progress: Heartbeat,
+    /// Hybridquelle (Ubuntu): Intervall der Massendaten in Minuten aus den Einstellungen (0 = Konfigurationswert).
+    pub bulk_interval_minutes: i64,
 }
 
 /// Gemeinsame Schnittstelle aller Feeds; weitere Quellen (Red Hat, Alpine …) kommen als eigener Adapter dazu.

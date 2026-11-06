@@ -122,6 +122,26 @@ pub struct CveConfig {
     /// bis zum Ende dieses Rückstandsabbaus als unvollständig.
     pub ubuntu_max_pages: u32,
     pub ubuntu_max_page_bytes: u64,
+    /// Ubuntu-Betriebsart (`PATCHWATCH_CVE_UBUNTU_MODE`): `hybrid` (Standard: tägliche OVAL-Massendaten für behobene
+    /// Fälle plus stündlich die ersten Seiten von `cves.json` für offene) oder `api` (nur der alte Rückstandsabbau
+    /// durch tiefes Blättern, Rückfallweg).
+    pub ubuntu_mode: String,
+    /// Basis-URL der OVAL-Dateien (`PATCHWATCH_CVE_UBUNTU_OVAL_URL`), Muster `<basis>/com.ubuntu.<release>.cve.oval.xml.bz2`.
+    pub ubuntu_oval_url: String,
+    /// Zusätzliche Releases für den Massenimport, außer denen auf den Ubuntu-Hosts
+    /// (`PATCHWATCH_CVE_UBUNTU_BULK_RELEASES`, kommagetrennt).
+    pub ubuntu_bulk_releases: Vec<String>,
+    /// Standard-Intervall des täglichen Massenimports in Minuten (in der UI je Quelle änderbar, mindestens 15).
+    pub ubuntu_bulk_interval_minutes: u64,
+    /// Grenzen einer OVAL-Datei: komprimiert, entpackt, Gesamtdauer in Sekunden.
+    pub ubuntu_oval_max_bytes: u64,
+    pub ubuntu_oval_max_xml_bytes: u64,
+    pub ubuntu_oval_timeout_secs: u64,
+    /// Seiten je stündlichem Abruf von `cves.json` und Start-Seitengröße (5 bis 20; bei Fehlern schrumpft sie).
+    pub ubuntu_incremental_pages: u32,
+    pub ubuntu_page_size: u32,
+    /// Zeitlimit je Seitenanfrage des stündlichen Abrufs (Sekunden); die Quelle antwortet teils erst nach 25 s und mehr.
+    pub ubuntu_page_timeout_secs: u64,
     pub debian_max_bytes: u64,
     /// Pause zwischen zwei Ubuntu-Seiten in Millisekunden (Umgebungsvariable
     /// `PATCHWATCH_CVE_UBUNTU_PAGE_PAUSE_MS`): höchstens eine Anfrage gleichzeitig, dazwischen Luft für die Quelle.
@@ -149,7 +169,17 @@ impl Default for CveConfig {
             ubuntu_max_pages: 100,
             ubuntu_max_page_bytes: 32 * 1024 * 1024,
             debian_max_bytes: 200 * 1024 * 1024,
-            ubuntu_page_pause_ms: 500,
+            ubuntu_mode: "hybrid".into(),
+            ubuntu_oval_url: "https://security-metadata.canonical.com/oval".into(),
+            ubuntu_bulk_releases: Vec::new(),
+            ubuntu_bulk_interval_minutes: 1440,
+            ubuntu_oval_max_bytes: 64 * 1024 * 1024,
+            ubuntu_oval_max_xml_bytes: 1024 * 1024 * 1024,
+            ubuntu_oval_timeout_secs: 900,
+            ubuntu_incremental_pages: 10,
+            ubuntu_page_size: 20,
+            ubuntu_page_timeout_secs: 90,
+            ubuntu_page_pause_ms: 2000,
             stall_timeout_secs: 30 * 60,
             request_timeout_secs: 120,
             retries: 3,
@@ -347,6 +377,32 @@ impl Config {
         if let Some(v) = s("CVE_UBUNTU_PAGE_PAUSE_MS") {
             c.cve.ubuntu_page_pause_ms = v.parse().context("CVE_UBUNTU_PAGE_PAUSE_MS")?;
         }
+        if let Some(v) = s("CVE_UBUNTU_MODE") {
+            c.cve.ubuntu_mode = v;
+        }
+        if let Some(v) = s("CVE_UBUNTU_OVAL_URL") {
+            c.cve.ubuntu_oval_url = v;
+        }
+        if let Some(v) = s("CVE_UBUNTU_BULK_RELEASES") {
+            c.cve.ubuntu_bulk_releases = v
+                .split(',')
+                .map(|r| r.trim().to_owned())
+                .filter(|r| !r.is_empty())
+                .collect();
+        }
+        if let Some(v) = s("CVE_UBUNTU_BULK_INTERVAL_MINUTES") {
+            c.cve.ubuntu_bulk_interval_minutes =
+                v.parse().context("CVE_UBUNTU_BULK_INTERVAL_MINUTES")?;
+        }
+        if let Some(v) = s("CVE_UBUNTU_INCREMENTAL_PAGES") {
+            c.cve.ubuntu_incremental_pages = v.parse().context("CVE_UBUNTU_INCREMENTAL_PAGES")?;
+        }
+        if let Some(v) = s("CVE_UBUNTU_PAGE_TIMEOUT_SECS") {
+            c.cve.ubuntu_page_timeout_secs = v.parse().context("CVE_UBUNTU_PAGE_TIMEOUT_SECS")?;
+        }
+        if let Some(v) = s("CVE_UBUNTU_PAGE_SIZE") {
+            c.cve.ubuntu_page_size = v.parse().context("CVE_UBUNTU_PAGE_SIZE")?;
+        }
         if let Some(v) = s("CVE_STALL_TIMEOUT_SECS") {
             c.cve.stall_timeout_secs = v.parse().context("CVE_STALL_TIMEOUT_SECS")?;
         }
@@ -401,6 +457,31 @@ impl Config {
         }
         if self.cve.ubuntu_horizon_days > 36_500 {
             bail!("cve.ubuntu_horizon_days (PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS) darf höchstens 36500 sein");
+        }
+        if !["hybrid", "api"].contains(&self.cve.ubuntu_mode.as_str()) {
+            bail!("cve.ubuntu_mode (PATCHWATCH_CVE_UBUNTU_MODE) muss hybrid oder api sein");
+        }
+        if !(15..=10_080).contains(&self.cve.ubuntu_bulk_interval_minutes) {
+            bail!("cve.ubuntu_bulk_interval_minutes muss zwischen 15 und 10080 liegen");
+        }
+        if !(1..=100).contains(&self.cve.ubuntu_incremental_pages) {
+            bail!("cve.ubuntu_incremental_pages muss zwischen 1 und 100 liegen");
+        }
+        if !(1..=600).contains(&self.cve.ubuntu_page_timeout_secs) {
+            bail!("cve.ubuntu_page_timeout_secs muss zwischen 1 und 600 liegen");
+        }
+        if !(5..=20).contains(&self.cve.ubuntu_page_size) {
+            bail!(
+                "cve.ubuntu_page_size muss zwischen 5 und 20 liegen (die API erlaubt höchstens 20)"
+            );
+        }
+        if let Some(bad) = self.cve.ubuntu_bulk_releases.iter().find(|r| {
+            r.is_empty()
+                || !r
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        }) {
+            bail!("cve.ubuntu_bulk_releases: ungültiger Codename {bad:?} (nur Kleinbuchstaben und Ziffern)");
         }
         if self.cve.ubuntu_page_pause_ms > 60_000 {
             bail!("cve.ubuntu_page_pause_ms (PATCHWATCH_CVE_UBUNTU_PAGE_PAUSE_MS) darf höchstens 60000 sein");

@@ -31,9 +31,18 @@ pub async fn set_status(conn: &mut PgConnection, host_id: i64, new: &str) -> sql
 /// vollständigen, erfolgreichen Abruf hatte, kein Abbau (Erstabruf oder Rückstand) offen ist, der letzte Erfolg
 /// nicht älter ist als max(3 x Intervall, 6 Stunden) (`usable_until`) und kein Dauerfehler vorliegt (mindestens
 /// 3 Fehlschläge in Folge, wie beim Alarm).
-const SOURCE_USABLE_SQL: &str = "EXISTS (SELECT 1 FROM feed_state f WHERE f.source = d.id \
-     AND f.last_success_at IS NOT NULL AND f.backfill IS NULL AND f.consecutive_failures < 3 \
-     AND f.usable_until > $2)";
+///
+/// Hybridquellen (Ubuntu, `feed_state.bulk`): zusätzlich muss das Release des Hosts (`h` = Tabellenalias von `hosts`)
+/// gültige, frische Massendaten haben (`bulk.ok.<release>` = Ende der Frische). Fehlt der Eintrag, ist die
+/// CVE-Lage dieses Hosts "unbekannt"; ein NULL-Vergleich zählt ebenfalls als nicht nutzbar.
+fn source_usable_sql(h: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM feed_state f WHERE f.source = d.id \
+         AND f.last_success_at IS NOT NULL AND f.backfill IS NULL AND f.consecutive_failures < 3 \
+         AND f.usable_until > $2 \
+         AND (f.bulk IS NULL OR (f.bulk->'ok'->>{h}.os_codename)::timestamptz > $2))"
+    )
+}
 
 /// SQL-Ausdruck: Für diesen Host (`h` = Tabellenalias von `hosts`) fehlt eine nutzbare CVE-Quelle. Gilt für
 /// Debian/Ubuntu-Hosts außer Proxmox. Es müssen alle eingeschalteten Quellen der Distribution nutzbar sein, und
@@ -45,7 +54,8 @@ fn cve_source_missing_sql(h: &str) -> String {
            AND {h}.os_id IN ('debian', 'ubuntu') \
            AND (NOT EXISTS (SELECT 1 FROM cve_sources d WHERE d.kind = {h}.os_id AND d.enabled AND d.deleted_at IS NULL) \
                 OR EXISTS (SELECT 1 FROM cve_sources d WHERE d.kind = {h}.os_id AND d.enabled AND d.deleted_at IS NULL \
-                           AND NOT {SOURCE_USABLE_SQL})))"
+                           AND NOT {usable})))",
+        usable = source_usable_sql(h),
     )
 }
 
@@ -72,23 +82,48 @@ pub async fn recompute_cve_gated_hosts(
     Ok(ids.len())
 }
 
+/// Begründungen für "CVE-Lage unbekannt": je Distribution (Quelle unvollständig, veraltet, fehlerhaft) und, bei
+/// Hybridquellen, je Release (Massendaten fehlen oder sind veraltet).
+#[derive(Debug, Default)]
+pub struct SourceIssues {
+    by_kind: std::collections::HashMap<String, String>,
+    by_release: std::collections::HashMap<(String, String), String>,
+}
+
+impl SourceIssues {
+    /// Begründung für einen Host (Distribution, Codename); `None`, wenn alle zuständigen Quellen nutzbar sind.
+    pub fn for_host(&self, os_id: &str, codename: Option<&str>) -> Option<String> {
+        self.by_kind.get(os_id).cloned().or_else(|| {
+            codename.and_then(|c| {
+                self.by_release
+                    .get(&(os_id.to_owned(), c.to_owned()))
+                    .cloned()
+            })
+        })
+    }
+}
+
 /// Begründung für "CVE-Lage unbekannt": welche Quelle der Distribution nicht nutzbar ist und warum.
-/// `None`, wenn alle zuständigen Quellen nutzbar sind (oder der Host keine Quelle braucht).
-pub async fn cve_source_issues(
-    pool: &sqlx::PgPool,
-) -> sqlx::Result<std::collections::HashMap<String, String>> {
+pub async fn cve_source_issues(pool: &sqlx::PgPool) -> sqlx::Result<SourceIssues> {
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, String, bool, Option<DateTime<Utc>>, i32, bool)> = sqlx::query_as(
+    let rows: Vec<(String, String, bool, Option<DateTime<Utc>>, i32, bool, Option<serde_json::Value>)> = sqlx::query_as(
         "SELECT d.kind, d.label, f.backfill IS NOT NULL, f.last_success_at, \
-                COALESCE(f.consecutive_failures, 0), COALESCE(f.usable_until > now(), false) \
+                COALESCE(f.consecutive_failures, 0), COALESCE(f.usable_until > now(), false), f.bulk \
          FROM cve_sources d LEFT JOIN feed_state f ON f.source = d.id \
          WHERE d.enabled AND d.deleted_at IS NULL AND d.kind IN ('debian', 'ubuntu') ORDER BY d.label",
     )
     .fetch_all(pool)
     .await?;
-    let mut out = std::collections::HashMap::new();
+    let mut out = SourceIssues::default();
     let mut seen_kinds = std::collections::HashSet::new();
-    for (kind, label, backfill, success, failures, fresh) in rows {
+    let codenames: Vec<(String, String)> = sqlx::query_as(
+        "SELECT DISTINCT os_id, os_codename FROM hosts WHERE os_id IN ('debian', 'ubuntu') AND NOT is_proxmox \
+         AND os_codename IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    let now = Utc::now();
+    for (kind, label, backfill, success, failures, fresh, bulk) in rows {
         seen_kinds.insert(kind.clone());
         let why = if backfill {
             "unvollständig (Abruf wird noch aufgebaut)"
@@ -99,14 +134,33 @@ pub async fn cve_source_issues(
         } else if !fresh {
             "veraltet"
         } else {
+            // Hybridquelle: je Release prüfen, ob gültige, frische Massendaten vorliegen.
+            if let Some(b) = bulk.and_then(|v| serde_json::from_value::<crate::cve::Bulk>(v).ok()) {
+                for (os, codename) in codenames.iter().filter(|(os, _)| *os == kind) {
+                    if b.ok.get(codename).is_none_or(|until| *until <= now) {
+                        let known = b
+                            .releases
+                            .get(codename)
+                            .is_some_and(|r| r.verified_at.is_some());
+                        out.by_release.entry((os.clone(), codename.clone())).or_insert_with(|| {
+                            format!(
+                                "Quelle {label}: für {codename} fehlen aktuelle Massendaten ({})",
+                                if known { "Import fehlgeschlagen oder veraltet" } else { "noch nicht importiert" }
+                            )
+                        });
+                    }
+                }
+            }
             continue;
         };
-        out.entry(kind)
+        out.by_kind
+            .entry(kind)
             .or_insert_with(|| format!("Quelle {label} {why}"));
     }
     for kind in ["debian", "ubuntu"] {
         if !seen_kinds.contains(kind) {
-            out.insert(kind.to_owned(), "keine aktive CVE-Quelle".to_owned());
+            out.by_kind
+                .insert(kind.to_owned(), "keine aktive CVE-Quelle".to_owned());
         }
     }
     Ok(out)

@@ -114,11 +114,16 @@ async fn main() -> Result<()> {
             }
             // Altbestand: Ubuntu-Quellen, deren Erstabruf nach 5 Seiten als vollständig galt, werden vollständig
             // nachgeladen (bis dahin "unvollständig", Hosts nie grün).
-            let reopened = patchwatch_server::cve::ubuntu::reopen_legacy_imports(
-                &pool,
-                cfg.cve.ubuntu_horizon_days,
-            )
-            .await?;
+            // Nur im Rückfallmodus `api`: der Hybridmodus lädt die Behoben-Daten aus den Massendateien.
+            let reopened = if cfg.cve.ubuntu_mode == "api" {
+                patchwatch_server::cve::ubuntu::reopen_legacy_imports(
+                    &pool,
+                    cfg.cve.ubuntu_horizon_days,
+                )
+                .await?
+            } else {
+                0
+            };
             if reopened > 0 {
                 tracing::warn!(
                     sources = reopened,

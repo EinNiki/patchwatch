@@ -81,7 +81,10 @@ async fn with_source_issues(st: &AppState, mut rows: Vec<HostRow>) -> ApiResult<
     let issues = crate::hostops::cve_source_issues(&st.pool).await?;
     for r in &mut rows {
         if !r.is_proxmox {
-            r.cve_source_issue = r.os_id.as_ref().and_then(|os| issues.get(os)).cloned();
+            r.cve_source_issue = r
+                .os_id
+                .as_deref()
+                .and_then(|os| issues.for_host(os, r.os_codename.as_deref()));
         }
     }
     Ok(rows)

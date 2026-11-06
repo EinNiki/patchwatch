@@ -129,3 +129,25 @@ gewinnt innerhalb eines Imports; über Läufe gewinnt der zuletzt geschriebene, 
 Je Release eine Datei von 5 bis 13 MB (CDN, Sekunden) plus lokale Verarbeitung (entpacken und parsen ca. 5 bis 20 s,
 Speichern einiger Zehntausend Zeilen): für drei Releases **unter zwei Minuten**, sofern `security-metadata.canonical.com`
 erreichbar ist. Das stündliche Blättern der ersten Seiten läuft unabhängig davon.
+
+## Umsetzung (Stand dieser Version)
+
+* **Zustand:** `feed_state.bulk` (JSONB: je Release `etag`, `last_modified`, `verified_at`, `imported_at`, Größe, Ergebnis,
+  letzter Fehler mit Statuscode, `Retry-After`, nächster Versuch; dazu `ok` = Ende der Frische je Release, `complete`,
+  `relevant` und der Stand des stündlichen Abrufs: Seitengröße, gelerntes Maximum, Fehler, Fortschritt). Der bestätigte
+  Cursor bleibt `feed_state.cursor`. Migration 0013 ist rein additiv (`bulk`, `backfill_parked`), nichts wird gelöscht.
+* **Nutzbarkeit je Release:** ein Host gilt nur als bewertbar, wenn `bulk.ok.<Release des Hosts>` in der Zukunft liegt
+  (`hostops::source_usable_sql`). Fehlt das, zeigt der Host „CVE-Lage unbekannt“ mit Begründung („für jammy fehlen aktuelle
+  Massendaten“); andere Releases bleiben bewertbar. `eval.rs` ist unverändert.
+* **Fehler im Massenimport** (404/5xx, abgeschnitten, zu groß, kein bz2, XML ohne Ende) verändern gespeicherte Daten nie;
+  der Fehler steht in der Anzeige, die Quelle ist dann „unvollständig“ (nie grün), und der nächste Versuch folgt nach
+  15 Minuten, verdoppelt bis höchstens 6 Stunden (`Retry-After` verlängert).
+* **Stündlicher Abruf:** der bestätigte Cursor rückt erst vor, wenn der Abstand geschlossen ist; reicht das Seitenlimit
+  (`ubuntu_incremental_pages`, Standard 10) nicht, setzt der nächste Lauf per Offset fort (eine Seite Überlappung), es
+  entsteht keine Lücke. Ohne Cursor beginnt die Verfolgung mit der ersten Seite.
+* **Anzeige:** Feed-Tabelle zeigt je Release Zeitpunkt, Dateigröße, „importiert“ oder „unverändert (304)“ bzw. den Fehler
+  samt Statuscode und `Retry-After`, nächsten Versuch sowie für den stündlichen Abruf Seitengröße, Fehler, nächsten Versuch
+  und einen Hinweis bei dauerhaftem 503/504. „Aktuell“ erscheint nur bei „vollständig“ und ohne dauerhaften Ausfall des
+  stündlichen Abrufs (ab drei Fehlläufen in Folge „unvollständig“).
+* **Speicher:** je Release werden die behobenen Kernel-Einträge (einige Zehntausend CVEs) vor dem Speichern im Speicher
+  gehalten, die Datei selbst nie.

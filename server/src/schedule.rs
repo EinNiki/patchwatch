@@ -195,6 +195,20 @@ pub async fn feed_interval_minutes(pool: &PgPool, source: &str, fallback: i64) -
         .unwrap_or(fallback)
 }
 
+/// Einstellungsschlüssel des Intervalls der Massendaten (täglicher Import) einer Quelle.
+pub fn bulk_key(source: &str) -> String {
+    format!("schedule.feeds.bulk_interval_minutes.{source}")
+}
+
+/// Intervall des täglichen Massendaten-Imports in Minuten (Standard aus der Konfiguration).
+pub async fn bulk_interval_minutes(pool: &PgPool, source: &str, fallback: i64) -> i64 {
+    get(pool, &bulk_key(source))
+        .await
+        .and_then(|v| v.as_i64())
+        .filter(|m| FEED_INTERVAL_RANGE.contains(m))
+        .unwrap_or(fallback)
+}
+
 /// Stunden ohne Report, ab denen ein Host als "meldet sich nicht" gilt.
 pub async fn stale_after_hours(pool: &PgPool, fallback: i64) -> i64 {
     get(pool, STALE_KEY)

@@ -34,11 +34,19 @@ pub async fn get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>>
     for src in crate::cve::sources::list(&st).await? {
         let source = &src.id;
         let default = st.cfg.cve.interval_minutes as i64;
+        // Hybridquelle (Ubuntu): zusätzlich das Intervall des täglichen Massendaten-Imports.
+        let bulk = (src.kind == "ubuntu" && st.cfg.cve.ubuntu_mode == "hybrid")
+            .then(|| st.cfg.cve.ubuntu_bulk_interval_minutes as i64);
         feeds.push(json!({
             "source": source,
             "label": src.label,
             "interval_minutes": schedule::feed_interval_minutes(&st.pool, source, default).await,
             "default_minutes": default,
+            "bulk_interval_minutes": match bulk {
+                Some(d) => json!(schedule::bulk_interval_minutes(&st.pool, source, d).await),
+                None => Value::Null,
+            },
+            "bulk_default_minutes": bulk,
         }));
     }
     let sched = schedule::report_schedule(&st.pool).await;
@@ -70,6 +78,8 @@ pub struct Body {
     stale_after_hours: Option<i64>,
     /// Quelle -> Minuten.
     feed_intervals: Option<BTreeMap<String, i64>>,
+    /// Quelle -> Minuten des täglichen Massendaten-Imports (nur Hybridquellen).
+    feed_bulk_intervals: Option<BTreeMap<String, i64>>,
     report_schedule: Option<ReportSchedule>,
 }
 
@@ -106,6 +116,22 @@ pub async fn put(
             schedule::validate_feed_interval(*minutes).map_err(ApiError::BadRequest)?;
         }
     }
+    if let Some(map) = &body.feed_bulk_intervals {
+        for (source, minutes) in map {
+            let known: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM cve_sources WHERE id = $1 AND kind = 'ubuntu' AND deleted_at IS NULL)",
+            )
+            .bind(source)
+            .fetch_one(&st.pool)
+            .await?;
+            if !known {
+                return Err(ApiError::BadRequest(
+                    "Massendaten-Intervall gibt es nur für Ubuntu-Quellen".into(),
+                ));
+            }
+            schedule::validate_feed_interval(*minutes).map_err(ApiError::BadRequest)?;
+        }
+    }
     if let Some(r) = &body.report_schedule {
         r.validate().map_err(ApiError::BadRequest)?;
     }
@@ -119,6 +145,9 @@ pub async fn put(
     }
     for (source, minutes) in body.feed_intervals.iter().flatten() {
         schedule::set(&mut *tx, &schedule::feed_key(source), &json!(minutes)).await?;
+    }
+    for (source, minutes) in body.feed_bulk_intervals.iter().flatten() {
+        schedule::set(&mut *tx, &schedule::bulk_key(source), &json!(minutes)).await?;
     }
     if let Some(r) = &body.report_schedule {
         schedule::set(

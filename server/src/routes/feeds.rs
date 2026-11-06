@@ -22,6 +22,8 @@ struct FeedDb {
     /// Fehlläufe in Folge (Wiederholungsleiter) und frühester nächster Versuch danach.
     retry_step: i32,
     next_attempt_at: Option<DateTime<Utc>>,
+    /// Hybridquelle (Ubuntu): Massendaten je Release und stündlicher Abruf (siehe `cve::Bulk`).
+    bulk: Option<Value>,
 }
 
 /// Fortschritt eines Rückstandsabbaus oder Erstabrufs für die Feed-Tabelle.
@@ -82,6 +84,127 @@ fn backfill_view(raw: &Value, pages_per_run: Option<u32>) -> Option<BackfillView
     })
 }
 
+/// Eine Massendatei (ein Release) für die Feed-Tabelle.
+#[derive(Serialize)]
+pub struct BulkReleaseView {
+    release: String,
+    /// `ok` (gültig und frisch), `error` (letzter Import fehlgeschlagen), `stale` (Frist überschritten) oder `pending`.
+    state: &'static str,
+    /// Fertiger Text: "importiert", "unverändert (304)" oder der Fehler.
+    result_text: String,
+    imported_at: Option<DateTime<Utc>>,
+    verified_at: Option<DateTime<Utc>>,
+    bytes: Option<u64>,
+    records: Option<u32>,
+    status: Option<u16>,
+    retry_after_secs: Option<u64>,
+    next_attempt_at: Option<DateTime<Utc>>,
+    fresh_until: Option<DateTime<Utc>>,
+}
+
+/// Der stündliche Abruf der ersten Seiten von `cves.json`.
+#[derive(Serialize)]
+pub struct HourlyView {
+    last_run_at: Option<DateTime<Utc>>,
+    last_ok_at: Option<DateTime<Utc>>,
+    page_size: u32,
+    max_page: Option<u32>,
+    pages_last: u32,
+    failures: u32,
+    status: Option<u16>,
+    retry_after_secs: Option<u64>,
+    error_text: Option<String>,
+    next_attempt_at: Option<DateTime<Utc>>,
+    /// Hinweis bei dauerhaftem 503/504.
+    hint: Option<String>,
+}
+
+/// Anzeige der Hybridquelle: Massendaten je Release und stündlicher Abruf.
+#[derive(Serialize)]
+pub struct BulkView {
+    /// Alle relevanten Releases haben einen gültigen, frischen Import (Voraussetzung für "ok").
+    complete: bool,
+    bulk_interval_minutes: i64,
+    releases: Vec<BulkReleaseView>,
+    hourly: HourlyView,
+}
+
+fn bulk_view(
+    raw: &Value,
+    label: &str,
+    now: DateTime<Utc>,
+    hourly_next: Option<DateTime<Utc>>,
+    bulk_interval_minutes: i64,
+) -> Option<BulkView> {
+    let b: crate::cve::Bulk = serde_json::from_value(raw.clone()).ok()?;
+    let releases = b
+        .relevant
+        .iter()
+        .map(|r| {
+            let e = b.releases.get(r).cloned().unwrap_or_default();
+            let fresh_until = b.ok.get(r).copied();
+            let (state, result_text) = match (e.last_result.as_str(), fresh_until) {
+                ("error", _) => (
+                    "error",
+                    plain_error(
+                        e.last_error.as_deref().unwrap_or("Fehler"),
+                        label,
+                        e.next_attempt_at.map(|n| n - now),
+                    ),
+                ),
+                (_, Some(_)) if e.last_result == "not_modified" => {
+                    ("ok", "unverändert (304)".to_owned())
+                }
+                (_, Some(_)) => ("ok", "importiert".to_owned()),
+                ("", None) => ("pending", "noch nicht importiert".to_owned()),
+                (_, None) => ("stale", "Frist überschritten, Daten veraltet".to_owned()),
+            };
+            BulkReleaseView {
+                release: r.clone(),
+                state,
+                result_text,
+                imported_at: e.imported_at,
+                verified_at: e.verified_at,
+                bytes: e.bytes,
+                records: e.records,
+                status: e.last_status,
+                retry_after_secs: e.retry_after_secs,
+                next_attempt_at: e.next_attempt_at,
+                fresh_until,
+            }
+        })
+        .collect();
+    let i = &b.incr;
+    let persistent = i.failures >= 3 && matches!(i.last_status, Some(503 | 504));
+    let hourly = HourlyView {
+        last_run_at: i.last_run_at,
+        last_ok_at: i.last_ok_at,
+        page_size: i.page_size,
+        max_page: i.max_page,
+        pages_last: i.pages_last,
+        failures: i.failures,
+        status: i.last_status,
+        retry_after_secs: i.retry_after_secs,
+        error_text: i
+            .last_error
+            .as_deref()
+            .map(|e| plain_error(e, label, hourly_next.map(|n| n - now))),
+        next_attempt_at: hourly_next,
+        hint: persistent.then(|| {
+            format!(
+                "Die Ubuntu-API antwortet seit {} Läufen mit 503/504 (überlastet). Behoben-Daten kommen weiter aus den Massendateien; offene Fälle werden verzögert nachgeführt.",
+                i.failures
+            )
+        }),
+    };
+    Some(BulkView {
+        complete: b.complete,
+        bulk_interval_minutes,
+        releases,
+        hourly,
+    })
+}
+
 #[derive(Serialize)]
 pub struct FeedRow {
     /// Stabile ID der Quelle (nicht der Anzeigename).
@@ -125,6 +248,8 @@ pub struct FeedRow {
     error_text: Option<String>,
     /// Fortschritt, solange der Feed unvollständig ist.
     backfill: Option<BackfillView>,
+    /// Nur Ubuntu im Hybridmodus: Massendaten je Release und stündlicher Abruf.
+    bulk: Option<BulkView>,
 }
 
 /// Fehlertext für Menschen: was die Quelle gemeldet hat und wann es weitergeht.
@@ -173,6 +298,18 @@ fn classify(
     if f.backfill.is_some() {
         return ("incomplete", f.last_success_at);
     }
+    // Hybridquelle: "ok" nur, wenn alle relevanten Releases gültige, frische Massendaten haben und die offenen Fälle
+    // (stündlicher Abruf) nicht dauerhaft ausbleiben.
+    if let Some(b) = f
+        .bulk
+        .as_ref()
+        .and_then(|v| serde_json::from_value::<crate::cve::Bulk>(v.clone()).ok())
+    {
+        let hourly_broken = b.incr.failures >= 3;
+        if !b.complete || b.ok.values().any(|u| *u <= now) || hourly_broken {
+            return ("incomplete", f.last_success_at);
+        }
+    }
     match f.last_success_at {
         None => ("never", None),
         Some(t) if f.consecutive_failures > 0 || now - t > max_age => ("stale", Some(t)),
@@ -183,7 +320,7 @@ fn classify(
 pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<FeedRow>>> {
     let sources = sources::list(&st).await?;
     let rows: Vec<FeedDb> = sqlx::query_as(
-        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill, retry_step, next_attempt_at FROM feed_state",
+        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill, retry_step, next_attempt_at, bulk FROM feed_state",
     )
     .fetch_all(&st.pool)
     .await?;
@@ -202,6 +339,7 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
             backfill: None,
             retry_step: 0,
             next_attempt_at: None,
+            bulk: None,
         };
         let f = f.unwrap_or(&empty);
         let interval = crate::schedule::feed_interval_minutes(&st.pool, &src.id, default).await;
@@ -217,6 +355,12 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
         } else {
             None
         };
+        let bulk_every = crate::schedule::bulk_interval_minutes(
+            &st.pool,
+            &src.id,
+            st.cfg.cve.ubuntu_bulk_interval_minutes as i64,
+        )
+        .await;
         let error_text = f
             .last_error
             .as_deref()
@@ -256,6 +400,10 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
                     (src.kind == "ubuntu").then_some(st.cfg.cve.ubuntu_max_pages),
                 )
             }),
+            bulk: f
+                .bulk
+                .as_ref()
+                .and_then(|b| bulk_view(b, &src.label, now, by_interval, bulk_every)),
             source: src.id,
         });
     }
@@ -626,6 +774,7 @@ mod tests {
                 backfill: None,
                 retry_step: 0,
                 next_attempt_at: None,
+                bulk: None,
             },
             now,
         )

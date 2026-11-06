@@ -39,14 +39,16 @@ async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
         .execute(&state.pool)
         .await?;
     #[allow(clippy::type_complexity)]
-    let (etag, last_modified, cursor, backfill, covered): (
+    let (etag, last_modified, cursor, backfill, covered, bulk, parked): (
         Option<String>,
         Option<String>,
         Option<String>,
         Option<serde_json::Value>,
         Option<chrono::DateTime<chrono::Utc>>,
+        Option<serde_json::Value>,
+        Option<serde_json::Value>,
     ) = sqlx::query_as(
-        "SELECT etag, last_modified, cursor, backfill, covered_since FROM feed_state WHERE source = $1",
+        "SELECT etag, last_modified, cursor, backfill, covered_since, bulk, backfill_parked FROM feed_state WHERE source = $1",
     )
     .bind(name)
     .fetch_one(&state.pool)
@@ -58,6 +60,9 @@ async fn load_state(state: &AppState, name: &str) -> Result<FeedState> {
         // Ein unlesbarer Eintrag zählt als "kein Fortschritt": der Abruf beginnt dann wieder vorn.
         backfill: backfill.and_then(|v| serde_json::from_value(v).ok()),
         covered_since: covered.map(|t| t.to_rfc3339()),
+        bulk: bulk.and_then(|v| serde_json::from_value(v).ok()),
+        parked: parked.and_then(|v| serde_json::from_value(v).ok()),
+        usable_until: None,
     })
 }
 
@@ -69,7 +74,7 @@ async fn context(state: &AppState, id: &str, kind: &str) -> Result<FetchCtx> {
     .bind(id)
     .fetch_all(&state.pool)
     .await?;
-    let hosts = if kind == "osv" {
+    let hosts = if kind == "osv" || kind == "ubuntu" {
         reeval::host_refs(&state.pool).await?
     } else {
         Vec::new()
@@ -92,6 +97,16 @@ async fn context(state: &AppState, id: &str, kind: &str) -> Result<FetchCtx> {
         hosts,
         enrich,
         progress: super::Heartbeat::default(),
+        bulk_interval_minutes: if kind == "ubuntu" {
+            crate::schedule::bulk_interval_minutes(
+                &state.pool,
+                id,
+                state.cfg.cve.ubuntu_bulk_interval_minutes as i64,
+            )
+            .await
+        } else {
+            0
+        },
     })
 }
 
@@ -318,6 +333,44 @@ async fn refresh_source_locked(state: &AppState, id: &str, src: &dyn CveSource) 
             )
             .await
         }
+        Ok(FetchOutcome::Failed {
+            state: new_state,
+            error,
+        }) => {
+            // Einzelheiten (Fehler je Release, Seitengröße, geparkter Abbau) bleiben erhalten, Daten ändern sich nicht.
+            let bulk = new_state
+                .bulk
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()?;
+            let parked = new_state
+                .parked
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()?;
+            let backfill = new_state
+                .backfill
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()?;
+            sqlx::query(
+                "UPDATE feed_state SET bulk = $2, backfill_parked = $3, backfill = $4, cursor = $5 WHERE source = $1",
+            )
+            .bind(name)
+            .bind(&bulk)
+            .bind(&parked)
+            .bind(&backfill)
+            .bind(&new_state.cursor)
+            .execute(&state.pool)
+            .await?;
+            let msg = error.to_string();
+            let hint = match &error {
+                FeedError::Throttled { retry_after, .. } => *retry_after,
+                _ => None,
+            };
+            record_failure(state, name, &msg, hint).await?;
+            Ok(Outcome::Failed(msg))
+        }
         Err(e) => {
             let msg = e.to_string();
             tracing::warn!(source = name, error = %msg, "Feed-Abruf fehlgeschlagen, alter Stand bleibt erhalten");
@@ -364,9 +417,22 @@ async fn store(
         .as_ref()
         .map(serde_json::to_value)
         .transpose()?;
+    let bulk = new_state
+        .bulk
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()?;
+    let parked = new_state
+        .parked
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()?;
     match &partial {
         None => {
-            let until = usable_until(state, name).await;
+            let until = match new_state.usable_until {
+                Some(u) => u,
+                None => usable_until(state, name).await,
+            };
             let covered = new_state
                 .covered_since
                 .as_deref()
@@ -374,7 +440,8 @@ async fn store(
             sqlx::query(
                 "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
                  last_success_at = now(), last_error = NULL, consecutive_failures = 0, usable_until = $6, \
-                 retry_step = 0, next_attempt_at = NULL, covered_since = COALESCE($7, covered_since) WHERE source = $1",
+                 retry_step = 0, next_attempt_at = NULL, covered_since = COALESCE($7, covered_since), \
+                 bulk = $8, backfill_parked = $9 WHERE source = $1",
             )
             .bind(name)
             .bind(&new_state.etag)
@@ -383,6 +450,8 @@ async fn store(
             .bind(&backfill)
             .bind(until)
             .bind(covered)
+            .bind(&bulk)
+            .bind(&parked)
             .execute(&mut *tx)
             .await?;
         }
@@ -391,7 +460,7 @@ async fn store(
             sqlx::query(
                 "UPDATE feed_state SET etag = $2, last_modified = $3, cursor = $4, backfill = $5, \
                  last_error = $6, last_error_at = CASE WHEN $6::text IS NULL THEN last_error_at ELSE now() END, \
-                 consecutive_failures = 0 WHERE source = $1",
+                 consecutive_failures = 0, bulk = $7, backfill_parked = $8 WHERE source = $1",
             )
             .bind(name)
             .bind(&new_state.etag)
@@ -399,6 +468,8 @@ async fn store(
             .bind(&new_state.cursor)
             .bind(&backfill)
             .bind(interrupted.as_deref().map(|m| format!("Lauf unterbrochen: {m}")))
+            .bind(&bulk)
+            .bind(&parked)
             .execute(&mut *tx)
             .await?;
             if interrupted.is_some() {

@@ -9,9 +9,10 @@
 //! geschlossen ist; erst dann rückt er auf den neuesten zu Beginn gesehenen Zeitstempel vor.
 
 use super::http::{self, Limits};
+use super::oval::{self, Imported, OvalParams};
 use super::{
-    is_cve_id, is_kernel_source, truncate, valid_version, Backfill, CveSource, Entry, FeedError,
-    FeedState, FetchCtx, FetchOutcome, Record, SourceStatus,
+    is_cve_id, is_kernel_source, truncate, valid_version, Backfill, BulkRelease, CveSource, Entry,
+    FeedError, FeedState, FetchCtx, FetchOutcome, Incr, Record, SourceStatus,
 };
 use crate::config::CveConfig;
 use async_trait::async_trait;
@@ -32,6 +33,16 @@ pub struct Ubuntu {
     /// Pause zwischen zwei Seiten: höchstens eine Anfrage gleichzeitig, dazwischen Luft für die Quelle.
     page_pause: Duration,
     lim: Limits,
+    /// Hybridmodus: Massendaten (täglich) plus erste Seiten der API (stündlich); sonst nur der Rückstandsabbau.
+    hybrid: bool,
+    oval: OvalParams,
+    bulk_client: reqwest::Client,
+    extra_releases: Vec<String>,
+    default_bulk_minutes: i64,
+    incr_pages: u32,
+    page_size: u32,
+    /// Grenzen für die Seitenanfragen des stündlichen Abrufs (ein Versuch je Anfrage, die Schleife steuert Wiederholungen).
+    page_lim: Limits,
 }
 
 impl Ubuntu {
@@ -45,6 +56,25 @@ impl Ubuntu {
                 max_bytes: c.ubuntu_max_page_bytes,
                 timeout: Duration::from_secs(c.request_timeout_secs),
                 attempts: c.retries,
+                base_delay: Duration::from_millis(c.retry_base_delay_ms),
+                retry_after_cap: super::http::RETRY_AFTER_CAP,
+            },
+            hybrid: c.ubuntu_mode == "hybrid",
+            oval: OvalParams {
+                base_url: c.ubuntu_oval_url.trim_end_matches('/').to_owned(),
+                max_bytes: c.ubuntu_oval_max_bytes,
+                max_xml_bytes: c.ubuntu_oval_max_xml_bytes,
+                timeout: Duration::from_secs(c.ubuntu_oval_timeout_secs),
+            },
+            bulk_client: oval::bulk_client(),
+            extra_releases: c.ubuntu_bulk_releases.clone(),
+            default_bulk_minutes: c.ubuntu_bulk_interval_minutes as i64,
+            incr_pages: c.ubuntu_incremental_pages,
+            page_size: c.ubuntu_page_size,
+            page_lim: Limits {
+                max_bytes: c.ubuntu_max_page_bytes,
+                timeout: Duration::from_secs(c.ubuntu_page_timeout_secs),
+                attempts: 1,
                 base_delay: Duration::from_millis(c.retry_base_delay_ms),
                 retry_after_cap: super::http::RETRY_AFTER_CAP,
             },
@@ -231,6 +261,38 @@ impl CveSource for Ubuntu {
         state: &FeedState,
         ctx: &FetchCtx,
     ) -> Result<FetchOutcome, FeedError> {
+        if self.hybrid {
+            return self.fetch_hybrid(client, state, ctx).await;
+        }
+        // Rückfallmodus `api`: ein geparkter Rückstandsabbau wird fortgesetzt, die Hybriddaten werden verworfen
+        // (die nächste Umstellung beginnt mit bedingten Anfragen ohne Wirkung auf vorhandene CVE-Daten).
+        let mut restored = state.clone();
+        let had_bulk = restored.bulk.take().is_some();
+        if let Some(p) = restored.parked.take() {
+            if restored.backfill.is_none() {
+                restored.backfill = Some(p);
+            }
+        }
+        let out = self.fetch_api(client, &restored, ctx).await?;
+        Ok(match out {
+            // Der Zustand (Hybriddaten entfernt) muss auch ohne neue Records gespeichert werden.
+            FetchOutcome::NotModified if had_bulk || restored != *state => FetchOutcome::Records {
+                records: Vec::new(),
+                state: restored,
+            },
+            o => o,
+        })
+    }
+}
+
+impl Ubuntu {
+    /// Bisheriger Weg (Modus `api`): absteigend nach `updated` blättern, Rückstand über Läufe abbauen.
+    async fn fetch_api(
+        &self,
+        client: &reqwest::Client,
+        state: &FeedState,
+        ctx: &FetchCtx,
+    ) -> Result<FetchOutcome, FeedError> {
         // Bestätigter Cursor: alles Neuere ist vollständig geladen. Er rückt nur vor, wenn die Lücke zwischen
         // Ziel (alter Cursor bzw. Horizont des Erstabrufs) und Listenkopf geschlossen ist; solange sie offen
         // ist, steht der Fortschritt in `backfill`. Auch der Erstabruf ist so ein Abbau: ohne Cursor gilt die
@@ -348,7 +410,38 @@ impl CveSource for Ubuntu {
             return Err(FeedError::Format("Feed liefert keine CVEs".into()));
         }
 
-        // Watchlist-CVEs, die nicht im neuesten Fenster liegen, gezielt nachladen.
+        self.fetch_watchlist(client, ctx, &mut records).await;
+
+        if !complete {
+            return Ok(FetchOutcome::Partial {
+                records,
+                state: new_state,
+                retry_after: match &interrupted {
+                    Some(FeedError::Throttled { retry_after, .. }) => *retry_after,
+                    _ => None,
+                },
+                interrupted: interrupted.map(|e| e.to_string()),
+            });
+        }
+        // Ein geschlossener Rückstand muss den Cursor auch dann übernehmen, wenn er keine Records brachte.
+        if records.is_empty() && !had_backfill {
+            return Ok(FetchOutcome::NotModified);
+        }
+        Ok(FetchOutcome::Records {
+            records,
+            state: new_state,
+        })
+    }
+}
+
+impl Ubuntu {
+    /// Watchlist-CVEs, die nicht im neuesten Fenster liegen, gezielt nachladen.
+    async fn fetch_watchlist(
+        &self,
+        client: &reqwest::Client,
+        ctx: &FetchCtx,
+        records: &mut Vec<Record>,
+    ) {
         for id in ctx
             .watch_missing
             .iter()
@@ -374,26 +467,6 @@ impl CveSource for Ubuntu {
                 }
             }
         }
-
-        if !complete {
-            return Ok(FetchOutcome::Partial {
-                records,
-                state: new_state,
-                retry_after: match &interrupted {
-                    Some(FeedError::Throttled { retry_after, .. }) => *retry_after,
-                    _ => None,
-                },
-                interrupted: interrupted.map(|e| e.to_string()),
-            });
-        }
-        // Ein geschlossener Rückstand muss den Cursor auch dann übernehmen, wenn er keine Records brachte.
-        if records.is_empty() && !had_backfill {
-            return Ok(FetchOutcome::NotModified);
-        }
-        Ok(FetchOutcome::Records {
-            records,
-            state: new_state,
-        })
     }
 }
 
@@ -444,6 +517,344 @@ async fn fetch_page(
         }
     }
     Ok(page)
+}
+
+/// Seitengrößen der Leiter beim Verkleinern und Wachsen (nie unter 5, die API erlaubt höchstens 20).
+const SIZE_LADDER: [u32; 3] = [5, 10, 20];
+const MIN_PAGE: u32 = 5;
+
+/// Nächstkleinere Stufe der Leiter (nie unter 5).
+fn smaller(size: u32) -> u32 {
+    SIZE_LADDER
+        .iter()
+        .rev()
+        .copied()
+        .find(|s| *s < size)
+        .unwrap_or(MIN_PAGE)
+}
+
+/// Nächstgrößere Stufe der Leiter, höchstens `cap`.
+fn larger(size: u32, cap: u32) -> u32 {
+    SIZE_LADDER
+        .iter()
+        .copied()
+        .find(|s| *s > size)
+        .map_or(size, |s| s.min(cap))
+        .max(size)
+}
+
+/// Nächste Stufe der Leiter, die nicht größer als `n` ist (Werte unter 5 bleiben 5).
+fn snap(n: u32) -> u32 {
+    SIZE_LADDER
+        .iter()
+        .rev()
+        .copied()
+        .find(|s| *s <= n)
+        .unwrap_or(MIN_PAGE)
+}
+
+fn status_of(e: &FeedError) -> Option<u16> {
+    match e {
+        FeedError::Http(c) | FeedError::Throttled { status: c, .. } => Some(*c),
+        _ => None,
+    }
+}
+
+fn retry_after_of(e: &FeedError) -> Option<Duration> {
+    match e {
+        FeedError::Throttled { retry_after, .. } => *retry_after,
+        _ => None,
+    }
+}
+
+impl Ubuntu {
+    /// Releases, für die Massendaten gebraucht werden: Releases der Ubuntu-Hosts plus Konfiguration.
+    fn relevant_releases(&self, ctx: &FetchCtx) -> Vec<String> {
+        let mut v: Vec<String> = ctx
+            .hosts
+            .iter()
+            .filter(|h| h.distro_id == "ubuntu")
+            .map(|h| h.codename.clone())
+            .chain(self.extra_releases.iter().cloned())
+            .filter(|r| oval::valid_release(r))
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    /// Hybridmodus: täglich die behobenen Kernel-Einträge aus den OVAL-Dateien (bedingt, gestreamt), stündlich die
+    /// ersten Seiten der API für offene Fälle. Ein Ausfall der API ist kein Totalausfall: die Massendaten gelten
+    /// weiter, aber nur innerhalb ihrer Frische (siehe docs/ubuntu-source.md).
+    async fn fetch_hybrid(
+        &self,
+        client: &reqwest::Client,
+        state: &FeedState,
+        ctx: &FetchCtx,
+    ) -> Result<FetchOutcome, FeedError> {
+        let mut st = state.clone();
+        // Ein vorhandener Rückstandsabbau bleibt erhalten, ruht aber (im Modus `api` läuft er weiter).
+        if let Some(b) = st.backfill.take() {
+            st.parked = Some(b);
+        }
+        let mut bulk = st.bulk.take().unwrap_or_default();
+        let relevant = self.relevant_releases(ctx);
+        let every = chrono::Duration::minutes(if ctx.bulk_interval_minutes > 0 {
+            ctx.bulk_interval_minutes
+        } else {
+            self.default_bulk_minutes
+        });
+        // Frische der Massendaten: max(3 x tägliches Intervall, 36 Stunden).
+        let window = (every * 3).max(chrono::Duration::hours(36));
+
+        let mut records: Vec<Record> = Vec::new();
+        let (mut bulk_ok_ops, mut first_error): (u32, Option<FeedError>) = (0, None);
+        for rel in &relevant {
+            let entry = bulk.releases.entry(rel.clone()).or_default();
+            let due = if entry.last_result == "error" {
+                entry.next_attempt_at.is_none_or(|n| Utc::now() >= n)
+            } else {
+                entry.checked_at.is_none_or(|c| Utc::now() - c >= every)
+            };
+            if !due {
+                continue;
+            }
+            ctx.progress.beat();
+            let res =
+                oval::import_release(&self.bulk_client, rel, entry, &self.oval, &ctx.progress)
+                    .await;
+            let at = Utc::now();
+            entry.checked_at = Some(at);
+            match res {
+                Ok(Imported::NotModified) => {
+                    entry.verified_at = Some(at);
+                    entry.last_result = "not_modified".into();
+                    clear_bulk_error(entry);
+                    bulk_ok_ops += 1;
+                }
+                Ok(Imported::Data {
+                    records: r,
+                    etag,
+                    last_modified,
+                    bytes,
+                }) => {
+                    entry.etag = etag;
+                    entry.last_modified = last_modified;
+                    entry.verified_at = Some(at);
+                    entry.imported_at = Some(at);
+                    entry.bytes = Some(bytes);
+                    entry.records = Some(u32::try_from(r.len()).unwrap_or(u32::MAX));
+                    entry.last_result = "imported".into();
+                    clear_bulk_error(entry);
+                    records.extend(r);
+                    bulk_ok_ops += 1;
+                }
+                Err(e) => {
+                    // Ein Fehler verändert die gespeicherten Daten nie; er wird nur vermerkt.
+                    entry.failures += 1;
+                    entry.last_result = "error".into();
+                    entry.last_error = Some(e.to_string());
+                    entry.last_status = status_of(&e);
+                    entry.retry_after_secs = retry_after_of(&e).map(|d| d.as_secs());
+                    let backoff = chrono::Duration::minutes(
+                        (15i64 << entry.failures.saturating_sub(1).min(5)).min(360),
+                    );
+                    let asked = retry_after_of(&e)
+                        .and_then(|d| chrono::Duration::from_std(d).ok())
+                        .unwrap_or_else(chrono::Duration::zero);
+                    entry.next_attempt_at = Some(at + backoff.max(asked));
+                    tracing::warn!(release = %rel, error = %e, "Ubuntu: Massendaten-Import fehlgeschlagen");
+                    first_error.get_or_insert(e);
+                }
+            }
+        }
+
+        // Stündlich: die ersten Seiten der API (offene Fälle, neue Änderungen).
+        let incr_res = self
+            .incremental(client, &mut st.cursor, &mut bulk.incr, ctx, &mut records)
+            .await;
+        let incr_ok = incr_res.is_ok();
+        if let Err(e) = incr_res {
+            tracing::warn!(error = %e, "Ubuntu: stündlicher Abruf fehlgeschlagen, Massendaten gelten weiter");
+            first_error.get_or_insert(e);
+        }
+        if incr_ok {
+            self.fetch_watchlist(client, ctx, &mut records).await;
+        }
+
+        // Frische und Vollständigkeit neu bestimmen.
+        let now = Utc::now();
+        bulk.ok.clear();
+        for rel in &relevant {
+            if let Some(until) = bulk
+                .releases
+                .get(rel)
+                .and_then(|r| r.verified_at)
+                .map(|v| v + window)
+                .filter(|u| *u > now)
+            {
+                bulk.ok.insert(rel.clone(), until);
+            }
+        }
+        bulk.complete = relevant.iter().all(|r| {
+            bulk.ok.contains_key(r)
+                && bulk
+                    .releases
+                    .get(r)
+                    .is_some_and(|b| b.last_result != "error")
+        });
+        bulk.relevant = relevant;
+        st.usable_until = bulk.ok.values().max().copied();
+        let nothing_usable = bulk.ok.is_empty() && !bulk.relevant.is_empty();
+        st.bulk = Some(bulk);
+
+        if let (true, Some(error)) = (nothing_usable && bulk_ok_ops == 0 && !incr_ok, first_error) {
+            return Ok(FetchOutcome::Failed { state: st, error });
+        }
+        Ok(FetchOutcome::Records { records, state: st })
+    }
+
+    /// Erste Seiten von `cves.json` bis zum bestätigten Cursor. Seitengröße 20, bei Fehlern 10, dann 5 (nie darunter),
+    /// bei HTTP 422 wird das Maximum gelernt; eine Anfrage gleichzeitig mit Pause dazwischen. Reicht das Seitenlimit
+    /// nicht bis zum Cursor, bleibt der Fortschritt (`pending`, `next_offset`) erhalten und der Cursor unverändert,
+    /// sodass keine Lücke entsteht.
+    async fn incremental(
+        &self,
+        client: &reqwest::Client,
+        cursor: &mut Option<String>,
+        incr: &mut Incr,
+        ctx: &FetchCtx,
+        records: &mut Vec<Record>,
+    ) -> Result<(), FeedError> {
+        incr.last_run_at = Some(Utc::now());
+        let confirmed = cursor.as_deref().and_then(parse_time);
+        let cap = snap(incr.max_page.unwrap_or(self.page_size).min(self.page_size));
+        let mut size = if incr.page_size == 0 {
+            cap
+        } else {
+            snap(incr.page_size).min(cap)
+        };
+        // Fortschritt nur fortsetzen, wenn er zum bestätigten Cursor gehört.
+        let resume = confirmed.is_some() && incr.pending.as_deref().and_then(parse_time).is_some();
+        let mut offset = if resume { incr.next_offset as usize } else { 0 };
+        let mut newest = if resume {
+            incr.pending.as_deref().and_then(parse_time)
+        } else {
+            None
+        }
+        .or(confirmed);
+        let (mut pages, mut shrunk, mut min_retry) = (0u32, false, false);
+        let mut reached = false;
+        let mut failure: Option<FeedError> = None;
+
+        while pages < self.incr_pages {
+            if (pages > 0 || shrunk) && !self.page_pause.is_zero() {
+                tokio::time::sleep(self.page_pause).await;
+            }
+            ctx.progress.beat();
+            let url = page_url(&self.base, size as usize, offset);
+            match fetch_page(client, &url, self.page_lim, confirmed, size as usize).await {
+                Ok(p) => {
+                    pages += 1;
+                    min_retry = false;
+                    records.extend(p.records);
+                    newest = newest.max(p.newest);
+                    offset += size as usize;
+                    // Ohne bestätigten Cursor beginnt die Verfolgung mit der ersten Seite (kein Rückstand bekannt).
+                    if p.reached_end || confirmed.is_none() {
+                        reached = true;
+                        break;
+                    }
+                }
+                Err(FeedError::Http(422)) => {
+                    // Die Quelle lehnt die Seitengröße ab: Maximum lernen und mit der kleineren Stufe wiederholen.
+                    if size <= MIN_PAGE {
+                        failure = Some(FeedError::Http(422));
+                        break;
+                    }
+                    size = smaller(size);
+                    incr.max_page = Some(size);
+                    shrunk = true;
+                }
+                Err(
+                    e
+                    @ (FeedError::Throttled { .. } | FeedError::Network(_) | FeedError::Format(_)),
+                ) => {
+                    // Überlastung, Zeitüberschreitung, Verbindungsabbruch: kleinere Seiten, nach Wartezeit (Retry-After
+                    // gilt, Jitter gegen Gleichtakt). Auf der kleinsten Stufe gibt es noch einen Versuch, dann Schluss.
+                    if size > MIN_PAGE {
+                        size = smaller(size);
+                        shrunk = true;
+                    } else if min_retry {
+                        failure = Some(e);
+                        break;
+                    } else {
+                        min_retry = true;
+                        shrunk = true;
+                    }
+                    let wait = retry_after_of(&e)
+                        .unwrap_or(Duration::ZERO)
+                        .min(super::http::RETRY_AFTER_CAP)
+                        + http::jitter(self.lim.base_delay.as_millis() as u64);
+                    if failure.is_none() && !wait.is_zero() {
+                        ctx.progress.beat();
+                        tokio::time::sleep(wait).await;
+                    }
+                    incr.last_status = status_of(&e);
+                    incr.last_error = Some(e.to_string());
+                    incr.retry_after_secs = retry_after_of(&e).map(|d| d.as_secs());
+                }
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+            }
+        }
+
+        // Fortschritt festhalten.
+        if reached {
+            *cursor = newest.map(|n| n.to_rfc3339());
+            incr.pending = None;
+            incr.next_offset = 0;
+        } else if pages > 0 && confirmed.is_some() {
+            // Eine Seite Überlappung (Verschiebungen oben, ausgeblendete Einträge); bei einer Seite geht es direkt weiter.
+            incr.pending = newest.map(|n| n.to_rfc3339());
+            incr.next_offset = if pages > 1 {
+                offset.saturating_sub(size as usize) as u32
+            } else {
+                offset as u32
+            };
+        }
+        incr.pages_last = pages;
+        match failure {
+            None => {
+                // Nach einem fehlerfreien Lauf wieder wachsen, höchstens bis zum (gelernten) Maximum.
+                incr.page_size = if shrunk { size } else { larger(size, cap) };
+                incr.last_ok_at = Some(Utc::now());
+                incr.last_error = None;
+                incr.last_status = None;
+                incr.retry_after_secs = None;
+                incr.failures = 0;
+                Ok(())
+            }
+            Some(e) => {
+                incr.page_size = size;
+                incr.failures += 1;
+                incr.last_error = Some(e.to_string());
+                incr.last_status = status_of(&e);
+                incr.retry_after_secs = retry_after_of(&e).map(|d| d.as_secs());
+                Err(e)
+            }
+        }
+    }
+}
+
+fn clear_bulk_error(e: &mut BulkRelease) {
+    e.last_error = None;
+    e.last_status = None;
+    e.retry_after_secs = None;
+    e.failures = 0;
+    e.next_attempt_at = None;
 }
 
 #[cfg(test)]

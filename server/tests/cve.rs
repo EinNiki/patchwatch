@@ -35,6 +35,13 @@ struct Mock {
     /// Seite ab diesem Offset bricht mitten im Body ab (Verbindungsabbruch).
     ubuntu_drop_offset: Option<usize>,
     ubuntu_garbage: bool,
+    /// Hybridtests: Seiten (limit, offset) in Reihenfolge der Anfragen; Antworten mit `limit` über der Grenze
+    /// schlagen mit 503 bzw. 422 fehl.
+    pages: Vec<(usize, usize)>,
+    ubuntu_503_above: Option<usize>,
+    ubuntu_422_above: Option<usize>,
+    /// OVAL-Dateien je Release (Dateiname `com.ubuntu.<release>.cve.oval.xml.bz2`).
+    oval: HashMap<String, OvalFile>,
     user_agents: Vec<String>,
     /// Seite ab diesem Offset antwortet mit HTTP 500 (Netz-/Serverfehler mitten im Lauf).
     ubuntu_fail_offset: Option<usize>,
@@ -46,7 +53,69 @@ struct Mock {
     log: Vec<String>,
 }
 
+#[derive(Clone, Default)]
+struct OvalFile {
+    body: Vec<u8>,
+    etag: String,
+    /// Ersetzt die Antwort durch diesen Statuscode (z. B. 503) samt `Retry-After`.
+    status: Option<u16>,
+    retry_after: Option<String>,
+    /// Körper bricht nach so vielen Bytes ab (Verbindungsabbruch bei angekündigter Länge).
+    cut_at: Option<usize>,
+}
+
 type Shared = Arc<Mutex<Mock>>;
+
+/// Statische Dateien der Massendaten mit `ETag`/`If-None-Match` (304 bei unverändertem Stand).
+async fn oval_file(
+    State(m): State<Shared>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let mut g = m.lock().unwrap();
+    let inm = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    g.log.push(format!(
+        "oval {name}{}",
+        if inm.is_some() { " conditional" } else { "" }
+    ));
+    let Some(f) = g.oval.get(&name).cloned() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if let Some(code) = f.status {
+        let mut r = StatusCode::from_u16(code).unwrap().into_response();
+        if let Some(v) = &f.retry_after {
+            r.headers_mut()
+                .insert(header::RETRY_AFTER, v.parse().unwrap());
+        }
+        return r;
+    }
+    if inm.as_deref() == Some(f.etag.as_str()) {
+        return Response::builder().status(304).body(Body::empty()).unwrap();
+    }
+    let len = f.body.len();
+    let body = match f.cut_at {
+        Some(n) => {
+            let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+                Ok(f.body[..n].to_vec()),
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "abgerissen",
+                )),
+            ];
+            Body::from_stream(futures_util::stream::iter(chunks))
+        }
+        None => Body::from(f.body),
+    };
+    Response::builder()
+        .header(header::CONTENT_LENGTH, len.to_string())
+        .header(header::ETAG, f.etag)
+        .header(header::LAST_MODIFIED, "Thu, 05 Nov 2026 22:44:49 GMT")
+        .body(body)
+        .unwrap()
+}
 
 async fn ubuntu_list(
     State(m): State<Shared>,
@@ -82,6 +151,13 @@ async fn ubuntu_list(
     } else {
         format!("ubuntu probe={offset}")
     });
+    m.pages.push((limit, offset));
+    if m.ubuntu_422_above.is_some_and(|max| limit > max) {
+        return StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    }
+    if m.ubuntu_503_above.is_some_and(|max| limit > max) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if let Some(code) = m.ubuntu_status {
         let mut r = StatusCode::from_u16(code).unwrap().into_response();
         if let Some(v) = &m.ubuntu_retry_after {
@@ -199,6 +275,7 @@ async fn start_mock(mock: Shared) -> String {
     let app = Router::new()
         .route("/security/cves.json", get(ubuntu_list))
         .route("/security/cves/{id}", get(ubuntu_one))
+        .route("/oval/{name}", get(oval_file))
         .route("/tracker/data/json", get(debian))
         .route("/v1/query", post(osv))
         .route("/nvd", get(nvd))
@@ -243,7 +320,7 @@ async fn setup(pool: PgPool, sources: &[&str], extra_toml: &str, base: &str) -> 
         .join(",");
     let toml = format!(
         "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\nnvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\n\
-         retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\n{extra_toml}\n\
+         retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\nubuntu_mode = \"api\"\n{extra_toml}\n\
          [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
     );
     let cfg = Config::from_sources(Some(&toml), &|_| None).unwrap();
@@ -2074,7 +2151,7 @@ async fn setup_keyed_extra(pool: PgPool, sources: &[&str], base: &str, extra: &s
         .join(",");
     let toml = format!(
         "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\n\
-         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\n{extra}\n"
+         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\nubuntu_mode = \"api\"\n{extra}\n"
     );
     let cfg = Config::from_sources(Some(&toml), &|k| {
         (k == "PATCHWATCH_SECRET_KEY").then(|| SECRET_B64.to_owned())
@@ -3110,7 +3187,7 @@ async fn setup_cfg(
 ) -> AppState {
     let toml = format!(
         "[cve]\nsources = [\"ubuntu\"]\nubuntu_url = \"{base}\"\nretries = {retries}\nretry_base_delay_ms = 10\n\
-         request_timeout_secs = {timeout_secs}\nstall_timeout_secs = {stall_secs}\nubuntu_page_pause_ms = {pause_ms}\n\
+         request_timeout_secs = {timeout_secs}\nstall_timeout_secs = {stall_secs}\nubuntu_page_pause_ms = {pause_ms}\nubuntu_mode = \"api\"\n\
          [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
     );
     AppState::new(pool, Config::from_sources(Some(&toml), &|_| None).unwrap()).unwrap()
@@ -3872,4 +3949,913 @@ async fn filter_rejects_bad_values_and_survives_special_characters(pool: PgPool)
         );
     }
     assert_eq!(count(&e.pool, "SELECT count(*) FROM cves").await, 1);
+}
+
+// ---------- Ubuntu hybrid: Massendaten (OVAL) plus stündlicher Abruf der API ----------
+
+/// Eine OVAL-Datei wie bei Canonical (verkürzt): je Eintrag eine CVE mit den behobenen Kernel-Varianten
+/// (`fixed`) und optional dem Kriterium "Kernel läuft" für offene Fälle (ohne Fixversion).
+/// (CVE, behobene Kernel-Varianten (Paket, Version), zusätzlich "Kernel läuft")
+type OvalDef<'a> = (&'a str, &'a [(&'a str, &'a str)], bool);
+
+fn oval_xml(release: &str, defs: &[OvalDef<'_>]) -> String {
+    let mut x = String::from(
+        "<oval_definitions xmlns=\"http://oval.mitre.org/XMLSchema/oval-definitions-5\"><generator/><definitions>\
+         <definition id=\"oval:inv\" class=\"inventory\" version=\"1\"><metadata><title>inv</title><description /></metadata></definition>",
+    );
+    for (cve, fixed, open) in defs {
+        x.push_str(&format!(
+            "<definition id=\"oval:{cve}\" class=\"vulnerability\" version=\"1\"><metadata><title>{cve}</title>\
+             <reference source=\"CVE\" ref_id=\"{cve}\" ref_url=\"https://x\" /><description>Test &amp; Beschreibung {cve}</description>\
+             <advisory><cve href=\"https://x\" priority=\"high\" public=\"20250709\">{cve}</cve></advisory></metadata><criteria>"
+        ));
+        for (pkg, ver) in *fixed {
+            x.push_str(&format!(
+                "<criterion test_ref=\"oval:t\" comment=\"'{pkg}' kernel in {release} was vulnerable but has been fixed (note: '{ver}').\" />"
+            ));
+        }
+        if *open {
+            x.push_str("<criterion test_ref=\"oval:o\" comment=\"Is kernel 'linux' running?\" />");
+        }
+        x.push_str("</criteria></definition>");
+    }
+    x.push_str("</definitions></oval_definitions>");
+    x
+}
+
+fn bz2(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::fast());
+    e.write_all(data).unwrap();
+    e.finish().unwrap()
+}
+
+fn set_oval(mock: &Shared, release: &str, xml: &str, etag: &str) {
+    mock.lock().unwrap().oval.insert(
+        format!("com.ubuntu.{release}.cve.oval.xml.bz2"),
+        OvalFile {
+            body: bz2(xml.as_bytes()),
+            etag: etag.to_owned(),
+            ..Default::default()
+        },
+    );
+}
+
+async fn setup_hybrid(pool: PgPool, base: &str, extra: &str) -> AppState {
+    let timeout = if extra.contains("ubuntu_page_timeout_secs") {
+        ""
+    } else {
+        "ubuntu_page_timeout_secs = 3\n"
+    };
+    let toml = format!(
+        "[cve]\nsources = [\"ubuntu\"]\nubuntu_url = \"{base}\"\nubuntu_oval_url = \"{base}/oval\"\nubuntu_mode = \"hybrid\"\n\
+         retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\n{timeout}{extra}\n\
+         [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
+    );
+    let st = AppState::new(pool, Config::from_sources(Some(&toml), &|_| None).unwrap()).unwrap();
+    patchwatch_server::cve::sources::ensure_seeded(&st)
+        .await
+        .unwrap();
+    st
+}
+
+async fn bulk_json(pool: &PgPool) -> Value {
+    sqlx::query_scalar::<_, Option<Value>>("SELECT bulk FROM feed_state WHERE source = 'ubuntu'")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .unwrap_or(Value::Null)
+}
+
+/// Lässt den letzten Import aller Releases zwei Tage zurückliegen und hebt Wartezeiten nach Fehlern auf (fällig),
+/// ohne die Frische zu berühren.
+async fn make_bulk_due(pool: &PgPool) {
+    sqlx::query(
+        "UPDATE feed_state SET bulk = (SELECT jsonb_set(bulk, '{releases}', COALESCE((SELECT jsonb_object_agg(k, \
+         (jsonb_set(v, '{checked_at}', to_jsonb(to_char(now() - interval '2 days', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))) || '{\"next_attempt_at\": null}'::jsonb)) \
+         FROM jsonb_each(bulk->'releases') AS e(k, v)), '{}'::jsonb))) WHERE source = 'ubuntu'",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn status_rows(pool: &PgPool, cve: &str) -> Vec<(String, String, String, Option<String>)> {
+    sqlx::query_as(
+        "SELECT release, package, status, fix_version FROM cve_source_status WHERE cve_id = $1 AND source_id = 'ubuntu' \
+         ORDER BY release, package",
+    )
+    .bind(cve)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+fn page_limits(mock: &Shared) -> Vec<usize> {
+    mock.lock().unwrap().pages.iter().map(|p| p.0).collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_first_import_is_complete_green_and_maps_status(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[
+                (
+                    "CVE-2026-20001",
+                    &[("linux", "6.8.0-20.20"), ("linux-aws", "6.8.0-1000.1")],
+                    false,
+                ),
+                // Nur "Kernel läuft": offen oder unbekannt, wird nicht gespeichert.
+                ("CVE-2026-20002", &[], true),
+                // Kein Kernel-Paket: wird nie übernommen.
+                ("CVE-2026-20009", &[("openssl", "3.0.13-1")], false),
+            ],
+        ),
+        "\"v1\"",
+    );
+    mock.lock().unwrap().ubuntu = vec![ubuntu_cve(
+        "CVE-2026-20003",
+        Utc::now() - Duration::minutes(1),
+        &[("noble", "released", "6.8.0-20.20")],
+    )];
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    gate(&st).await;
+    assert_eq!(
+        host_status(&pool, hid).await,
+        "cve_unknown",
+        "vor dem Import nie grün"
+    );
+
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+
+    // Behoben-Daten stammen aus der Datei, mit Fixversion; offene und fremde Einträge nicht.
+    assert_eq!(
+        status_rows(&pool, "CVE-2026-20001").await,
+        vec![
+            (
+                "noble".into(),
+                "linux".into(),
+                "fixed".into(),
+                Some("6.8.0-20.20".into())
+            ),
+            (
+                "noble".into(),
+                "linux-aws".into(),
+                "fixed".into(),
+                Some("6.8.0-1000.1".into())
+            ),
+        ]
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM cves WHERE id IN ('CVE-2026-20002', 'CVE-2026-20009')"
+        )
+        .await,
+        0
+    );
+    // Die API liefert den Rest.
+    assert_eq!(status_rows(&pool, "CVE-2026-20003").await.len(), 1);
+
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(row["state"], "ok");
+    assert_eq!(row["bulk"]["complete"], true);
+    let rel = &row["bulk"]["releases"][0];
+    assert_eq!(
+        (
+            rel["release"].as_str(),
+            rel["state"].as_str(),
+            rel["result_text"].as_str()
+        ),
+        (Some("noble"), Some("ok"), Some("importiert"))
+    );
+    assert!(rel["bytes"].as_u64().unwrap() > 0 && rel["imported_at"].is_string());
+    assert!(row["bulk"]["hourly"]["last_ok_at"].is_string());
+    assert_eq!(row["bulk"]["hourly"]["page_size"], 20);
+    assert_eq!(host_status(&pool, hid).await, "ok", "vollständig: grün");
+    assert!(host_issue(&app, &h, hid).await.is_none());
+    // Ehrlicher User-Agent auch bei den Massendaten, höchstens eine Datei je Release.
+    assert_eq!(attempts(&mock, "oval com.ubuntu.noble.cve.oval.xml.bz2"), 1);
+    assert!(mock
+        .lock()
+        .unwrap()
+        .user_agents
+        .iter()
+        .all(|u| u.starts_with("patchwatch-server/")));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_second_run_is_a_conditional_304_and_shows_it(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        ),
+        "\"v1\"",
+    );
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    refresh::refresh_all(&st).await;
+    let first = bulk_json(&pool).await["releases"]["noble"]["verified_at"].clone();
+
+    // Noch nicht fällig (täglich): keine Anfrage an die Datei.
+    refresh::refresh_all(&st).await;
+    assert_eq!(attempts(&mock, "oval com.ubuntu.noble.cve.oval.xml.bz2"), 1);
+    assert_eq!(
+        attempts(&mock, "oval com.ubuntu.noble.cve.oval.xml.bz2 conditional"),
+        0
+    );
+
+    make_bulk_due(&pool).await;
+    refresh::refresh_all(&st).await;
+    assert_eq!(
+        attempts(&mock, "oval com.ubuntu.noble.cve.oval.xml.bz2 conditional"),
+        1,
+        "bedingte Anfrage mit If-None-Match"
+    );
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(
+        row["bulk"]["releases"][0]["result_text"],
+        "unverändert (304)"
+    );
+    assert_eq!(row["state"], "ok");
+    assert_ne!(
+        bulk_json(&pool).await["releases"]["noble"]["verified_at"],
+        first,
+        "304 bestätigt den Stand"
+    );
+    assert_eq!(status_rows(&pool, "CVE-2026-20001").await.len(), 1);
+}
+
+/// Abgeschnittene, zu große und unlesbare Dateien: die vorhandenen Daten bleiben, die Quelle ist nie grün,
+/// und eine Datei ohne vorherigen Import macht aus "unbekannt" nie "behoben".
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_broken_files_keep_old_data_and_are_never_green(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let good = oval_xml(
+        "noble",
+        &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+    );
+    set_oval(&mock, "noble", &good, "\"v1\"");
+    let st = setup_hybrid(
+        pool.clone(),
+        &base,
+        "ubuntu_bulk_releases = [\"noble\"]\nubuntu_oval_max_bytes = 5000",
+    )
+    .await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    refresh::refresh_all(&st).await;
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+
+    let file = "com.ubuntu.noble.cve.oval.xml.bz2";
+    type Breaker = Box<dyn Fn(&mut OvalFile)>;
+    let broken: Vec<(&str, Breaker)> = vec![
+        (
+            "abgeschnittene bz2-Datei",
+            Box::new(|f: &mut OvalFile| {
+                f.cut_at = Some(f.body.len() / 2);
+                f.etag = "\"v2\"".into();
+            }),
+        ),
+        (
+            "gültiges bz2, aber XML ohne Ende",
+            Box::new(|f: &mut OvalFile| {
+                f.body =
+                    bz2(b"<oval_definitions><definitions><definition class=\"vulnerability\">");
+                f.etag = "\"v3\"".into();
+            }),
+        ),
+        (
+            "größer als das Limit",
+            Box::new(|f: &mut OvalFile| {
+                f.body = vec![b'x'; 6000];
+                f.etag = "\"v4\"".into();
+            }),
+        ),
+        (
+            "kein bz2",
+            Box::new(|f: &mut OvalFile| {
+                f.body = b"das ist kein bzip2".to_vec();
+                f.etag = "\"v5\"".into();
+            }),
+        ),
+    ];
+    for (what, change) in broken {
+        let mut f = mock.lock().unwrap().oval[file].clone();
+        f.cut_at = None;
+        change(&mut f);
+        mock.lock().unwrap().oval.insert(file.into(), f);
+        make_bulk_due(&pool).await;
+        refresh::refresh_all(&st).await;
+        let row = ubuntu_feed_row(&app, &h).await;
+        assert_eq!(row["state"], "incomplete", "{what}: nie grün");
+        assert_eq!(row["bulk"]["releases"][0]["state"], "error", "{what}");
+        assert!(
+            row["bulk"]["releases"][0]["result_text"]
+                .as_str()
+                .unwrap()
+                .len()
+                > 5,
+            "{what}"
+        );
+        // Alte Daten bleiben; der Host bleibt innerhalb der Frische bewertet (Rot bliebe rot).
+        assert_eq!(
+            status_rows(&pool, "CVE-2026-20001").await.len(),
+            1,
+            "{what}"
+        );
+        assert_eq!(host_status(&pool, hid).await, "ok", "{what}");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_failed_first_import_stores_nothing_and_hosts_stay_unknown(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let mut f = OvalFile {
+        body: bz2(oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        )
+        .as_bytes()),
+        etag: "\"v1\"".into(),
+        ..Default::default()
+    };
+    f.cut_at = Some(30);
+    mock.lock()
+        .unwrap()
+        .oval
+        .insert("com.ubuntu.noble.cve.oval.xml.bz2".into(), f);
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    refresh::refresh_all(&st).await;
+    assert_eq!(count(&pool, "SELECT count(*) FROM cve_source_status WHERE source_id = 'ubuntu' AND status = 'fixed'").await, 0);
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "incomplete");
+    assert_eq!(
+        host_status(&pool, hid).await,
+        "cve_unknown",
+        "fehlende Information ist nie grün"
+    );
+    let issue = host_issue(&app, &h, hid).await.unwrap();
+    assert!(
+        issue.contains("noble") && issue.contains("Massendaten"),
+        "{issue}"
+    );
+}
+
+/// Statusabbildung im Adapter: fixed aus der Datei, needed/pending/ignored aus der API, nichts für fehlende
+/// Information; ein roter Host bleibt rot, auch wenn die Datei das Release nicht (mehr) kennt.
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_status_mapping_open_cases_and_missing_information(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[
+                ("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false),
+                ("CVE-2026-20002", &[], true),
+            ],
+        ),
+        "\"v1\"",
+    );
+    let now = Utc::now();
+    mock.lock().unwrap().ubuntu = vec![
+        ubuntu_cve(
+            "CVE-2026-20010",
+            now - Duration::minutes(1),
+            &[("noble", "needed", "")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-20011",
+            now - Duration::minutes(2),
+            &[("noble", "pending", "6.8.0-99.99")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-20012",
+            now - Duration::minutes(3),
+            &[("noble", "ignored", "end of life")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-20013",
+            now - Duration::minutes(4),
+            &[("noble", "needs-triage", "")],
+        ),
+    ];
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let _ = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    refresh::refresh_all(&st).await;
+    let s = |c: &'static str| {
+        let pool = pool.clone();
+        async move {
+            status_rows(&pool, c)
+                .await
+                .first()
+                .map(|r| (r.2.clone(), r.3.clone()))
+        }
+    };
+    assert_eq!(
+        s("CVE-2026-20001").await,
+        Some(("fixed".into(), Some("6.8.0-20.20".into())))
+    );
+    assert_eq!(s("CVE-2026-20010").await.unwrap().0, "vulnerable");
+    assert_eq!(
+        s("CVE-2026-20011").await,
+        Some(("fix_pending".into(), Some("6.8.0-99.99".into())))
+    );
+    assert_eq!(s("CVE-2026-20012").await.unwrap().0, "vulnerable");
+    assert_eq!(s("CVE-2026-20013").await.unwrap().0, "unknown");
+    // "Kernel läuft" ohne Fixkriterium und unbekannte CVEs: keine Zeile, also nie fixed/not_affected.
+    assert_eq!(s("CVE-2026-20002").await, None);
+    assert_eq!(s("CVE-2026-29999").await, None);
+    assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
+}
+
+/// Massendaten frisch, API fällt aus: kein Totalausfall. Seiten werden kleiner (20, 10, 5, 5), der Fehler mit
+/// Statuscode steht in der Anzeige, bei dauerhaftem 503 kommt ein Hinweis, und nach Ablauf der Frische ist die
+/// CVE-Lage "unbekannt".
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_api_outage_is_no_total_outage_until_freshness_ends(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        ),
+        "\"v1\"",
+    );
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 3, Utc::now() - Duration::hours(1));
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    sqlx::query("DELETE FROM cve_watchlist")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Erster Lauf: alles gut, die Quelle ist vollständig.
+    refresh::refresh_all(&st).await;
+    // Der Host hat ein offenes CVE aus der API: rot, und Rot bleibt Rot.
+    assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
+
+    mock.lock().unwrap().ubuntu_status = Some(503);
+    mock.lock().unwrap().ubuntu_retry_after = Some("7".into());
+    mock.lock().unwrap().pages.clear();
+    for _ in 0..3 {
+        let out = refresh::refresh_all(&st).await;
+        assert!(
+            matches!(out[0].1, Outcome::Updated { .. }),
+            "API-Ausfall ist kein Fehlschlag der Quelle: {:?}",
+            out[0].1
+        );
+    }
+    let limits = page_limits(&mock);
+    // Erster Lauf: 20, 10, 5 und ein Wiederholversuch auf der kleinsten Stufe; danach bleibt es bei 5.
+    assert_eq!(
+        limits,
+        vec![20, 10, 5, 5, 5, 5, 5, 5],
+        "die Größe bleibt klein, nie unter 5"
+    );
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(row["bulk"]["hourly"]["status"], 503);
+    assert_eq!(row["bulk"]["hourly"]["retry_after_secs"], 7);
+    assert_eq!(row["bulk"]["hourly"]["page_size"], 5, "nie unter 5");
+    assert!(row["bulk"]["hourly"]["error_text"]
+        .as_str()
+        .unwrap()
+        .contains("503"));
+    assert!(row["bulk"]["hourly"]["hint"]
+        .as_str()
+        .unwrap()
+        .contains("503/504"));
+    assert_eq!(
+        row["state"], "incomplete",
+        "dauerhafter Ausfall der offenen Fälle: nie grün"
+    );
+    assert_eq!(
+        row["bulk"]["complete"], true,
+        "die Massendaten sind weiter vollständig"
+    );
+
+    // Frische vorbei: unbekannt.
+    sqlx::query(
+        "UPDATE feed_state SET usable_until = now() - interval '1 minute', \
+         bulk = jsonb_set(bulk, '{ok,noble}', to_jsonb(to_char(now() - interval '1 minute', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))) \
+         WHERE source = 'ubuntu'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    gate(&st).await;
+    assert_eq!(
+        host_status(&pool, hid).await,
+        "cve_vulnerable",
+        "Rot bleibt Rot, auch wenn die Frische abläuft"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_fresh_bulk_keeps_hosts_usable_when_the_api_is_down(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        ),
+        "\"v1\"",
+    );
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let _ = login(&app, &pool).await;
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    mock.lock().unwrap().ubuntu_status = Some(504);
+    refresh::refresh_all(&st).await;
+    gate(&st).await;
+    assert_eq!(
+        host_status(&pool, hid).await,
+        "ok",
+        "Massendaten frisch, API ausgefallen: noch nutzbar"
+    );
+    // Frische vorbei: unbekannt, nie grün.
+    sqlx::query(
+        "UPDATE feed_state SET usable_until = now() - interval '1 minute', \
+         bulk = jsonb_set(bulk, '{ok,noble}', to_jsonb(to_char(now() - interval '1 minute', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))) \
+         WHERE source = 'ubuntu'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    gate(&st).await;
+    assert_eq!(host_status(&pool, hid).await, "cve_unknown");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_timeout_in_the_hourly_fetch_shrinks_pages_and_keeps_bulk(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        ),
+        "\"v1\"",
+    );
+    mock.lock().unwrap().ubuntu_hang = true;
+    let st = setup_hybrid(
+        pool.clone(),
+        &base,
+        "ubuntu_bulk_releases = [\"noble\"]\nubuntu_page_timeout_secs = 1",
+    )
+    .await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    // Antwort kommt nie: 20, 10, 5 und ein Wiederholversuch auf der kleinsten Stufe, jeweils nach 1 s Zeitlimit.
+    assert_eq!(attempts(&mock, "ubuntu hang"), 4);
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(row["bulk"]["hourly"]["page_size"], 5);
+    assert!(row["bulk"]["hourly"]["error_text"].is_string());
+    assert_eq!(row["bulk"]["complete"], true);
+    assert_eq!(status_rows(&pool, "CVE-2026-20001").await.len(), 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_422_teaches_the_maximum_page_size(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 3, Utc::now() - Duration::hours(1));
+    mock.lock().unwrap().ubuntu_422_above = Some(10);
+    let st = setup_hybrid(pool.clone(), &base, "").await;
+    let _ = patchwatch_server::router(st.clone());
+    refresh::refresh_all(&st).await;
+    assert_eq!(page_limits(&mock), vec![20, 10]);
+    let b = bulk_json(&pool).await;
+    assert_eq!(b["incr"]["max_page"], 10);
+    assert_eq!(b["incr"]["page_size"], 10);
+    // Der nächste Lauf fängt direkt mit dem gelernten Maximum an.
+    mock.lock().unwrap().pages.clear();
+    refresh::refresh_all(&st).await;
+    assert_eq!(page_limits(&mock)[0], 10);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_page_size_shrinks_on_503_and_grows_back_after_success(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 3, Utc::now() - Duration::hours(1));
+    mock.lock().unwrap().ubuntu_503_above = Some(7);
+    let st = setup_hybrid(pool.clone(), &base, "").await;
+    let _ = patchwatch_server::router(st.clone());
+    refresh::refresh_all(&st).await;
+    assert_eq!(page_limits(&mock), vec![20, 10, 5]);
+    let size = || async {
+        bulk_json(&pool).await["incr"]["page_size"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(size().await, 5);
+    mock.lock().unwrap().ubuntu_503_above = None;
+    mock.lock().unwrap().pages.clear();
+    refresh::refresh_all(&st).await;
+    assert_eq!(size().await, 10, "fehlerfreier Lauf: eine Stufe größer");
+    refresh::refresh_all(&st).await;
+    assert_eq!(size().await, 20);
+    assert_eq!(page_limits(&mock), vec![5, 10]);
+}
+
+/// Umstellung ohne Lücke: der bisherige bestätigte Cursor bleibt, der Abstand wird über mehrere Läufe (Seitenlimit
+/// je Lauf) geschlossen; der Cursor rückt erst vor, wenn alles gelesen ist.
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_switch_closes_the_gap_without_losing_entries(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let newest = Utc::now() - Duration::minutes(10);
+    let mut items = ubuntu_batch(1, 25, newest);
+    let cursor = newest - Duration::hours(1);
+    items.extend((0..5).map(|i| {
+        ubuntu_cve(
+            &format!("CVE-2026-9{i:04}"),
+            cursor - Duration::minutes(i),
+            &[("noble", "needed", "")],
+        )
+    }));
+    mock.lock().unwrap().ubuntu = items;
+    let st = setup_hybrid(
+        pool.clone(),
+        &base,
+        "ubuntu_page_size = 5\nubuntu_incremental_pages = 2",
+    )
+    .await;
+    let _ = patchwatch_server::router(st.clone());
+    sqlx::query("INSERT INTO feed_state (source, cursor, last_success_at) VALUES ('ubuntu', $1, now()) ON CONFLICT (source) DO UPDATE SET cursor = $1")
+        .bind(cursor.to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+    refresh::refresh_all(&st).await;
+    let c = || async { ubuntu_cursor(&pool).await };
+    assert_eq!(
+        c().await,
+        cursor.to_rfc3339(),
+        "Abstand offen: Cursor bleibt"
+    );
+    for _ in 0..12 {
+        if c().await != cursor.to_rfc3339() {
+            break;
+        }
+        refresh::refresh_all(&st).await;
+    }
+    assert_ne!(c().await, cursor.to_rfc3339(), "Abstand geschlossen");
+    assert_eq!(count(&pool, "SELECT count(DISTINCT cve_id) FROM cve_source_status WHERE source_id = 'ubuntu' AND cve_id LIKE 'CVE-2026-1%'").await, 25, "keine Lücke");
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT count(*) FROM cve_source_status WHERE cve_id LIKE 'CVE-2026-9%'"
+        )
+        .await,
+        0,
+        "nichts jenseits des Cursors"
+    );
+}
+
+/// Der Erstimport beginnt mit der ersten Seite, ohne relevante Releases ist die Quelle sofort vollständig.
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_initial_import_ends_complete(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 50, Utc::now() - Duration::hours(1));
+    let st = setup_hybrid(pool.clone(), &base, "").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    let row = ubuntu_feed_row(&app, &h).await;
+    assert_eq!(row["state"], "ok");
+    assert!(row["backfill"].is_null());
+    assert!(ubuntu_cursor_opt(&pool).await.is_some());
+}
+
+/// Ein vorhandener Rückstandsabbau wird weder gelöscht noch zurückgesetzt: er ruht im Hybridmodus
+/// (`backfill_parked`) und läuft im Rückfallmodus `api` mit demselben Fortschritt weiter.
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_parks_the_legacy_backfill_and_api_mode_resumes_it(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 3, Utc::now() - Duration::hours(1));
+    let cursor = (Utc::now() - Duration::days(3)).to_rfc3339();
+    let backfill = json!({
+        "target": (Utc::now() - Duration::days(365)).to_rfc3339(), "pending": cursor.clone(), "next_offset": 400,
+        "pages_done": 20, "runs": 4, "started_at": Utc::now().to_rfc3339(), "initial": true, "est_pages": 1100
+    });
+    let st = setup_hybrid(pool.clone(), &base, "").await;
+    let _ = patchwatch_server::router(st.clone());
+    sqlx::query("INSERT INTO feed_state (source, cursor, backfill) VALUES ('ubuntu', $1, $2) ON CONFLICT (source) DO UPDATE SET cursor = $1, backfill = $2")
+        .bind(&cursor)
+        .bind(&backfill)
+        .execute(&pool)
+        .await
+        .unwrap();
+    refresh::refresh_all(&st).await;
+    let (bf, parked): (Option<Value>, Option<Value>) =
+        sqlx::query_as("SELECT backfill, backfill_parked FROM feed_state WHERE source = 'ubuntu'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(bf.is_none());
+    assert_eq!(
+        parked.unwrap()["next_offset"],
+        400,
+        "Fortschritt bleibt erhalten"
+    );
+
+    // Rückfall: derselbe Fortschritt läuft weiter (Seite bei Offset 400), die Hybriddaten sind weg.
+    let api = setup_cfg(pool.clone(), &base, 1, 10, 600, 0).await;
+    mock.lock().unwrap().pages.clear();
+    refresh::refresh_all(&api).await;
+    let (bf, parked, bulk): (Option<Value>, Option<Value>, Option<Value>) = sqlx::query_as(
+        "SELECT backfill, backfill_parked, bulk FROM feed_state WHERE source = 'ubuntu'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(parked.is_none() && bulk.is_none());
+    assert!(
+        mock.lock().unwrap().pages.iter().any(|p| p.1 >= 400),
+        "setzt bei Offset 400 fort: {:?}",
+        mock.lock().unwrap().pages
+    );
+    assert!(bf.is_some() || ubuntu_cursor_opt(&pool).await.is_some());
+}
+
+/// Ein Release ohne Massendaten (Datei fehlt): nur Hosts dieses Releases sind "unbekannt", der Rest bleibt grün.
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_missing_release_only_affects_hosts_of_that_release(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        ),
+        "\"v1\"",
+    );
+    let st = setup_hybrid(pool.clone(), &base, "").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let n = add_host(&pool, "web-noble").await;
+    let j = add_host(&pool, "web-jammy").await;
+    assert_eq!(
+        report(&app, &noble("web-noble", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    let jammy = K {
+        codename: "jammy",
+        os_version: "22.04",
+        release: "5.15.0-100-generic",
+        package: "linux-image-5.15.0-100-generic",
+        ..noble("web-jammy", "5.15.0-100.110", "5.15.0-100.110")
+    };
+    assert_eq!(report(&app, &jammy).await, StatusCode::NO_CONTENT);
+    refresh::refresh_all(&st).await;
+    gate(&st).await;
+    assert_eq!(host_status(&pool, n).await, "ok");
+    assert_eq!(host_status(&pool, j).await, "cve_unknown");
+    let issue = host_issue(&app, &h, j).await.unwrap();
+    assert!(issue.contains("jammy"), "{issue}");
+    assert!(host_issue(&app, &h, n).await.is_none());
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "incomplete");
+    // Datei erscheint: beide grün, Quelle vollständig.
+    set_oval(
+        &mock,
+        "jammy",
+        &oval_xml(
+            "jammy",
+            &[("CVE-2026-20001", &[("linux", "5.15.0-1.1")], false)],
+        ),
+        "\"j1\"",
+    );
+    make_bulk_due(&pool).await;
+    refresh::refresh_all(&st).await;
+    gate(&st).await;
+    assert_eq!(host_status(&pool, j).await, "ok");
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+}
+
+/// Quelle löschen und neu anlegen: der Zustand der alten Quelle (Massendaten, ETags) gehört zur alten ID; die neue
+/// Quelle beginnt mit einem vollständigen Import und kommt wieder auf "vollständig".
+#[sqlx::test(migrations = "./migrations")]
+async fn hybrid_delete_and_recreate_source_imports_again(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    set_oval(
+        &mock,
+        "noble",
+        &oval_xml(
+            "noble",
+            &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+        ),
+        "\"v1\"",
+    );
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    refresh::refresh_all(&st).await;
+    assert_eq!(ubuntu_feed_row(&app, &h).await["state"], "ok");
+    let r = call(&app, Method::DELETE, "/api/v1/feeds/ubuntu", &hdr(&h), None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/feeds",
+        &hdr(&h),
+        Some(json!({"type": "ubuntu"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let new_id = r.json["source"]
+        .as_str()
+        .or(r.json["id"].as_str())
+        .unwrap()
+        .to_owned();
+    assert_ne!(new_id, "ubuntu");
+    mock.lock().unwrap().log.clear();
+    refresh::refresh_all(&st).await;
+    assert_eq!(
+        attempts(&mock, "oval com.ubuntu.noble.cve.oval.xml.bz2"),
+        1,
+        "unbedingter Neuimport (kein If-None-Match)"
+    );
+    let row = feed(&feeds(&app, &h).await, &new_id).clone();
+    assert_eq!(row["state"], "ok");
+    assert_eq!(row["bulk"]["complete"], true);
 }

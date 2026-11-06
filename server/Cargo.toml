@@ -37,6 +37,8 @@ tower-http = { version = "0.6", features = ["trace", "catch-panic"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
+bzip2 = "0.6"
+quick-xml = "0.38"
 
 [dev-dependencies]
 http-body-util = "0.1"

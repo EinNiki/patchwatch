@@ -1,0 +1,272 @@
+<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5" xmlns:ind-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent" xmlns:oval="http://oval.mitre.org/XMLSchema/oval-common-5" xmlns:unix-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#unix" xmlns:linux-def="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://oval.mitre.org/XMLSchema/oval-common-5 oval-common-schema.xsd   http://oval.mitre.org/XMLSchema/oval-definitions-5 oval-definitions-schema.xsd   http://oval.mitre.org/XMLSchema/oval-definitions-5#independent independent-definitions-schema.xsd   http://oval.mitre.org/XMLSchema/oval-definitions-5#unix unix-definitions-schema.xsd  http://oval.mitre.org/XMLSchema/oval-definitions-5#linux linux-definitions-schema.xsd">
+  <generator>
+    <oval:product_name>Canonical OVAL Generator</oval:product_name>
+    <oval:product_version>2</oval:product_version>
+    <oval:schema_version>5.11.1</oval:schema_version>
+    <oval:timestamp>2026-11-05T22:44:49</oval:timestamp>
+  </generator>
+  <definitions>
+    <definition id="oval:com.ubuntu.noble:def:100" class="inventory" version="1">
+      <metadata>
+        <title>Check that Ubuntu 24.04 LTS (noble) is installed.</title>
+        <description />
+      </metadata>
+      <criteria>
+        <criterion test_ref="oval:com.ubuntu.noble:tst:100" comment="The host is part of the unix family." />
+        <criterion test_ref="oval:com.ubuntu.noble:tst:101" comment="The host is running Ubuntu 24.04 LTS (noble)." />
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:200224390000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2002-2439 on Ubuntu 24.04 LTS (noble) - low</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2002-2439" ref_url="https://www.cve.org/CVERecord?id=CVE-2002-2439" />
+        <description>operator new[] sometimes returns pointers to heap blocks which are too small.  When a new array is allocated, the C++ run-time has to calculate its size.  The product may exceed the maximum value which can be stored in a machine register.  This error is ignored, and the truncated value is used for the heap allocation. This may lead to heap overflows and therefore security bugs. (See http://cert.uni-stuttgart.de/advisories/calloc.php for further references.)</description>
+        <advisory from="security@ubuntu.com">
+          <severity>Low</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2019-10-23T18:15:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2002-2439" priority="low" public="20191023">CVE-2002-2439</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criteria operator="OR">
+          <criterion test_ref="oval:com.ubuntu.noble:tst:200224390000000" comment="gcc-arm-none-eabi source package in noble, might be affected and may need fixing." />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:200224390000010" comment="gcc-h8300-hms source package in noble, might be affected and may need fixing." />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:200224390000020" comment="gcc-mingw-w64 source package in noble, might be affected and may need fixing." />
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:2025382500000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2025-38250 on Ubuntu 24.04 LTS (noble) - low</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2025-38250" ref_url="https://www.cve.org/CVERecord?id=CVE-2025-38250" />
+        <reference source="USN" ref_id="USN-7833-1" ref_url="https://ubuntu.com/security/notices/USN-7833-1" />
+        <reference source="USN" ref_id="USN-7834-1" ref_url="https://ubuntu.com/security/notices/USN-7834-1" />
+        <reference source="USN" ref_id="USN-7833-2" ref_url="https://ubuntu.com/security/notices/USN-7833-2" />
+        <reference source="USN" ref_id="USN-7833-3" ref_url="https://ubuntu.com/security/notices/USN-7833-3" />
+        <reference source="USN" ref_id="USN-7833-4" ref_url="https://ubuntu.com/security/notices/USN-7833-4" />
+        <reference source="USN" ref_id="USN-7856-1" ref_url="https://ubuntu.com/security/notices/USN-7856-1" />
+        <reference source="USN" ref_id="USN-8028-1" ref_url="https://ubuntu.com/security/notices/USN-8028-1" />
+        <reference source="USN" ref_id="USN-8028-2" ref_url="https://ubuntu.com/security/notices/USN-8028-2" />
+        <reference source="USN" ref_id="USN-8031-1" ref_url="https://ubuntu.com/security/notices/USN-8031-1" />
+        <reference source="USN" ref_id="USN-8028-3" ref_url="https://ubuntu.com/security/notices/USN-8028-3" />
+        <reference source="USN" ref_id="USN-8028-4" ref_url="https://ubuntu.com/security/notices/USN-8028-4" />
+        <reference source="USN" ref_id="USN-8028-5" ref_url="https://ubuntu.com/security/notices/USN-8028-5" />
+        <reference source="USN" ref_id="USN-8031-2" ref_url="https://ubuntu.com/security/notices/USN-8031-2" />
+        <reference source="USN" ref_id="USN-8028-6" ref_url="https://ubuntu.com/security/notices/USN-8028-6" />
+        <reference source="USN" ref_id="USN-8031-3" ref_url="https://ubuntu.com/security/notices/USN-8031-3" />
+        <reference source="USN" ref_id="USN-8052-1" ref_url="https://ubuntu.com/security/notices/USN-8052-1" />
+        <reference source="USN" ref_id="USN-8028-7" ref_url="https://ubuntu.com/security/notices/USN-8028-7" />
+        <reference source="USN" ref_id="USN-8028-8" ref_url="https://ubuntu.com/security/notices/USN-8028-8" />
+        <reference source="USN" ref_id="USN-8052-2" ref_url="https://ubuntu.com/security/notices/USN-8052-2" />
+        <reference source="USN" ref_id="USN-8074-1" ref_url="https://ubuntu.com/security/notices/USN-8074-1" />
+        <reference source="USN" ref_id="USN-8074-2" ref_url="https://ubuntu.com/security/notices/USN-8074-2" />
+        <reference source="USN" ref_id="USN-8126-1" ref_url="https://ubuntu.com/security/notices/USN-8126-1" />
+        <reference source="USN" ref_id="USN-8575-1" ref_url="https://ubuntu.com/security/notices/USN-8575-1" />
+        <reference source="USN" ref_id="USN-8576-1" ref_url="https://ubuntu.com/security/notices/USN-8576-1" />
+        <reference source="USN" ref_id="USN-8575-2" ref_url="https://ubuntu.com/security/notices/USN-8575-2" />
+        <reference source="USN" ref_id="USN-8576-2" ref_url="https://ubuntu.com/security/notices/USN-8576-2" />
+        <reference source="USN" ref_id="USN-8575-3" ref_url="https://ubuntu.com/security/notices/USN-8575-3" />
+        <reference source="USN" ref_id="USN-8610-1" ref_url="https://ubuntu.com/security/notices/USN-8610-1" />
+        <reference source="USN" ref_id="USN-8620-1" ref_url="https://ubuntu.com/security/notices/USN-8620-1" />
+        <reference source="USN" ref_id="USN-8620-2" ref_url="https://ubuntu.com/security/notices/USN-8620-2" />
+        <reference source="USN" ref_id="USN-8620-3" ref_url="https://ubuntu.com/security/notices/USN-8620-3" />
+        <reference source="USN" ref_id="USN-8620-4" ref_url="https://ubuntu.com/security/notices/USN-8620-4" />
+        <reference source="USN" ref_id="USN-8668-1" ref_url="https://ubuntu.com/security/notices/USN-8668-1" />
+        <reference source="USN" ref_id="USN-8668-2" ref_url="https://ubuntu.com/security/notices/USN-8668-2" />
+        <description>In the Linux kernel, the following vulnerability has been resolved: Bluetooth: hci_core: Fix use-after-free in vhci_flush() syzbot reported use-after-free in vhci_flush() without repro. [0] From the splat, a thread close()d a vhci file descriptor while its device was being used by iotcl() on another thread. Once the last fd refcnt is released, vhci_release() calls hci_unregister_dev(), hci_free_dev(), and kfree() for struct vhci_data, which is set to hci_dev-&amp;gt;dev-&amp;gt;driver_data. The problem is that there is no synchronisation after unlinking hdev from hci_dev_list in hci_unregister_dev().  There might be another thread still accessing the hdev which was fetched before the unlink operation. We can use SRCU for such synchronisation. Let's run hci_dev_reset() under SRCU and wait for its completion in hci_unregister_dev(). Another option would be to restore hci_dev-&amp;gt;destruct(), which was removed in commit 587ae086f6e4 ("Bluetooth: Remove unused hci-destruct cb").  However, this would not be a good solution, as we should not run hci_unregister_dev() while there are in-flight ioctl() requests, which could lead to another data-race KCSAN splat. Note that other drivers seem to have the same problem, for exmaple, virtbt_remove(). [0]: BUG: KASAN: slab-use-after-free in skb_queue_empty_lockless include/linux/skbuff.h:1891 [inline] BUG: KASAN: slab-use-after-free in skb_queue_purge_reason+0x99/0x360 net/core/skbuff.c:3937 Read of size 8 at addr ffff88807cb8d858 by task syz.1.219/6718 CPU: 1 UID: 0 PID: 6718 Comm: syz.1.219 Not tainted 6.16.0-rc1-syzkaller-00196-g08207f42d3ff #0 PREEMPT(full) Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 05/07/2025 Call Trace:  &amp;lt;TASK&amp;gt;  dump_stack_lvl+0x189/0x250 lib/dump_stack.c:120  print_address_description mm/kasan/report.c:408 [inline]  print_report+0xd2/0x2b0 mm/kasan/report.c:521  kasan_report+0x118/0x150 mm/kasan/report.c:634  skb_queue_empty_lockless include/linux/skbuff.h:1891 [inline]  skb_queue_purge_reason+0x99/0x360 net/core/skbuff.c:3937  skb_queue_purge include/linux/skbuff.h:3368 [inline]  vhci_flush+0x44/0x50 drivers/bluetooth/hci_vhci.c:69  hci_dev_do_reset net/bluetooth/hci_core.c:552 [inline]  hci_dev_reset+0x420/0x5c0 net/bluetooth/hci_core.c:592  sock_do_ioctl+0xd9/0x300 net/socket.c:1190  sock_ioctl+0x576/0x790 net/socket.c:1311  vfs_ioctl fs/ioctl.c:51 [inline]  __do_sys_ioctl fs/ioctl.c:907 [inline]  __se_sys_ioctl+0xf9/0x170 fs/ioctl.c:893  do_syscall_x64 arch/x86/entry/syscall_64.c:63 [inline]  do_syscall_64+0xfa/0x3b0 arch/x86/entry/syscall_64.c:94  entry_SYSCALL_64_after_hwframe+0x77/0x7f RIP: 0033:0x7fcf5b98e929 Code: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 &amp;lt;48&amp;gt; 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48 RSP: 002b:00007fcf5c7b9038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010 RAX: ffffffffffffffda RBX: 00007fcf5bbb6160 RCX: 00007fcf5b98e929 RDX: 0000000000000000 RSI: 00000000400448cb RDI: 0000000000000009 RBP: 00007fcf5ba10b39 R08: 0000000000000000 R09: 0000000000000000 R10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000 R13: 0000000000000000 R14: 00007fcf5bbb6160 R15: 00007ffd6353d528  &amp;lt;/TASK&amp;gt; Allocated by task 6535:  kasan_save_stack mm/kasan/common.c:47 [inline]  kasan_save_track+0x3e/0x80 mm/kasan/common.c:68  poison_kmalloc_redzone mm/kasan/common.c:377 [inline]  __kasan_kmalloc+0x93/0xb0 mm/kasan/common.c:394  kasan_kmalloc include/linux/kasan.h:260 [inline]  __kmalloc_cache_noprof+0x230/0x3d0 mm/slub.c:4359  kmalloc_noprof include/linux/slab.h:905 [inline]  kzalloc_noprof include/linux/slab.h:1039 [inline]  vhci_open+0x57/0x360 drivers/bluetooth/hci_vhci.c:635  misc_open+0x2bc/0x330 drivers/char/misc.c:161  chrdev_open+0x4c9/0x5e0 fs/char_dev.c:414  do_dentry_open+0xdf0/0x1970 fs/open.c:964  vfs_open+0x3b/0x340 fs/open.c:1094  do_open fs/namei.c:3887 [inline]  path_openat+0x2ee5/0x3830 fs/name ---truncated---  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-6.8.0-100-generic - 6.8.0-100.100 linux-image-unsigned-6.8.0-100-generic - 6.8.0-100.100 linux-image-unsigned-6.8.0-100-generic-64k - 6.8.0-100.100 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1046-aws - 6.8.0-1046.49 linux-image-unsigned-6.8.0-1046-aws-64k - 6.8.0-1046.49 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.14.0-1015-aws - 6.14.0-1015.15~24.04.1 linux-image-unsigned-6.14.0-1015-aws-64k - 6.14.0-1015.15~24.04.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1046-azure - 6.8.0-1046.52 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.14.0-1014-azure - 6.14.0-1014.14~24.04.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1046-azure-fde - 6.8.0-1046.53 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.14.0-1007-azure-nvidia - 6.14.0-1007.7 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1047-gcp - 6.8.0-1047.50 linux-image-unsigned-6.8.0-1047-gcp-64k - 6.8.0-1047.50 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.14.0-1018-gcp - 6.14.0-1018.19~24.04.1 linux-image-unsigned-6.14.0-1018-gcp-64k - 6.14.0-1018.19~24.04.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1043-gke - 6.8.0-1043.48 linux-image-unsigned-6.8.0-1043-gke-64k - 6.8.0-1043.48 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1030-gkeop - 6.8.0-1030.33 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1044-ibm - 6.8.0-1044.44 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-100-lowlatency - 6.8.0-100.100.1 linux-image-unsigned-6.8.0-100-lowlatency-64k - 6.8.0-100.100.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1046-nvidia - 6.8.0-1046.49 linux-image-unsigned-6.8.0-1046-nvidia-64k - 6.8.0-1046.49 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1046-nvidia-lowlatency - 6.8.0-1046.49.1 linux-image-unsigned-6.8.0-1046-nvidia-lowlatency-64k - 6.8.0-1046.49.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1020-nvidia-tegra - 6.8.0-1020.20 linux-image-unsigned-6.8.0-1020-nvidia-tegra-rt - 6.8.0-1020.20 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.14.0-1014-oem - 6.14.0-1014.14 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.8.0-1043-oracle - 6.8.0-1043.44 linux-image-unsigned-6.8.0-1043-oracle-64k - 6.8.0-1043.44 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-unsigned-6.14.0-1015-oracle - 6.14.0-1015.15~24.04.1 linux-image-unsigned-6.14.0-1015-oracle-64k - 6.14.0-1015.15~24.04.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-6.8.0-1047-raspi - 6.8.0-1047.51 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-6.14.0-34-generic - 6.14.0-34.34.1~24.04.1 No subscription required  Update Instructions:  Run `sudo pro fix CVE-2025-38250` to fix the vulnerability. The problem can be corrected by updating your system to the following package versions:  linux-image-6.8.0-1023-xilinx - 6.8.0-1023.24 No subscription required</description>
+        <advisory from="security@ubuntu.com">
+          <severity>Low</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2025-07-09T11:15:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2025-38250" priority="low" public="20250709" cvss_score="7.8" cvss_vector="CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H" cvss_severity="high" usns="7833-1,7834-1,7833-2,7833-3,7833-4,7856-1,8028-1,8028-2,8031-1,8028-3,8028-4,8028-5,8031-2,8028-6,8031-3,8052-1,8028-7,8028-8,8052-2,8074-1,8074-2,8126-1,8575-1,8576-1,8575-2,8576-2,8575-3,8610-1,8620-1,8620-2,8620-3,8620-4,8668-1,8668-2">CVE-2025-38250</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criteria operator="OR">
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000000" comment="Is kernel 'linux' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000010" comment="'linux' kernel in noble was vulnerable but has been fixed (note: '6.8.0-100.100')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000010" comment="Is kernel 'linux-aws' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000020" comment="'linux-aws' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1046.49')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000020" comment="Is kernel 'linux-aws-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024363500000000" comment="'linux-aws-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-1015.15~24.04.1')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000050" comment="Is kernel 'linux-azure' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000020" comment="'linux-azure' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1046.52')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000060" comment="Is kernel 'linux-azure-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000070" comment="Is kernel 'linux-azure-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000050" comment="'linux-azure-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-1014.14~24.04.1')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000100" comment="Is kernel 'linux-azure-fde' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000020" comment="'linux-azure-fde' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1046.53')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000140" comment="Is kernel 'linux-azure-nvidia' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000150" comment="Is kernel 'linux-azure-nvidia-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024363500000010" comment="'linux-azure-nvidia-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-1007.7')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000160" comment="Is kernel 'linux-gcp' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000040" comment="'linux-gcp' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1047.50')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000170" comment="Is kernel 'linux-gcp-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000180" comment="Is kernel 'linux-gcp-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024363500000020" comment="'linux-gcp-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-1018.19~24.04.1')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000210" comment="Is kernel 'linux-gke' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000060" comment="'linux-gke' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1043.48')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000220" comment="Is kernel 'linux-gkeop' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000070" comment="'linux-gkeop' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1030.33')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000230" comment="Is kernel 'linux-hwe-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000270" comment="Is kernel 'linux-ibm' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000080" comment="'linux-ibm' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1044.44')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000280" comment="Is kernel 'linux-intel' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000290" comment="Is kernel 'linux-lowlatency' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000010" comment="'linux-lowlatency' kernel in noble was vulnerable but has been fixed (note: '6.8.0-100.100.1')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000300" comment="Is kernel 'linux-lowlatency-hwe-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000310" comment="Is kernel 'linux-nvidia' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000020" comment="'linux-nvidia' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1046.49')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000320" comment="Is kernel 'linux-nvidia-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000350" comment="Is kernel 'linux-nvidia-lowlatency' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000020" comment="'linux-nvidia-lowlatency' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1046.49.1')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000360" comment="Is kernel 'linux-nvidia-tegra' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000010" comment="'linux-nvidia-tegra' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1020.20')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000370" comment="Is kernel 'linux-oem-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000380" comment="Is kernel 'linux-oem-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000050" comment="'linux-oem-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-1014.14')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000400" comment="Is kernel 'linux-oem-6.8' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000410" comment="Is kernel 'linux-oracle' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000060" comment="'linux-oracle' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1043.44')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000420" comment="Is kernel 'linux-oracle-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024363500000000" comment="'linux-oracle-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-1015.15~24.04.1')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000450" comment="Is kernel 'linux-raspi' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024289560000040" comment="'linux-raspi' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1047.51')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201111800000000" comment="Is kernel 'linux-raspi-realtime' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201111800000010" comment="Is kernel 'linux-realtime' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000460" comment="Is kernel 'linux-riscv' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000470" comment="Is kernel 'linux-riscv-6.14' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2024363500000030" comment="'linux-riscv-6.14' kernel in noble was vulnerable but has been fixed (note: '6.14.0-34.34.1~24.04.1')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000510" comment="Is kernel 'linux-xilinx' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2022490340000050" comment="'linux-xilinx' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1023.24')." />
+          </criteria>
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:2026999990000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2026-99999 on Ubuntu 24.04 LTS (noble) - medium</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2026-99999" ref_url="https://www.cve.org/CVERecord?id=CVE-2026-99999" />
+        <description>In the Linux kernel, the following vulnerability has been resolved: ipv4: validate checksum_start before completing checksum If a packet with bad checksum metadata gets into the ipv4 stack, skb_checksum_help can corrupt the network header and cause a bunch of mischief. This was discovered and reported by Paulos, and has been reporoduced by others independently since. We really shouldn't allow such packets in, but as a defence in depth measure, let's also check before we complete the checksum. A more complete validation at input is forthcoming, but needs more work. ipv4: validate checksum_start before completing checksum If a packet with bad checksum metadata gets into the ipv4 stack, skb_checksum_help can corrupt the network header and cause a bunch of mischief. This was discovered and reported by Paulos, and has been reporoduced by others independently since. We really shouldn't allow such packets in, but as a defence in depth measure, let's also check before we complete the checksum. A more complete validation at input is forthcoming, but needs more work.</description>
+        <advisory from="security@ubuntu.com">
+          <severity>Medium</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2026-10-15T13:17:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2026-99999" priority="medium" public="20261015" cvss_score="6.9" cvss_vector="CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:H/SC:N/SI:N/SA:N" cvss_severity="medium">CVE-2026-99999</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criteria operator="OR">
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000000" comment="Is kernel 'linux' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000010" comment="Is kernel 'linux-aws' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000020" comment="Is kernel 'linux-aws-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000030" comment="Is kernel 'linux-aws-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000040" comment="Is kernel 'linux-aws-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000050" comment="Is kernel 'linux-azure' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000060" comment="Is kernel 'linux-azure-6.11' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000070" comment="Is kernel 'linux-azure-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000080" comment="Is kernel 'linux-azure-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000090" comment="Is kernel 'linux-azure-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000100" comment="Is kernel 'linux-azure-fde' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000110" comment="Is kernel 'linux-azure-fde-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000120" comment="Is kernel 'linux-azure-fde-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000130" comment="Is kernel 'linux-azure-fde-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000140" comment="Is kernel 'linux-azure-nvidia' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000150" comment="Is kernel 'linux-azure-nvidia-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000160" comment="Is kernel 'linux-gcp' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000170" comment="Is kernel 'linux-gcp-6.11' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000180" comment="Is kernel 'linux-gcp-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000190" comment="Is kernel 'linux-gcp-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000200" comment="Is kernel 'linux-gcp-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000210" comment="Is kernel 'linux-gke' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000220" comment="Is kernel 'linux-gkeop' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000230" comment="Is kernel 'linux-hwe-6.11' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000240" comment="Is kernel 'linux-hwe-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000250" comment="Is kernel 'linux-hwe-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000260" comment="Is kernel 'linux-hwe-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000270" comment="Is kernel 'linux-ibm' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000290" comment="Is kernel 'linux-lowlatency' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000300" comment="Is kernel 'linux-lowlatency-hwe-6.11' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000310" comment="Is kernel 'linux-nvidia' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000320" comment="Is kernel 'linux-nvidia-6.11' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000330" comment="Is kernel 'linux-nvidia-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000340" comment="Is kernel 'linux-nvidia-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000350" comment="Is kernel 'linux-nvidia-lowlatency' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000360" comment="Is kernel 'linux-nvidia-tegra' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000370" comment="Is kernel 'linux-oem-6.11' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000380" comment="Is kernel 'linux-oem-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000390" comment="Is kernel 'linux-oem-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000400" comment="Is kernel 'linux-oem-6.8' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000410" comment="Is kernel 'linux-oracle' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000420" comment="Is kernel 'linux-oracle-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000430" comment="Is kernel 'linux-oracle-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000440" comment="Is kernel 'linux-oracle-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000450" comment="Is kernel 'linux-raspi' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201111800000000" comment="Is kernel 'linux-raspi-realtime' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201111800000010" comment="Is kernel 'linux-realtime' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000460" comment="Is kernel 'linux-riscv' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000470" comment="Is kernel 'linux-riscv-6.14' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000480" comment="Is kernel 'linux-riscv-6.17' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000490" comment="Is kernel 'linux-riscv-7.0' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000510" comment="Is kernel 'linux-xilinx' running?" />
+        </criteria>
+      </criteria>
+    </definition>
+  </definitions>
+</oval_definitions>
