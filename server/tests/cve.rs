@@ -28,7 +28,14 @@ struct Mock {
     ubuntu: Vec<Value>,
     ubuntu_single: HashMap<String, Value>,
     ubuntu_status: Option<u16>,
+    /// Wert des Headers `Retry-After` zur Antwort mit `ubuntu_status`.
+    ubuntu_retry_after: Option<String>,
+    /// Antwort kommt nie (hängende Quelle).
+    ubuntu_hang: bool,
+    /// Seite ab diesem Offset bricht mitten im Body ab (Verbindungsabbruch).
+    ubuntu_drop_offset: Option<usize>,
     ubuntu_garbage: bool,
+    user_agents: Vec<String>,
     /// Seite ab diesem Offset antwortet mit HTTP 500 (Netz-/Serverfehler mitten im Lauf).
     ubuntu_fail_offset: Option<usize>,
     debian_body: String,
@@ -43,8 +50,20 @@ type Shared = Arc<Mutex<Mock>>;
 
 async fn ubuntu_list(
     State(m): State<Shared>,
+    headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
+    if let Some(ua) = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+    {
+        m.lock().unwrap().user_agents.push(ua.to_owned());
+    }
+    let hang = m.lock().unwrap().ubuntu_hang;
+    if hang {
+        m.lock().unwrap().log.push("ubuntu hang".into());
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
     let mut m = m.lock().unwrap();
     let (offset, limit) = (
         q["offset"].parse::<usize>().unwrap(),
@@ -64,7 +83,26 @@ async fn ubuntu_list(
         format!("ubuntu probe={offset}")
     });
     if let Some(code) = m.ubuntu_status {
-        return StatusCode::from_u16(code).unwrap().into_response();
+        let mut r = StatusCode::from_u16(code).unwrap().into_response();
+        if let Some(v) = &m.ubuntu_retry_after {
+            r.headers_mut()
+                .insert(header::RETRY_AFTER, v.parse().unwrap());
+        }
+        return r;
+    }
+    if m.ubuntu_drop_offset == Some(offset) {
+        // Verspricht 1 MB, liefert ein paar Bytes und reißt dann die Verbindung ab.
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+            Ok(b"{\"cves\": [".to_vec()),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "abgerissen",
+            )),
+        ];
+        return Response::builder()
+            .header(header::CONTENT_LENGTH, "1048576")
+            .body(Body::from_stream(futures_util::stream::iter(chunks)))
+            .unwrap();
     }
     if m.ubuntu_fail_offset == Some(offset) {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -205,7 +243,7 @@ async fn setup(pool: PgPool, sources: &[&str], extra_toml: &str, base: &str) -> 
         .join(",");
     let toml = format!(
         "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\nnvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\n\
-         retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\n{extra_toml}\n\
+         retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\n{extra_toml}\n\
          [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
     );
     let cfg = Config::from_sources(Some(&toml), &|_| None).unwrap();
@@ -1003,7 +1041,7 @@ async fn ubuntu_cursor_opt(pool: &PgPool) -> Option<String> {
 }
 
 /// Erstabruf mit mehr CVEs als Seitenlimit: mehrere Läufe, am Ende ist alles da, dazwischen ist die Quelle nie
-/// "ok", der Cursor fehlt bis zum Schluss, die Anzeige nennt "Erstabruf läuft, N von M Seiten".
+/// "ok", der Cursor fehlt bis zum Schluss, die Anzeige nennt "Erstabruf läuft: Seite N von etwa M".
 #[sqlx::test(migrations = "./migrations")]
 async fn fund2_initial_import_larger_than_page_limit_is_built_up_over_runs(pool: PgPool) {
     let mock: Shared = Arc::default();
@@ -1029,7 +1067,8 @@ async fn fund2_initial_import_larger_than_page_limit_is_built_up_over_runs(pool:
                 assert_eq!(row["backfill"]["est_pages"], 7, "130 CVEs = 7 Seiten");
                 let text = row["backfill"]["progress"].as_str().unwrap();
                 assert!(
-                    text.starts_with("Erstabruf läuft, ") && text.contains(" von ca. 7 Seiten"),
+                    text.starts_with("Erstabruf läuft: Seite ")
+                        && text.contains(" von etwa 7 (Schätzung)"),
                     "{text}"
                 );
                 assert!(
@@ -2035,7 +2074,7 @@ async fn setup_keyed_extra(pool: PgPool, sources: &[&str], base: &str, extra: &s
         .join(",");
     let toml = format!(
         "[cve]\nsources = [{list}]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\nosv_url = \"{base}\"\n\
-         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\n{extra}\n"
+         nvd_url = \"{base}/nvd\"\nkev_url = \"{base}/kev\"\nretries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 10\nubuntu_page_pause_ms = 0\n{extra}\n"
     );
     let cfg = Config::from_sources(Some(&toml), &|k| {
         (k == "PATCHWATCH_SECRET_KEY").then(|| SECRET_B64.to_owned())
@@ -3056,4 +3095,388 @@ async fn distro_chip_only_counts_packages_the_hosts_use(pool: PgPool) {
         );
         assert_eq!(d[0]["package"], "linux", "{path}");
     }
+}
+
+// ---------- Ubuntu-Feed bei Drosselung/Ausfall: Backoff, Wiederaufnahme, Anzeige ----------
+
+/// Konfiguration mit frei wählbaren Wiederholungen, Timeouts, Seitenpause und Watchdog (nur der Ubuntu-Feed).
+async fn setup_cfg(
+    pool: PgPool,
+    base: &str,
+    retries: u32,
+    timeout_secs: u64,
+    stall_secs: u64,
+    pause_ms: u64,
+) -> AppState {
+    let toml = format!(
+        "[cve]\nsources = [\"ubuntu\"]\nubuntu_url = \"{base}\"\nretries = {retries}\nretry_base_delay_ms = 10\n\
+         request_timeout_secs = {timeout_secs}\nstall_timeout_secs = {stall_secs}\nubuntu_page_pause_ms = {pause_ms}\n\
+         [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
+    );
+    AppState::new(pool, Config::from_sources(Some(&toml), &|_| None).unwrap()).unwrap()
+}
+
+async fn retry_state(pool: &PgPool) -> (i32, Option<chrono::DateTime<Utc>>) {
+    sqlx::query_as("SELECT retry_step, next_attempt_at FROM feed_state WHERE source = 'ubuntu'")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn minutes_until(t: Option<chrono::DateTime<Utc>>) -> Option<f64> {
+    t.map(|t| (t - Utc::now()).num_milliseconds() as f64 / 60_000.0)
+}
+
+fn attempts(mock: &Shared, what: &str) -> usize {
+    mock.lock()
+        .unwrap()
+        .log
+        .iter()
+        .filter(|l| l.as_str() == what)
+        .count()
+}
+
+/// 503 ohne Retry-After: drei Versuche je Seite, dann endet der Lauf sauber. Die Wartezeit bis zum nächsten Lauf
+/// wächst (2, 5, 10, 30 Minuten, danach normales Intervall); der Feed ist dabei nie grün; ein Erfolg setzt alles zurück.
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_503_three_attempts_then_ladder_grows_and_success_resets(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 3, 10, 600, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 15, Utc::now() - Duration::hours(1));
+        m.ubuntu_status = Some(503);
+    }
+    let expect = [Some(2.0), Some(5.0), Some(10.0), Some(30.0), None, None];
+    for (i, want) in expect.iter().enumerate() {
+        mock.lock().unwrap().log.clear();
+        let out = refresh::refresh_all(&st).await;
+        assert!(
+            matches!(&out[0].1, Outcome::Failed(m) if m == "HTTP 503"),
+            "{:?}",
+            out[0].1
+        );
+        assert_eq!(attempts(&mock, "ubuntu offset=0"), 3, "3 Versuche je Seite");
+        let (step, next) = retry_state(&pool).await;
+        assert_eq!(step, i as i32 + 1);
+        match (want, minutes_until(next)) {
+            (Some(w), Some(got)) => assert!(
+                (got - w).abs() < 0.2,
+                "Lauf {}: {got} Min. statt {w}",
+                i + 1
+            ),
+            (None, None) => {}
+            (w, g) => panic!("Lauf {}: erwartet {w:?}, war {g:?}", i + 1),
+        }
+        let f = ubuntu_feed(&app, &h).await;
+        assert_ne!(f["state"], "ok");
+        assert_eq!(f["failed_runs"], i as i32 + 1);
+        let text = f["error_text"].as_str().unwrap();
+        assert!(text.starts_with("Ubuntu meldet 503"), "{text}");
+        if want.is_some() {
+            assert!(text.contains("nächster Versuch in"), "{text}");
+        }
+    }
+    // Quelle erholt sich: Erfolg setzt Leiter und Fehlertext zurück, der Feed wird erst jetzt grün.
+    mock.lock().unwrap().ubuntu_status = None;
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(retry_state(&pool).await, (0, None));
+    let f = ubuntu_feed(&app, &h).await;
+    assert_eq!(f["state"], "ok");
+    assert!(f["error_text"].is_null() && f["last_error"].is_null());
+    assert_eq!(f["failed_runs"], 0);
+}
+
+/// 429 wird wie eine Drosselung behandelt (Wiederholung, Leiter, verständlicher Text).
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_429_is_throttling_with_plain_text(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 2, 10, 600, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_status = Some(429);
+    }
+    let out = refresh::refresh_all(&st).await;
+    assert!(matches!(&out[0].1, Outcome::Failed(m) if m == "HTTP 429"));
+    assert_eq!(attempts(&mock, "ubuntu offset=0"), 2);
+    let text = ubuntu_feed(&app, &h).await["error_text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(text.starts_with("Ubuntu drosselt (429"), "{text}");
+}
+
+/// Retry-After in Sekunden bestimmt die Pause innerhalb des Laufs (statt des kurzen Backoffs).
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_after_seconds_is_honoured_within_the_run(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 2, 10, 600, 0).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_status = Some(503);
+        m.ubuntu_retry_after = Some("1".into());
+    }
+    let t = std::time::Instant::now();
+    let out = refresh::refresh_all(&st).await;
+    assert!(matches!(out[0].1, Outcome::Failed(_)));
+    assert!(
+        t.elapsed() >= std::time::Duration::from_millis(950),
+        "Pause nur {:?}",
+        t.elapsed()
+    );
+    assert_eq!(attempts(&mock, "ubuntu offset=0"), 2);
+}
+
+/// Retry-After als HTTP-Datum wird ebenso beachtet.
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_after_http_date_is_honoured_within_the_run(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 2, 10, 600, 0).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_status = Some(503);
+        m.ubuntu_retry_after = Some(
+            (Utc::now() + Duration::seconds(3))
+                .format("%a, %d %b %Y %H:%M:%S GMT")
+                .to_string(),
+        );
+    }
+    let t = std::time::Instant::now();
+    refresh::refresh_all(&st).await;
+    // Das Datum hat Sekundenauflösung: zwischen 2 und 3 Sekunden Wartezeit.
+    assert!(
+        t.elapsed() >= std::time::Duration::from_millis(1800),
+        "Pause nur {:?}",
+        t.elapsed()
+    );
+    assert_eq!(attempts(&mock, "ubuntu offset=0"), 2);
+}
+
+/// Retry-After verlängert die Wartezeit bis zum nächsten Lauf über die Leiter hinaus, aber höchstens auf 15 Minuten.
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_after_extends_the_next_attempt_and_is_capped_at_15_minutes(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    // Ein Versuch je Seite: keine Pause im Lauf, der Wunsch der Quelle wirkt nur auf den nächsten Lauf.
+    let st = setup_cfg(pool.clone(), &base, 1, 10, 600, 0).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_status = Some(503);
+        m.ubuntu_retry_after = Some("600".into());
+    }
+    refresh::refresh_all(&st).await;
+    let got = minutes_until(retry_state(&pool).await.1).unwrap();
+    assert!((got - 10.0).abs() < 0.2, "{got}");
+    mock.lock().unwrap().ubuntu_retry_after = Some("86400".into());
+    refresh::refresh_all(&st).await;
+    let got = minutes_until(retry_state(&pool).await.1).unwrap();
+    assert!((got - 15.0).abs() < 0.2, "{got}");
+}
+
+/// Timeout: eine Quelle, die nicht antwortet, ist ein Fehllauf mit verständlichem Text (kein Hängenbleiben).
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_timeout_is_a_failed_run(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 1, 1, 600, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_hang = true;
+    }
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(&out[0].1, Outcome::Failed(m) if m.starts_with("Netzwerkfehler")),
+        "{:?}",
+        out[0].1
+    );
+    let f = ubuntu_feed(&app, &h).await;
+    assert!(f["error_text"]
+        .as_str()
+        .unwrap()
+        .starts_with("Verbindung zu Ubuntu fehlgeschlagen"));
+    assert_eq!(f["failed_runs"], 1);
+}
+
+/// Verbindungsabbruch mitten im Lauf: geladene Seiten bleiben gespeichert, der Feed ist nie grün, die Leiter greift
+/// (2 Minuten), und der nächste Lauf setzt bei der gespeicherten Seite fort, nicht bei Seite 1.
+#[sqlx::test(migrations = "./migrations")]
+async fn retry_connection_drop_midway_resumes_at_stored_page(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 1, 10, 600, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 60, Utc::now() - Duration::hours(1));
+        m.ubuntu_drop_offset = Some(20);
+    }
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Incomplete { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM cves").await,
+        20,
+        "Seite 1 bleibt gespeichert"
+    );
+    let f = ubuntu_feed(&app, &h).await;
+    assert_eq!(f["state"], "incomplete");
+    assert!(f["last_error"]
+        .as_str()
+        .unwrap()
+        .starts_with("Lauf unterbrochen: Netzwerkfehler"));
+    let text = f["error_text"].as_str().unwrap();
+    assert!(
+        text.contains("Lauf unterbrochen") && text.contains("nächster Versuch in"),
+        "{text}"
+    );
+    assert!(f["backfill"]["progress"]
+        .as_str()
+        .unwrap()
+        .contains("Seite 1"));
+    let (step, next) = retry_state(&pool).await;
+    assert_eq!(step, 1);
+    assert!((minutes_until(next).unwrap() - 2.0).abs() < 0.2);
+
+    // Quelle wieder gesund: Fortsetzung bei Offset 20, Abschluss, Leiter zurückgesetzt, jetzt erst grün.
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu_drop_offset = None;
+        m.log.clear();
+    }
+    let out = refresh::refresh_all(&st).await;
+    assert_eq!(
+        offsets(&mock)[0],
+        20,
+        "setzt bei der gespeicherten Seite fort"
+    );
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(count(&pool, "SELECT count(*) FROM cves").await, 60);
+    assert_eq!(retry_state(&pool).await, (0, None));
+    let f = ubuntu_feed(&app, &h).await;
+    assert_eq!(f["state"], "ok");
+    assert!(f["error_text"].is_null() && f["backfill"].is_null());
+}
+
+/// Fehllauf nach Fortschritt bei einem Erstabruf: Anzeige "Seite N von etwa M (Schätzung)", Läufe seit Beginn,
+/// Zwischenstände sind nie grün.
+#[sqlx::test(migrations = "./migrations")]
+async fn initial_import_shows_page_estimate_and_never_goes_green_midway(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 1, 10, 600, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 100, Utc::now() - Duration::hours(1));
+    mock.lock().unwrap().ubuntu_fail_offset = Some(40);
+    refresh::refresh_all(&st).await;
+    let f = ubuntu_feed(&app, &h).await;
+    assert_eq!(f["state"], "incomplete");
+    let p = f["backfill"]["progress"].as_str().unwrap();
+    assert!(
+        p.starts_with("Erstabruf läuft: Seite 1 von etwa 5 (Schätzung)"),
+        "{p}"
+    );
+    assert!(p.contains("1 Lauf seit Beginn"), "{p}");
+    assert!(f["next_attempt_at"].is_string() && f["last_success_at"].is_null());
+}
+
+/// Hängender Lauf: meldet die Quelle über die Stall-Zeit hinaus keinen Fortschritt, wird der Lauf abgebrochen, die
+/// Sperre ist frei und der nächste Lauf funktioniert.
+#[sqlx::test(migrations = "./migrations")]
+async fn hung_run_is_released_by_the_watchdog(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    // Anfrage-Timeout bewusst lang: nur der Watchdog kann diesen Lauf beenden.
+    let st = setup_cfg(pool.clone(), &base, 1, 120, 1, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_hang = true;
+    }
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        refresh::refresh_all(&st),
+    )
+    .await
+    .expect("Watchdog hat den Lauf nicht beendet");
+    assert!(
+        matches!(&out[0].1, Outcome::Failed(m) if m.contains("ohne Fortschritt")),
+        "{:?}",
+        out[0].1
+    );
+    let f = ubuntu_feed(&app, &h).await;
+    assert!(f["error_text"]
+        .as_str()
+        .unwrap()
+        .contains("hing und wurde abgebrochen"));
+    assert_eq!(f["failed_runs"], 1);
+    // Sperre freigegeben: der nächste Lauf läuft und schließt ab.
+    mock.lock().unwrap().ubuntu_hang = false;
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    assert_eq!(ubuntu_feed(&app, &h).await["state"], "ok");
+}
+
+/// Höflichkeit: eine Anfrage nach der anderen mit Pause dazwischen, und ein User-Agent mit Projektname.
+#[sqlx::test(migrations = "./migrations")]
+async fn pages_are_paced_and_requests_identify_the_project(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 1, 10, 600, 300).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 60, Utc::now() - Duration::hours(1));
+    let t = std::time::Instant::now();
+    let out = refresh::refresh_all(&st).await;
+    assert!(
+        matches!(out[0].1, Outcome::Updated { .. }),
+        "{:?}",
+        out[0].1
+    );
+    // 3 Seiten: zwei Pausen zu je 300 ms.
+    assert!(
+        t.elapsed() >= std::time::Duration::from_millis(600),
+        "{:?}",
+        t.elapsed()
+    );
+    let uas = mock.lock().unwrap().user_agents.clone();
+    assert!(!uas.is_empty());
+    assert!(
+        uas.iter()
+            .all(|u| u.starts_with("patchwatch-server/")
+                && u.contains("github.com/EinNiki/patchwatch")),
+        "{uas:?}"
+    );
 }
