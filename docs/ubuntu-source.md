@@ -60,6 +60,16 @@ Befunde:
 * Download der **noble**-Datei (einmalig): 11.172.446 Bytes in 0,5 s (CDN), entpackt 240 MB XML, 36.619 Definitionen,
   `bzcat` 4,2 s. Gestreamt zu verarbeiten ist das unkritisch; die ganze Datei darf nie im Speicher liegen.
 
+## Weitere Optionen für offene Fälle (nicht umgesetzt, nur zur Entscheidung)
+
+* **Abfrage je einzelner CVE statt Seiten:** `GET /security/cves/<CVE-ID>.json` liefert eine CVE (kleine Antwort, kein
+  Seitenlimit). Sinnvoll als gezielter Abruf für CVEs, die auf Hosts relevant sind (Watchlist, Offen-Liste), nicht für alle
+  Zehntausend. Bei der Stichprobenprüfung antwortete der Endpunkt in 3 von 5 Fällen, 2 liefen in Timeout/504: er teilt die
+  Überlastung der Listen-API.
+* **OSV für Ubuntu:** Massenarchiv `osv/osv-all.tar.xz` (60 MB, siehe oben) oder die OSV-API (`api.osv.dev`, Abfrage je
+  Paket/CVE, Ubuntu-Einträge `UBUNTU-CVE-…` mit `affected`-Bereichen). Eigene Infrastruktur, unabhängig von der
+  überlasteten Canonical-API; Aussage zu „offen“ (kein Fix) ist dort aber nicht vollständig, noch nicht gemessen.
+
 ## Was die OVAL-Dateien über Status sagen (Vergleich mit `cves.json`, noble)
 
 Verglichen wurden die 20 zuletzt geänderten Kernel-CVEs (1.200 Paket-Release-Einträge ohne DNE):
