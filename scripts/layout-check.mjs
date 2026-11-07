@@ -4,10 +4,11 @@
 // Umgebung: PW_BASE (Standard http://127.0.0.1:3100), PW_USER (admin), PW_WIDTHS (Standard 390,480,720,768,1024,1440,1920),
 // PW_SCHEMES (Standard dark,light), PW_ONLY (Kommaliste von Seitennamen). Exit 1 bei Verstößen.
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 
 const base = (process.env.PW_BASE ?? "http://127.0.0.1:3100").replace(/\/$/, "");
 const user = process.env.PW_USER ?? "admin";
-const password = process.env.PW_PASSWORD ?? (console.error("PW_PASSWORD setzen"), process.exit(1));
+const password = process.env.PW_PASSWORD ?? (process.env.PW_PWFILE ? readFileSync(process.env.PW_PWFILE, "utf8").trim() : (console.error("PW_PASSWORD oder PW_PWFILE setzen"), process.exit(1)));
 const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE ?? "playwright");
 const widths = (process.env.PW_WIDTHS ?? "390,480,720,768,1024,1440,1920").split(",").map(Number);
 const schemes = (process.env.PW_SCHEMES ?? "dark,light").split(",");

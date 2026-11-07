@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 
 const base = (process.env.PW_BASE ?? "http://127.0.0.1:3100").replace(/\/$/, "");
-const password = process.env.PW_PASSWORD ?? (console.error("PW_PASSWORD setzen"), process.exit(1));
+const password = process.env.PW_PASSWORD ?? (process.env.PW_PWFILE ? readFileSync(process.env.PW_PWFILE, "utf8").trim() : (console.error("PW_PASSWORD oder PW_PWFILE setzen"), process.exit(1)));
 const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE ?? "playwright");
 const axe = readFileSync(process.env.AXE_JS ?? "node_modules/axe-core/axe.min.js", "utf8");
 
