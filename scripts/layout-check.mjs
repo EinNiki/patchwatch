@@ -115,7 +115,7 @@ for (const scheme of schemes) {
         });
         if (cve.tiles === null) fail(name, w, scheme, "CVE-Kacheln fehlen");
         else {
-          if (cve.tileButtons < 4) fail(name, w, scheme, `erwartet 4 Kacheln, gefunden ${cve.tileButtons}`);
+          if (cve.tileButtons < 3) fail(name, w, scheme, `erwartet 3 Kacheln, gefunden ${cve.tileButtons}`);
           if (!cve.sentence) fail(name, w, scheme, "Zusammenfassungssatz fehlt");
           if (!cve.bar) fail(name, w, scheme, "Balken fehlt");
           if (cve.lists !== 1) fail(name, w, scheme, `genau eine aktive CVE-Liste erwartet, gefunden ${cve.lists}`);

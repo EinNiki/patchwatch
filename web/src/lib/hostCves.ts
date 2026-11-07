@@ -5,15 +5,21 @@ export interface StateCounts {
   open: number;
   reboot: number;
   fixed: number;
-  notAffected: number;
   unknown: number;
 }
 
-export type Tile = "open" | "reboot" | "fixed" | "not_affected" | "unknown";
+export type Tile = "open" | "reboot" | "fixed" | "unknown";
 
-/** Zähler aus der API-Antwort; `fix_pending` zählt zu "offen" (ein nur angekündigter Fix lässt den Host verwundbar). */
+/** Erlaubte Werte von `?cve=`. "Nicht betroffen" gibt es in der Host-Ansicht nicht mehr (die API liefert es weiter). */
+const TILES: readonly string[] = ["open", "reboot", "fixed", "unknown"];
+/** Unbekannte oder entfernte Werte (auch "not_affected", "constructor") ergeben null = Standardansicht. */
+export function parseCveFilter(v: string | null): Tile | null {
+  return v !== null && TILES.includes(v) ? (v as Tile) : null;
+}
+
+/** Zähler aus der API-Antwort (`not_affected` wird hier bewusst nicht übernommen); `fix_pending` zählt zu "offen" (ein nur angekündigter Fix lässt den Host verwundbar). */
 export function stateCounts(c: { vulnerable: number; fix_pending: number; fixed_installed_reboot_required: number; fixed: number; not_affected: number; unknown: number }): StateCounts {
-  return { open: c.vulnerable + c.fix_pending, reboot: c.fixed_installed_reboot_required, fixed: c.fixed, notAffected: c.not_affected, unknown: c.unknown };
+  return { open: c.vulnerable + c.fix_pending, reboot: c.fixed_installed_reboot_required, fixed: c.fixed, unknown: c.unknown };
 }
 
 const n = (v: number) => String(v);
@@ -47,7 +53,6 @@ export function barSegments(c: StateCounts): Segment[] {
     ["open", c.open],
     ["reboot", c.reboot],
     ["fixed", c.fixed],
-    ["not_affected", c.notAffected],
     ["unknown", c.unknown],
   ];
   const total = parts.reduce((s, p) => s + p[1], 0);

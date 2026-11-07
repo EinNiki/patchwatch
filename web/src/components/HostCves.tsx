@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { CVE_STATUS, type IconName } from "@/lib/status";
-import { LEVEL_FILTERS, barSegments, groupTitle, kernelLine, levelWord, openStatusWord, shortText, stateCounts, summarySentence, type FeedNotice, type Tile } from "@/lib/hostCves";
+import { LEVEL_FILTERS, barSegments, groupTitle, kernelLine, levelWord, openStatusWord, parseCveFilter, shortText, stateCounts, summarySentence, type FeedNotice, type Tile } from "@/lib/hostCves";
 import type { CveStatus, Host, HostCve, HostCveGroupsResponse, HostCvesResponse } from "@/lib/types";
 import { Marker } from "@/components/DistroChip";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -31,12 +31,9 @@ const TILE_STATUS: Record<Tile, string> = {
   open: "vulnerable,fix_pending",
   reboot: "fixed_installed_reboot_required",
   fixed: "fixed",
-  not_affected: "not_affected",
   unknown: "unknown",
 };
-export function parseCveFilter(v: string | null): CveFilter | null {
-  return v && v in TILE_STATUS ? (v as CveFilter) : null;
-}
+export { parseCveFilter };
 
 /** Wahr unter 768 px (Touch-Maße). */
 function useNarrow(): boolean {
@@ -72,8 +69,6 @@ export function hostState(c: HostCve, running: string | null, proxmox: boolean):
       return c.fix_version ? `Fix ab ${c.fix_version}, läuft ${run}` : `Kein Fix bekannt, läuft ${run}`;
     case "fix_pending":
       return c.fix_version ? `Fix angekündigt ab ${c.fix_version}, läuft ${run}` : `Fix angekündigt, läuft ${run}`;
-    case "not_affected":
-      return `Nicht betroffen, läuft ${run}`;
     default:
       return proxmox ? "Keine belastbare Quelle, manuell prüfen" : "Quelle liefert keine Aussage";
   }
@@ -86,7 +81,6 @@ const TILE_META: Record<Tile, { word: string; icon: IconName; tone: "crit" | "wa
   open: { word: "Offen", icon: "crit", tone: "crit", line: () => "Kein Fix installiert" },
   reboot: { word: "Neustart nötig", icon: "reboot", tone: "warn", line: (k) => (k ? <>Fix installiert, läuft erst nach Neustart auf <span className="whitespace-nowrap">{k}</span></> : "Fix installiert, läuft erst nach Neustart") },
   fixed: { word: "Gefixt", icon: "ok", tone: "ok", line: () => "Läuft bereits mit Fix" },
-  not_affected: { word: "Nicht betroffen", icon: "ok", tone: "grey", line: () => "Betrifft diesen Kernel nicht" },
   unknown: { word: "Unbekannt", icon: "unknown", tone: "unknown", line: () => "Quelle liefert keine Aussage" },
 };
 const TONE_BORDER = { crit: "border-crit", warn: "border-warn", ok: "border-ok", grey: "border-fg3", unknown: "border-unknown" } as const;
@@ -133,7 +127,7 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
   const newest = head.data?.host.newest_kernel_version ?? host.newest_kernel_version;
   const rebootNeeded = head.data?.host.reboot_needed ?? host.reboot_needed;
   const sc = counts ? stateCounts(counts) : null;
-  const numbers: Record<Tile, number> = sc ? { open: sc.open, reboot: sc.reboot, fixed: sc.fixed, not_affected: sc.notAffected, unknown: sc.unknown } : { open: 0, reboot: 0, fixed: 0, not_affected: 0, unknown: 0 };
+  const numbers: Record<Tile, number> = sc ? { open: sc.open, reboot: sc.reboot, fixed: sc.fixed, unknown: sc.unknown } : { open: 0, reboot: 0, fixed: 0, unknown: 0 };
 
   async function reloadAll() {
     await Promise.all([head.reload(), list.reload(), groups.reload()]);
@@ -163,7 +157,7 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
 
   const sentence = sc ? summarySentence(sc, { newest, proxmox: host.is_proxmox, restricted: notice.restricted }) : "CVE-Lage wird geladen …";
   const segments = sc ? barSegments(sc) : [];
-  const bigTiles: Tile[] = ["open", "reboot", "fixed", "not_affected"];
+  const bigTiles: Tile[] = ["open", "reboot", "fixed"];
 
   return (
     <section aria-labelledby="cve" className="mb-6">
@@ -203,14 +197,14 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
       </p>
       <div
         role="img"
-        aria-label={sc ? `Verteilung: ${numbers.open} offen, ${numbers.reboot} Neustart nötig, ${numbers.fixed} gefixt, ${numbers.not_affected} nicht betroffen, ${numbers.unknown} unbekannt` : "Verteilung wird geladen"}
+        aria-label={sc ? `Verteilung: ${numbers.open} offen, ${numbers.reboot} Neustart nötig, ${numbers.fixed} gefixt, ${numbers.unknown} unbekannt` : "Verteilung wird geladen"}
         className="mb-3 flex h-2.5 w-full overflow-hidden rounded-xs bg-sunk"
       >
         {segments.map((sg) => (
           <span key={sg.tile} style={{ width: `${sg.pct}%` }} className={`${TONE_BG[TILE_META[sg.tile].tone]} ${sg.tile === "unknown" ? "opacity-60" : ""}`} title={`${TILE_META[sg.tile].word}: ${sg.count}`} />
         ))}
       </div>
-      <div className="mb-2 grid grid-cols-4 gap-2 max-md:flex max-md:overflow-x-auto max-md:pb-1 max-md:[scroll-snap-type:x_proximity]" role="group" aria-label="CVE-Zustände">
+      <div className="mb-2 grid grid-cols-3 gap-2 max-md:flex max-md:overflow-x-auto max-md:pb-1 max-md:[scroll-snap-type:x_proximity]" role="group" aria-label="CVE-Zustände">
         {bigTiles.map((t) => (
           <TileButton
             key={t}
@@ -262,7 +256,7 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
           role="group"
           aria-label="Zusammenfassung"
         >
-          {(["open", "reboot", "fixed", "not_affected", "unknown"] as Tile[]).map((t) => (
+          {(["open", "reboot", "fixed", "unknown"] as Tile[]).map((t) => (
             <button
               key={t}
               type="button"
