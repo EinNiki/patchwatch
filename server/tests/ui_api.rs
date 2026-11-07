@@ -191,7 +191,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     let (all, _) = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all",
+        "/api/v1/cves?affects=all&releases=all",
         Some(&s),
         None,
     )
@@ -210,7 +210,14 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
         "debian/bookworm, debian/trixie, ubuntu/noble"
     );
 
-    let (mine, _) = call(&app, Method::GET, "/api/v1/cves", Some(&s), None).await;
+    let (mine, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?affects=all",
+        Some(&s),
+        None,
+    )
+    .await;
     let a = mine
         .json
         .as_array()
@@ -243,7 +250,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     let (r, _) = call(
         &app,
         Method::GET,
-        "/api/v1/cves?split=debian_fixed_ubuntu_open",
+        "/api/v1/cves?affects=all&split=debian_fixed_ubuntu_open",
         Some(&s),
         None,
     )
@@ -252,7 +259,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     let (r, _) = call(
         &app,
         Method::GET,
-        "/api/v1/cves?split=ubuntu_fixed_debian_open",
+        "/api/v1/cves?affects=all&split=ubuntu_fixed_debian_open",
         Some(&s),
         None,
     )
@@ -267,7 +274,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
         let (r, _) = call(
             &app,
             Method::GET,
-            &format!("/api/v1/cves?{query}"),
+            &format!("/api/v1/cves?affects=all&{query}"),
             Some(&s),
             None,
         )
@@ -278,7 +285,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     let (r, _) = call(
         &app,
         Method::GET,
-        "/api/v1/cves?debian=open",
+        "/api/v1/cves?affects=all&debian=open",
         Some(&s),
         None,
     )
@@ -297,7 +304,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     let (r, _) = call(
         &app,
         Method::GET,
-        "/api/v1/cves?distro=ubuntu",
+        "/api/v1/cves?affects=all&distro=ubuntu",
         Some(&s),
         None,
     )
@@ -312,7 +319,7 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     let (r, _) = call(
         &app,
         Method::GET,
-        "/api/v1/cves?distro=ubuntu&releases=all",
+        "/api/v1/cves?affects=all&distro=ubuntu&releases=all",
         Some(&s),
         None,
     )
@@ -390,7 +397,8 @@ async fn cve_detail_has_links_last_change_and_hosts(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("UPDATE cves SET updated_at = '2026-01-01T00:00:00Z'")
+    // „Letzte Änderung“ ist das Quelldatum der CVE, nicht der Importzeitpunkt der Einträge (cve_source_status.updated_at).
+    sqlx::query("UPDATE cves SET source_updated_at = '2026-01-01T00:00:00Z', last_synced_at = '2026-06-05T08:00:00Z'")
         .execute(&pool)
         .await
         .unwrap();
@@ -406,7 +414,8 @@ async fn cve_detail_has_links_last_change_and_hosts(pool: PgPool) {
     )
     .await;
     assert_eq!(r.status, StatusCode::OK);
-    assert_eq!(r.json["last_change_at"], "2026-06-02T11:00:00Z");
+    assert_eq!(r.json["last_change_at"], "2026-01-01T00:00:00Z");
+    assert_eq!(r.json["last_synced_at"], "2026-06-05T08:00:00Z");
     let links: Vec<(String, String)> = r.json["links"]
         .as_array()
         .unwrap()
