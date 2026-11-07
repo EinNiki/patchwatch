@@ -276,9 +276,10 @@ Feed-Zustand je Quelle („veraltet seit …“).
   betroffene Hosts.
 - **Host-Detail, CVE-Lage**: ein Satz als Entscheidungshilfe („Nach dem Neustart auf 7.0.0-42.42 sind noch 81 CVEs
   offen, 2894 werden behoben.“; ohne nötigen Neustart „81 CVEs offen, kein Fix installiert.“; ohne offene „Keine
-  offenen CVEs.“), ein gestapelter Balken und vier Kacheln: **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
-  Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**, **Nicht betroffen**; „Unbekannt“
-  als kleiner Zähler. Jede Kachel zeigt Zahl, Wort, Icon und eine Zeile, die aktive ist per Rahmen und Haken markiert. Es
+  offenen CVEs.“), ein gestapelter Balken und drei Kacheln: **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
+  Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**; „Unbekannt“
+  als kleiner Zähler. „Nicht betroffen“ wird in der Host-Ansicht nicht angezeigt (die API liefert die Zahl weiter; eine alte
+  URL mit `?cve=not_affected` öffnet die Standardansicht). Jede Kachel zeigt Zahl, Wort, Icon und eine Zeile, die aktive ist per Rahmen und Haken markiert. Es
   steht immer nur **eine** Liste da (Standard „Offen“): nach Level (hoch zuerst), dann Alter sortiert; „Neustart nötig“ und
   „Gefixt“ sind nach Fix-Version gruppiert (neueste zuerst, „Gefixt“ eingeklappt, „Alle anzeigen“ klappt alles auf).
   Suche (CVE-ID und Text) und Level-Filter gelten für die aktive Liste. Die Kernel-Zeile zeigt laufenden und neuesten
