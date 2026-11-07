@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
-import type { Feed, FeedBulk } from "@/lib/types";
+import type { Feed } from "@/lib/types";
 import type { StatusInfo } from "@/lib/status";
 import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -18,6 +18,7 @@ import { useFeedRuns } from "@/lib/useFeedRuns";
 import { isActive, isFailure, latestBySource, summary, type FeedRun } from "@/lib/feedRuns";
 import { MiniStepper, RunStepper } from "@/components/RunStepper";
 import { StatusBadge } from "@/components/StatusBadge";
+import { VISIBLE_DETAIL_LINES, detailLines, errorChip, errorLine } from "@/lib/feedView";
 import { Mono } from "@/components/Version";
 
 export const FEED_STATE: Record<Feed["state"], StatusInfo> = {
@@ -57,37 +58,27 @@ function suggestType(url: string): Feed["type"] | null {
   return null;
 }
 
-function size(bytes: number | null): string {
-  if (bytes === null) return "";
-  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-/** Ubuntu im Hybridmodus: je Release der Stand der Massendatei, dazu der stündliche Abruf der API. */
-function BulkDetails({ bulk }: { bulk: FeedBulk }) {
-  const h = bulk.hourly;
+/** Neutrale Details (Importstand, stündlicher Abruf): höchstens zwei Zeilen sichtbar, der Rest klappt auf. Leer = leere Zelle. */
+function DetailsCell({ feed, open, onToggle }: { feed: Feed; open: boolean; onToggle: () => void }) {
+  const lines = detailLines(feed);
+  if (lines.length === 0) return null;
+  const shown = open ? lines : lines.slice(0, VISIBLE_DETAIL_LINES);
+  const id = `feed-details-${feed.source}`;
   return (
-    <div className="mt-1 flex flex-col gap-1 text-xs">
-      {bulk.releases.map((r) => (
-        <div key={r.release} className={r.state === "ok" ? "text-fg2" : "text-warn"}>
-          <Mono>{r.release}</Mono>: {r.result_text}
-          {r.verified_at ? <> · geprüft {absTime(r.verified_at)}</> : null}
-          {r.imported_at ? <> · Import {absTime(r.imported_at)}</> : null}
-          {r.bytes !== null ? <> · {size(r.bytes)}</> : null}
-          {r.status !== null ? <> · Status {r.status}</> : null}
-          {r.retry_after_secs ? <> · Retry-After {r.retry_after_secs} s</> : null}
-          {r.state === "error" && r.next_attempt_at ? <> · nächster Versuch {absTime(r.next_attempt_at)}</> : null}
-        </div>
-      ))}
-      <div className={h.failures > 0 ? "text-warn" : "text-fg2"}>
-        Stündlicher Abruf: {h.last_ok_at ? `zuletzt erfolgreich ${absTime(h.last_ok_at)}` : "noch nicht erfolgreich"} · Seitengröße {h.page_size || "Standard"}
-        {h.max_page ? ` (Maximum ${h.max_page})` : ""}
-        {h.status !== null ? ` · Status ${h.status}` : ""}
-        {h.retry_after_secs ? ` · Retry-After ${h.retry_after_secs} s` : ""}
-        {h.next_attempt_at ? ` · nächster Versuch ${absTime(h.next_attempt_at)}` : ""}
+    <div className="flex flex-col gap-1 text-xs">
+      <div id={id} className="flex flex-col gap-1">
+        {shown.map((l) => (
+          <div key={l.key} className={l.tone === "warn" ? "text-warn" : "text-fg2"}>
+            {l.release ? <><Mono>{l.release}</Mono>: </> : null}
+            {l.text}
+          </div>
+        ))}
       </div>
-      {h.error_text ? <div className="text-warn">{h.error_text}</div> : null}
-      {h.hint ? <div className="text-warn">{h.hint}</div> : null}
-      {!bulk.complete ? <div className="text-warn">Nicht vollständig: nicht für jedes relevante Release liegt ein gültiger, frischer Import vor.</div> : null}
+      {lines.length > VISIBLE_DETAIL_LINES ? (
+        <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} aria-label={`${feed.label}: Details ${open ? "ausblenden" : "anzeigen"}`} className="inline-flex min-h-6 items-center self-start text-accent underline-offset-2 hover:underline max-md:min-h-11">
+          {open ? "Details ausblenden" : "Details anzeigen"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -113,10 +104,28 @@ export function FeedSources() {
   const [backoff, setBackoff] = useState<{ feed: Feed; failures: number; next: string | null } | null>(null);
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [allBusy, setAllBusy] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(new Set());
   const done = useRef(new Set<number>());
   const labels = useRef(new Map<string, string>());
   useEffect(() => {
     for (const f of feeds.data ?? []) labels.current.set(f.source, f.label);
+  }, [feeds.data]);
+  // Neue Fehler (Zeitpunkt des letzten Fehlers ändert sich) lösen einen Toast aus; der erste Stand wird nur gemerkt.
+  const errSeen = useRef<Map<string, string | null> | null>(null);
+  const runFailToast = useRef(new Map<string, number>());
+  useEffect(() => {
+    const data = feeds.data;
+    if (!data) return;
+    const prev = errSeen.current;
+    errSeen.current = new Map(data.map((f) => [f.source, f.last_error ? f.last_error_at : null]));
+    if (!prev) return;
+    for (const f of data) {
+      const line = errorLine(f);
+      if (!line || !f.last_error_at || prev.get(f.source) === f.last_error_at) continue;
+      // Ein Fehlschlag, den der Lauf-Toast gerade schon gemeldet hat, nicht doppelt melden.
+      if (Date.now() - (runFailToast.current.get(f.source) ?? 0) < 120_000) continue;
+      (errorChip(f)?.tone === "crit" ? toast.error : toast.warning)(`${f.label}: ${line}`);
+    }
   }, [feeds.data]);
   const reloadFeeds = feeds.reload;
   useEffect(() => {
@@ -138,6 +147,7 @@ export function FeedSources() {
       } else if (r.status === "incomplete") {
         toast.warning(`${name}: nur teilweise abgerufen.`);
       } else if (isFailure(r)) {
+        runFailToast.current.set(r.source, Date.now());
         toast.error(`${name}: Abruf fehlgeschlagen${r.error ? `: ${r.error}` : "."}`);
       }
     }
@@ -279,7 +289,8 @@ export function FeedSources() {
                 <th scope="col"><span className="th-pad">Zustand</span></th>
                 <th scope="col"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
                 <th scope="col"><span className="th-pad">Intervall</span></th>
-                <th scope="col"><span className="th-pad">Fehler</span></th>
+                <th scope="col"><span className="th-pad">Nächster Versuch</span></th>
+                <th scope="col"><span className="th-pad">Details</span></th>
                 <th scope="col"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
@@ -299,6 +310,8 @@ export function FeedSources() {
                   </td>
                   <td className="cell-status lead">
                     <StatusBadge info={FEED_STATE[f.state]} label={(f.state === "stale" || f.state === "incomplete") && f.stale_since ? `${f.state === "stale" ? "Veraltet" : "Unvollständig"} seit ${absTime(f.stale_since)}` : undefined} />
+                    {errorChip(f) ? <StatusBadge info={errorChip(f)!} /> : null}
+                    {errorLine(f) ? <p className="w-full max-w-[28rem] text-xs text-warn">{errorLine(f)}</p> : null}
                     {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}
                   </td>
                   <td data-label="Letzter Erfolg">
@@ -308,18 +321,11 @@ export function FeedSources() {
                   <td data-label="Intervall" className="whitespace-nowrap">
                     alle {f.interval_minutes} Min.
                   </td>
-                  <td className={`max-w-[24rem] max-md:max-w-none ${f.last_error || f.backfill || f.bulk ? "" : "max-md:hidden"}`}>
-                    {f.backfill ? <div className="text-warn">{f.backfill.progress}</div> : null}
-                    {f.bulk ? <BulkDetails bulk={f.bulk} /> : null}
-                    {f.enabled && f.next_attempt_at ? <div className="text-xs text-fg3">Nächster Versuch: {absTime(f.next_attempt_at)}</div> : null}
-                    {f.last_error ? (
-                      <span className="text-warn">
-                        {f.error_text ?? f.last_error}
-                        {(f.failed_runs ?? f.consecutive_failures) > 0 ? <span className="text-fg3"> ({f.failed_runs ?? f.consecutive_failures}× in Folge)</span> : null}
-                      </span>
-                    ) : f.backfill || f.bulk ? null : (
-                      <span className="text-fg3">–</span>
-                    )}
+                  <td data-label="Nächster Versuch" className={f.enabled && f.next_attempt_at ? "whitespace-nowrap" : "max-md:hidden"}>
+                    {f.enabled && f.next_attempt_at ? <RelTime iso={f.next_attempt_at} /> : null}
+                  </td>
+                  <td className={`max-w-[28rem] max-md:max-w-none ${detailLines(f).length ? "" : "max-md:hidden"}`}>
+                    <DetailsCell feed={f} open={detailsOpen.has(f.source)} onToggle={() => setDetailsOpen((o) => { const n = new Set(o); if (n.has(f.source)) n.delete(f.source); else n.add(f.source); return n; })} />
                   </td>
                   <td>
                     <div className="flex flex-wrap gap-2">
@@ -340,7 +346,7 @@ export function FeedSources() {
                 </tr>
                 {expanded(latest.get(f.source)) ? (
                   <tr className="run-row">
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <RunStepper run={latest.get(f.source)!} label={f.label} onRetry={() => void runOne(f)} onClose={() => toggleRun(latest.get(f.source)!)} />
                     </td>
                   </tr>
