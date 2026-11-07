@@ -178,17 +178,36 @@ pub async fn ingest_with(
         .filter(|r| by_cve.contains_key(r.cve_id.as_str()) || !known.contains(&r.cve_id))
         .collect();
     for chunk in touched.chunks(BATCH) {
+        // `source_updated_at` ist ausschließlich das Datum der Quelle (nie der Importzeitpunkt); mehrere Quellen: das neueste
+        // gewinnt (`GREATEST` ignoriert NULL). Fehlt es überall, bleibt es NULL = „unbekannt“. Der Importzeitpunkt steht
+        // getrennt in `last_synced_at`.
         sqlx::query(
-            "INSERT INTO cves (id, description, priority, published_at, updated_at) \
-             SELECT i, d, p, pub, COALESCE(u, now()) FROM UNNEST($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[]) AS t(i, d, p, pub, u) \
+            "INSERT INTO cves (id, description, priority, published_at, source_updated_at, last_synced_at) \
+             SELECT i, d, p, pub, u, now() FROM UNNEST($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::timestamptz[]) AS t(i, d, p, pub, u) \
              ON CONFLICT (id) DO UPDATE SET description = COALESCE(EXCLUDED.description, cves.description), \
                priority = COALESCE(EXCLUDED.priority, cves.priority), \
-               published_at = COALESCE(EXCLUDED.published_at, cves.published_at), updated_at = EXCLUDED.updated_at",
+               published_at = COALESCE(EXCLUDED.published_at, cves.published_at), \
+               source_updated_at = GREATEST(cves.source_updated_at, EXCLUDED.source_updated_at), last_synced_at = now()",
         )
         .bind(chunk.iter().map(|r| r.cve_id.clone()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|r| r.description.clone()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|r| r.priority.clone()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|r| r.published_at).collect::<Vec<_>>())
+        .bind(chunk.iter().map(|r| r.updated_at).collect::<Vec<_>>())
+        .execute(&mut *conn)
+        .await?;
+    }
+    // Unveränderte, bekannte CVEs: nur der Abgleichzeitpunkt und ein neu gelieferter Quellzeitpunkt (füllt Altzeilen nach).
+    let untouched: Vec<&Record> = recs
+        .iter()
+        .filter(|r| !by_cve.contains_key(r.cve_id.as_str()) && known.contains(&r.cve_id))
+        .collect();
+    for chunk in untouched.chunks(BATCH) {
+        sqlx::query(
+            "UPDATE cves SET last_synced_at = now(), source_updated_at = GREATEST(cves.source_updated_at, v.u) \
+             FROM UNNEST($1::text[], $2::timestamptz[]) AS v(i, u) WHERE cves.id = v.i",
+        )
+        .bind(chunk.iter().map(|r| r.cve_id.clone()).collect::<Vec<_>>())
         .bind(chunk.iter().map(|r| r.updated_at).collect::<Vec<_>>())
         .execute(&mut *conn)
         .await?;

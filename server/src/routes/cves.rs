@@ -57,7 +57,11 @@ pub struct CveRow {
     #[sqlx(skip)]
     level: u8,
     published_at: Option<DateTime<Utc>>,
-    updated_at: DateTime<Utc>,
+    /// Letzte Änderung laut Quelle (bei mehreren Quellen die neueste); `null`, wenn keine Quelle ein Datum liefert.
+    /// Nie der Importzeitpunkt (der steht in `last_synced_at`).
+    updated_at: Option<DateTime<Utc>>,
+    /// Zuletzt mit einer Quelle abgeglichen; `null`, solange keine Quelle die CVE geliefert hat.
+    last_synced_at: Option<DateTime<Utc>>,
     watched: bool,
     note: Option<String>,
     /// In der CISA-KEV-Liste (aktiv ausgenutzt).
@@ -195,7 +199,7 @@ pub fn priority_level(p: Option<&str>) -> u8 {
 /// Länge der Beschreibung in der Liste (Zeichen); die volle Beschreibung liefert `GET /cves/{id}`.
 const LIST_DESCRIPTION_CHARS: usize = 300;
 
-const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at, c.updated_at, \
+const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at, c.source_updated_at AS updated_at, c.last_synced_at, \
     (w.cve_id IS NOT NULL) AS watched, w.note, \
     EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = c.id AND k.source = 'cisa_kev') AS exploited, \
     count(h.*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
@@ -398,7 +402,8 @@ pub async fn list(
         }
         Some("latest") => format!("c.published_at {dir} {nulls}, c.id {dir}"),
         Some("level") => format!("{LEVEL_SQL} {dir}, c.published_at DESC NULLS LAST, c.id DESC"),
-        Some("updated") => format!("c.updated_at {dir}, c.id {dir}"),
+        // Quelldatum; CVEs ohne Datum stehen in beiden Richtungen am Ende.
+        Some("updated") => format!("c.source_updated_at {dir} NULLS LAST, c.id {dir}"),
         Some(_) => {
             return Err(ApiError::BadRequest(
                 "sort: hosts, latest, level oder updated".into(),
@@ -417,10 +422,10 @@ pub async fn list(
     // die volle steht im Detail.
     // limit und offset sind geklemmte Zahlen (keine Nutzerstrings) und stehen deshalb direkt in der Abfrage.
     let query = format!(
-        "SELECT p.id, left(d.description, {LIST_DESCRIPTION_CHARS}) AS description, p.priority, p.published_at, p.updated_at, p.watched, p.note, \
+        "SELECT p.id, left(d.description, {LIST_DESCRIPTION_CHARS}) AS description, p.priority, p.published_at, p.source_updated_at AS updated_at, p.last_synced_at, p.watched, p.note, \
          EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = p.id AND k.source = 'cisa_kev') AS exploited, \
          hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_reboot, hc.hosts_unknown \
-         FROM (SELECT c.id, c.priority, c.published_at, c.updated_at, (w.cve_id IS NOT NULL) AS watched, w.note, COALESCE(a.aff, 0) AS aff \
+         FROM (SELECT c.id, c.priority, c.published_at, c.source_updated_at, c.last_synced_at, (w.cve_id IS NOT NULL) AS watched, w.note, COALESCE(a.aff, 0) AS aff \
                FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id \
                LEFT JOIN (SELECT cve_id, count(*) AS aff FROM host_cve_status WHERE status IN ({AFFECTING_STATUSES}) GROUP BY cve_id) a ON a.cve_id = c.id {filter} \
                ORDER BY (w.cve_id IS NOT NULL) DESC, {order} LIMIT {limit} OFFSET {offset}) p \
@@ -508,11 +513,9 @@ pub async fn detail(
     .bind(&id)
     .fetch_all(&st.pool)
     .await?;
-    let last_change = sources
-        .iter()
-        .map(|s| s.updated_at)
-        .max()
-        .map_or(cve.updated_at, |m| m.max(cve.updated_at));
+    // Letzte Änderung laut Quelle; nie aus Importzeitpunkten (`cve_source_status.updated_at`) abgeleitet.
+    let last_change = cve.updated_at;
+    let last_synced = cve.last_synced_at;
     let seen: BTreeSet<&str> = sources.iter().map(|s| s.source.as_str()).collect();
     let links: Vec<Value> = seen
         .into_iter()
@@ -524,7 +527,7 @@ pub async fn detail(
         .unwrap_or_default();
     Ok(Json(serde_json::json!({
         "cve": cve, "sources": sources, "distros": distros, "links": links,
-        "last_change_at": last_change, "hosts": hosts,
+        "last_change_at": last_change, "last_synced_at": last_synced, "hosts": hosts,
     })))
 }
 

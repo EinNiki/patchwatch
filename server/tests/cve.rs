@@ -5839,3 +5839,164 @@ async fn cve_list_affects_combines_with_debian_ubuntu_filter_search_and_paging(p
     assert_eq!(paged, full);
     assert_eq!(full.len(), 6);
 }
+
+// ---------- CVE-Liste: „Aktualisiert“ = Änderung laut Quelle, nie der Importzeitpunkt ----------
+
+fn rec(id: &str, updated: Option<chrono::DateTime<Utc>>) -> patchwatch_server::cve::Record {
+    use patchwatch_server::cve::{Entry, Record, SourceStatus};
+    Record {
+        cve_id: id.into(),
+        description: Some("test".into()),
+        updated_at: updated,
+        entries: vec![Entry {
+            release: "noble".into(),
+            package: "linux".into(),
+            status: SourceStatus::Vulnerable,
+            fix_version: None,
+            raw: json!({}),
+        }],
+        ..Record::default()
+    }
+}
+
+async fn import(pool: &PgPool, source: &str, recs: &[patchwatch_server::cve::Record]) {
+    let mut c = pool.acquire().await.unwrap();
+    patchwatch_server::cve::ingest::ingest(&mut c, source, recs)
+        .await
+        .unwrap();
+}
+
+async fn updated_of(app: &Router, h: &[(String, String)], id: &str) -> Value {
+    let r = call(
+        app,
+        Method::GET,
+        &format!("/api/v1/cves?affects=all&releases=all&q={id}"),
+        &hdr(h),
+        None,
+    )
+    .await;
+    r.json[0]["updated_at"].clone()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn cve_updated_shows_source_date_never_import_time(pool: PgPool) {
+    let st = setup(pool.clone(), &[], "", "http://127.0.0.1:9").await;
+    let app = patchwatch_server::router(st);
+    let h = login(&app, &pool).await;
+    let t1 = Utc::now() - Duration::days(30);
+    let t2 = Utc::now() - Duration::days(3);
+    let t0 = Utc::now() - Duration::days(90);
+
+    // Quelle mit Datum liefert genau dieses Datum; Quelle ohne Datum (OVAL, Debian): „unbekannt“ = null.
+    import(
+        &pool,
+        "ubuntu",
+        &[rec("CVE-2026-20001", Some(t1)), rec("CVE-2026-20002", None)],
+    )
+    .await;
+    let dated = updated_of(&app, &h, "CVE-2026-20001").await;
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(dated.as_str().unwrap())
+            .unwrap()
+            .timestamp(),
+        t1.timestamp()
+    );
+    assert_eq!(
+        updated_of(&app, &h, "CVE-2026-20002").await,
+        Value::Null,
+        "ohne Quelldatum nie der Importzeitpunkt"
+    );
+    let synced: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_synced_at FROM cves WHERE id = 'CVE-2026-20002'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        synced.is_some_and(|s| (Utc::now() - s).num_seconds() < 60),
+        "Importzeitpunkt steht getrennt in last_synced_at"
+    );
+
+    // Erneuter Import (unverändert, mit und ohne Datum) ändert „Aktualisiert“ nicht; der Abgleich rückt vor.
+    sqlx::query("UPDATE cves SET last_synced_at = now() - interval '1 day'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    import(
+        &pool,
+        "ubuntu",
+        &[rec("CVE-2026-20001", Some(t1)), rec("CVE-2026-20002", None)],
+    )
+    .await;
+    import(
+        &pool,
+        "debian",
+        &[rec("CVE-2026-20001", None), rec("CVE-2026-20002", None)],
+    )
+    .await;
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(
+            updated_of(&app, &h, "CVE-2026-20001")
+                .await
+                .as_str()
+                .unwrap()
+        )
+        .unwrap()
+        .timestamp(),
+        t1.timestamp()
+    );
+    assert_eq!(updated_of(&app, &h, "CVE-2026-20002").await, Value::Null);
+    let fresh: i64 = count(
+        &pool,
+        "SELECT count(*) FROM cves WHERE last_synced_at > now() - interval '1 hour'",
+    )
+    .await;
+    assert_eq!(fresh, 2, "auch unveränderte CVEs gelten als abgeglichen");
+
+    // Zweite Quelle mit neuerem Datum gewinnt, mit älterem nicht; ein Datum füllt eine bisher unbekannte CVE nach.
+    import(
+        &pool,
+        "osv",
+        &[
+            rec("CVE-2026-20001", Some(t2)),
+            rec("CVE-2026-20002", Some(t0)),
+        ],
+    )
+    .await;
+    import(&pool, "ubuntu", &[rec("CVE-2026-20001", Some(t0))]).await;
+    let ts = |v: Value| {
+        chrono::DateTime::parse_from_rfc3339(v.as_str().unwrap())
+            .unwrap()
+            .timestamp()
+    };
+    assert_eq!(
+        ts(updated_of(&app, &h, "CVE-2026-20001").await),
+        t2.timestamp()
+    );
+    assert_eq!(
+        ts(updated_of(&app, &h, "CVE-2026-20002").await),
+        t0.timestamp()
+    );
+
+    // Sortierung nach „Aktualisiert“ nutzt das Quelldatum; CVEs ohne Datum stehen in beiden Richtungen zuletzt.
+    import(&pool, "ubuntu", &[rec("CVE-2026-20003", None)]).await;
+    assert_eq!(
+        list_ids(&app, &h, "affects=all&releases=all&sort=updated").await,
+        ["CVE-2026-20001", "CVE-2026-20002", "CVE-2026-20003"]
+    );
+    assert_eq!(
+        list_ids(&app, &h, "affects=all&releases=all&sort=updated&dir=asc").await,
+        ["CVE-2026-20002", "CVE-2026-20001", "CVE-2026-20003"]
+    );
+
+    // Detail: Quelldatum und Abgleich getrennt, „unbekannt“ bleibt null.
+    let d = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves/CVE-2026-20003",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(d.json["last_change_at"], Value::Null);
+    assert!(d.json["last_synced_at"].is_string());
+}
