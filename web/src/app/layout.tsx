@@ -18,8 +18,8 @@ export const viewport: Viewport = {
   colorScheme: "light dark",
 };
 
-// Setzt das gemerkte Farbschema vor dem ersten Rendern (kein Aufblitzen).
-const THEME_SCRIPT = `try{var t=localStorage.getItem("pw-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}`;
+// Setzt Farbschema und eingeklappte Seitenleiste vor dem ersten Rendern (kein Aufblitzen, keine Animation beim Laden).
+const THEME_SCRIPT = `try{var t=localStorage.getItem("pw-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);if(localStorage.getItem("pw-nav:collapsed")==="1")document.documentElement.setAttribute("data-sb","collapsed")}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

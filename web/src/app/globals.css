@@ -2,6 +2,27 @@
 
 @import "./tokens.css";
 
+/* Seitenleiste als Icon-Rail: zwischen 768 und 1023 px immer, ab 1024 px wenn der Nutzer sie eingeklappt hat
+   (html[data-sb="collapsed"], gesetzt vom Skript im <head> und von der Shell). Unter 768 px (Off-Canvas) gilt es nie. */
+@custom-variant rail {
+  @media (min-width: 768px) and (max-width: 1023px) {
+    @slot;
+  }
+  @media (min-width: 1024px) {
+    &:where([data-sb="collapsed"] *) {
+      @slot;
+    }
+  }
+}
+/* Nur der eingeklappte Zustand ab 1024 px (dort wird das Logo zur Schaltfläche „Einblenden“). */
+@custom-variant sbc {
+  @media (min-width: 1024px) {
+    &:where([data-sb="collapsed"] *) {
+      @slot;
+    }
+  }
+}
+
 /* Basisstile und Komponenten liegen in Layern, damit Tailwind-Utilities (z. B. text-fg, no-underline) sie überschreiben können. */
 @layer base {
 html {

@@ -72,7 +72,7 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   }
 }
 
-export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill";
+export type NavIconName = "hosts" | "cves" | "agents" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "collapse" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill";
 
 /** Navigations- und Aktions-Icons: eigene Linienformen, immer mit Text daneben (nie allein). */
 export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number }) {
@@ -186,6 +186,12 @@ export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number 
       return (
         <svg {...common} fill="currentColor">
           <path d="M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.4l-3.7 2.1.8-4.2L2 6.4l4.2-.5z" />
+        </svg>
+      );
+    case "collapse":
+      return (
+        <svg {...common}>
+          <path d="M10 4L6 8l4 4" />
         </svg>
       );
     case "chevron":

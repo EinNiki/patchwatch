@@ -35,10 +35,16 @@ Apple-Muster (Tab-Bars, SF Symbols, Systemfarben, Kapsel-Buttons), „mutige“ 
   Benachrichtigungen · Einstellungen**. „Benachrichtigungen“ hat eine zweite Ebene (ntfy, Matrix, Gotify, Discord, Live im Browser),
   mehr Ebenen gibt es nicht; die Gruppe hat einen eigenen Auf/Zu-Knopf (`aria-expanded`), ihr Zustand steht in `localStorage`
   (`pw-nav:notifications`) und wird beim Seitenwechsel nicht zurückgesetzt; auf Unterseiten ist sie immer offen.
-  Aktive Seite: `aria-current="page"`, linke 2-px-Leiste in `accent` + fetter Text. Unten: Feed-Zustand, Live-Status, Konto.
+  Aktive Seite: `aria-current="page"`, fetter Text und eine **gleitende Fläche** (ein Element hinter den Zeilen mit 2-px-Leiste in
+  `accent`; nur `transform`, 200 ms; Größenänderungen der Leiste folgen ohne Übergang, beim Laden springt sie ohne Animation).
+  Zähler: Hosts mit kritischem Stand (Zahl rechts, Text für Screenreader), Kanäle mit Fehler (Punkt am Symbol). Die Kanäle der Gruppe
+  hängen an einer Führungslinie unter dem Symbol. Unten: Feed-Zustand, Live-Status, Konto, Abmelden (alles als Zeilen mit festem Symbolplatz).
 - **Responsive** (min-width-Breakpoints: `md` 768, `lg` 1024, `xl` 1440, `wide` 1600, `2xl` 1920; Prüfbreiten 390, 480, 768, 1024, 1440, 1920):
-  - ≥ 1024: Seitenleiste fest, 220 px.
-  - 768–1023: Icon-Rail, 56 px, Tooltips bei Hover **und** Fokus, Name bleibt per `aria-label` lesbar.
+  - ≥ 1024: Seitenleiste fest, 220 px; per Knopf neben der Marke einklappbar (dann wird die Marke zur Schaltfläche „Einblenden“).
+    Breite und Inhaltsrand animieren in 240 ms, Beschriftungen blenden in 120 ms aus. Zustand in `localStorage` (`pw-nav:collapsed`);
+    ein Skript im `<head>` setzt `html[data-sb="collapsed"]` vor dem ersten Bild (kein Aufblitzen, keine Animation beim Laden).
+  - 768–1023: immer Icon-Rail, 56 px (nicht umschaltbar), Tooltips bei Hover **und** Fokus, Name bleibt im Link lesbar.
+    Eingeklappt ab 1024 sieht die Leiste genauso aus. Technisch: eigene Tailwind-Variante `rail` (globals.css).
   - < 768: Off-Canvas mit Kopfzeile (48 px); Fokusfalle, `Esc`, Klick auf den Hintergrund und Navigieren schließen; Fokus kehrt zum Menü-Button zurück.
   - Tabellen < 768: gestapelte Einträge (Name oben, Status-Chips darunter, Nebenwerte klein). Zu breite Tabellen scrollen in
     ihrem Container, nie die Seite (`scrollWidth ≤ innerWidth` ist ein Test).
@@ -113,7 +119,8 @@ Standardmäßig nur Releases anzeigen, die auf mindestens einem Host laufen; wei
 ## Bewegung
 
 Funktional, 120–200 ms (`--dur-1` 120, `--dur-2` 180), `ease-out`, nur `transform` und `opacity` (Ausnahme: Untermenü der Seitenleiste
-per `grid-template-rows`, begrenzt per `contain`). Keine Bibliothek, CSS genügt.
+per `grid-template-rows`, begrenzt per `contain`; Breite der Seitenleiste 240 ms, gleitende Fläche 200 ms). Keine Bibliothek, CSS
+und ein kleiner Hook genügen (Messung: First-Load-JS +0,4 KB gegenüber +30–40 KB für framer-motion).
 
 - Seitenwechsel: leiser Fade (View Transitions API, sonst CSS-Fade; keine experimentellen Flags). Dialog, Off-Canvas, Bottom-Sheet, Toast blenden ein und aus.
 - Live-Update: geänderte Zeilen blitzen kurz auf (`data-flash`), Status-Chips blenden weich über.

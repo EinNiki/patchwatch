@@ -90,6 +90,10 @@
 
   --sidebar-w: 220px;
   --rail-w: 56px;
+  /* Breite der Seitenleiste ab 1024 px; die Shell schaltet sie per html[data-sb="collapsed"] auf die Rail-Breite. */
+  --sb-w: var(--sidebar-w);
+  --sb-dur: 240ms;
+  --glide-dur: 200ms;
   --topbar-h: 48px;
   --row-h: 36px;
   --head-h: 32px;
@@ -145,4 +149,10 @@
   --breakpoint-xl: 90rem;
   --breakpoint-wide: 100rem;
   --breakpoint-2xl: 120rem;
+}
+
+@media (min-width: 1024px) {
+  html[data-sb="collapsed"] {
+    --sb-w: var(--rail-w);
+  }
 }
