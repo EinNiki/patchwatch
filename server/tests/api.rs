@@ -1011,7 +1011,7 @@ async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
     let latest = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all",
+        "/api/v1/cves?releases=all&affects=all&sort=latest",
         &cookie,
         None,
     )
@@ -1023,7 +1023,7 @@ async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
     let level = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all&sort=level",
+        "/api/v1/cves?releases=all&affects=all&sort=level",
         &cookie,
         None,
     )
@@ -1036,7 +1036,7 @@ async fn cve_list_sorts_by_latest_by_default_and_by_level(pool: PgPool) {
     let oldest = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all&dir=asc",
+        "/api/v1/cves?releases=all&affects=all&sort=latest&dir=asc",
         &cookie,
         None,
     )

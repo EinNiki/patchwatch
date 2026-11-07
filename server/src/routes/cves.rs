@@ -36,7 +36,11 @@ pub struct ListQuery {
     /// Fix-Stand je Distribution: `fixed` oder `open` (verwundbar oder Fix angekündigt); UND zwischen den Distributionen.
     debian: Option<String>,
     ubuntu: Option<String>,
-    /// Sortierung: `latest` (Standard, neueste Veröffentlichung), `level` (Priorität 10→0) oder `updated`.
+    /// „Betrifft“: `mine` (Standard): mindestens ein Host ist verwundbar, hat nur einen angekündigten Fix oder braucht
+    /// einen Neustart (`AFFECTING_STATUSES`); `all`: auch CVEs, die keinen deiner Hosts betreffen.
+    affects: Option<String>,
+    /// Sortierung: `hosts` (Standard: betroffene Hosts, dann Level, dann Veröffentlichung), `latest` (Veröffentlichung),
+    /// `level` (Priorität 10→0) oder `updated` (Änderung laut Quelle).
     sort: Option<String>,
     /// Richtung: `desc` (Standard) oder `asc`.
     dir: Option<String>,
@@ -60,6 +64,8 @@ pub struct CveRow {
     exploited: bool,
     hosts_vulnerable: i64,
     hosts_fix_pending: i64,
+    /// Fix installiert, läuft erst nach dem Neustart.
+    hosts_reboot: i64,
     hosts_unknown: i64,
 }
 
@@ -108,6 +114,9 @@ const SEVERITY_SQL: &str = "CASE (CASE WHEN s.source = 'debian' AND s.status = '
 /// Archiv noch in Security (nur z. B. in einem Zwischenarchiv), ist der Fix für Hosts noch nicht erreichbar: offen.
 /// Ohne Suiten-Angabe (ältere Zeilen) bleibt der Status des Trackers. Anzeige und Filter lesen beide dies.
 const EFFECTIVE_STATUS_SQL: &str = "CASE WHEN s.source = 'debian' AND s.status = 'fixed' AND s.suites IS NOT NULL AND NOT EXISTS (SELECT 1 FROM jsonb_each(s.suites) e WHERE e.value->>'status' = 'fixed') THEN 'vulnerable' ELSE s.status END";
+/// Zustände, in denen ein Host von einer CVE „betroffen“ ist (verwundbar, Fix nur angekündigt, Neustart nötig).
+/// „Unbekannt“ (z. B. Proxmox), „gefixt“ und „nicht betroffen“ zählen nicht. Filter „Betrifft“ und Sortierung lesen dies.
+const AFFECTING_STATUSES: &str = "'vulnerable','fix_pending','fixed_installed_reboot_required'";
 const MINE_SQL: &str =
     "s.release IN (SELECT os_codename FROM hosts WHERE os_codename IS NOT NULL AND os_codename <> '')";
 
@@ -191,6 +200,7 @@ const CVE_SELECT: &str = "SELECT c.id, c.description, c.priority, c.published_at
     EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = c.id AND k.source = 'cisa_kev') AS exploited, \
     count(h.*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
     count(h.*) FILTER (WHERE h.status = 'fix_pending') AS hosts_fix_pending, \
+    count(h.*) FILTER (WHERE h.status = 'fixed_installed_reboot_required') AS hosts_reboot, \
     count(h.*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \
     FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id LEFT JOIN host_cve_status h ON h.cve_id = c.id";
 
@@ -203,7 +213,7 @@ struct Built<'a> {
 
 /// Prüft die Filterparameter und baut die WHERE-Klausel der Liste. Die Liste und die Zählung "wie viele passen bei
 /// Umfang alle" benutzen genau diese Funktion; nur `all_releases` unterscheidet sich.
-fn build_filter(q: &ListQuery, all_releases: bool) -> ApiResult<Built<'_>> {
+fn build_filter(q: &ListQuery, all_releases: bool, affecting_only: bool) -> ApiResult<Built<'_>> {
     let distro = match q.distro.as_deref() {
         None | Some("") => None,
         Some(d @ ("debian" | "ubuntu" | "osv")) => Some(d),
@@ -286,6 +296,13 @@ fn build_filter(q: &ListQuery, all_releases: bool) -> ApiResult<Built<'_>> {
              OR EXISTS (SELECT 1 FROM cve_source_status s WHERE s.cve_id = c.id AND s.status <> 'not_affected' AND {MINE_SQL}))"
         ));
     }
+    // „Betrifft meine Hosts“: wie beim Umfang gilt die Einschränkung nicht für die gezielte Suche und nicht für
+    // beobachtete CVEs (die du selbst angeheftet hast).
+    if affecting_only && pattern.is_none() {
+        conds.push(format!(
+            "(w.cve_id IS NOT NULL OR EXISTS (SELECT 1 FROM host_cve_status y WHERE y.cve_id = c.id AND y.status IN ({AFFECTING_STATUSES})))"
+        ));
+    }
     if let Some(d) = distro {
         conds.push(chip_exists(d, ""));
     }
@@ -319,8 +336,16 @@ pub async fn scope_count(
     Query(q): Query<ListQuery>,
 ) -> ApiResult<Json<Value>> {
     let mut out = serde_json::Map::new();
-    for (name, all) in [("mine", false), ("all", true)] {
-        let b = build_filter(&q, all)?;
+    let affecting_only = parse_affects(&q)?;
+    // „affecting“: Treffer mit „Betrifft meine Hosts“ bei dem in der Anfrage gewählten Umfang (für die Zeile über der Liste).
+    let releases_all = matches!(q.releases.as_deref(), Some("all"));
+    let mut variants = vec![
+        ("mine", false, affecting_only),
+        ("all", true, affecting_only),
+    ];
+    variants.push(("affecting", releases_all, true));
+    for (name, all, aff) in variants {
+        let b = build_filter(&q, all, aff)?;
         let sql = format!(
             "SELECT count(*) FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id {}",
             b.filter
@@ -332,6 +357,15 @@ pub async fn scope_count(
         out.insert(name.into(), query.fetch_one(&st.pool).await?.into());
     }
     Ok(Json(Value::Object(out)))
+}
+
+/// `affects`: `mine` (Standard) oder `all`; liefert, ob nur betroffene CVEs gezeigt werden.
+fn parse_affects(q: &ListQuery) -> ApiResult<bool> {
+    match q.affects.as_deref() {
+        None | Some("") | Some("mine") => Ok(true),
+        Some("all") => Ok(false),
+        Some(_) => Err(ApiError::BadRequest("affects: mine oder all".into())),
+    }
 }
 
 pub async fn list(
@@ -358,14 +392,16 @@ pub async fn list(
         "NULLS FIRST"
     };
     let order = match q.sort.as_deref() {
-        None | Some("") | Some("latest") => {
-            format!("c.published_at {dir} {nulls}, c.id {dir}")
+        // Standard: zuerst CVEs, die mehr deiner Hosts betreffen, dann höheres Level, dann die neuere Veröffentlichung.
+        None | Some("") | Some("hosts") => {
+            format!("aff {dir}, {LEVEL_SQL} DESC, c.published_at DESC NULLS LAST, c.id DESC")
         }
+        Some("latest") => format!("c.published_at {dir} {nulls}, c.id {dir}"),
         Some("level") => format!("{LEVEL_SQL} {dir}, c.published_at DESC NULLS LAST, c.id DESC"),
         Some("updated") => format!("c.updated_at {dir}, c.id {dir}"),
         Some(_) => {
             return Err(ApiError::BadRequest(
-                "sort: latest, level oder updated".into(),
+                "sort: hosts, latest, level oder updated".into(),
             ))
         }
     };
@@ -374,7 +410,7 @@ pub async fn list(
         distro,
         pattern,
         filter,
-    } = build_filter(&q, all_releases)?;
+    } = build_filter(&q, all_releases, parse_affects(&q)?)?;
     // Erst die Seite (Filter, Sortierung, LIMIT) bestimmen, danach nur für diese Zeilen Zähler und KEV-Flag bilden.
     // Eine Aggregation über alle CVEs vor dem LIMIT kostete ~190 ms bei 20 000 CVEs (siehe docs/perf.md).
     // Die Beschreibung wird für die Liste gekürzt (erst für die Zeilen der Seite, sonst wird sie für alle CVEs entpackt);
@@ -383,13 +419,15 @@ pub async fn list(
     let query = format!(
         "SELECT p.id, left(d.description, {LIST_DESCRIPTION_CHARS}) AS description, p.priority, p.published_at, p.updated_at, p.watched, p.note, \
          EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = p.id AND k.source = 'cisa_kev') AS exploited, \
-         hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_unknown \
-         FROM (SELECT c.id, c.priority, c.published_at, c.updated_at, (w.cve_id IS NOT NULL) AS watched, w.note \
-               FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id {filter} \
+         hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_reboot, hc.hosts_unknown \
+         FROM (SELECT c.id, c.priority, c.published_at, c.updated_at, (w.cve_id IS NOT NULL) AS watched, w.note, COALESCE(a.aff, 0) AS aff \
+               FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id \
+               LEFT JOIN (SELECT cve_id, count(*) AS aff FROM host_cve_status WHERE status IN ({AFFECTING_STATUSES}) GROUP BY cve_id) a ON a.cve_id = c.id {filter} \
                ORDER BY (w.cve_id IS NOT NULL) DESC, {order} LIMIT {limit} OFFSET {offset}) p \
          JOIN cves d ON d.id = p.id \
          CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
                                     count(*) FILTER (WHERE h.status = 'fix_pending') AS hosts_fix_pending, \
+                                    count(*) FILTER (WHERE h.status = 'fixed_installed_reboot_required') AS hosts_reboot, \
                                     count(*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \
                              FROM host_cve_status h WHERE h.cve_id = p.id) hc \
          ORDER BY p.watched DESC, {outer_order}"
@@ -501,6 +539,7 @@ pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Js
             distro: None,
             split: None,
             debian: None,
+            affects: Some("all".into()),
             sort: None,
             dir: None,
             ubuntu: None,

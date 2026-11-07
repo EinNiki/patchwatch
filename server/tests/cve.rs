@@ -1675,7 +1675,7 @@ async fn rule_announced_fix_counts_as_vulnerable_everywhere(pool: PgPool) {
     let r = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all&ubuntu=open",
+        "/api/v1/cves?affects=all&releases=all&ubuntu=open",
         &hdr(&h),
         None,
     )
@@ -1687,7 +1687,7 @@ async fn rule_announced_fix_counts_as_vulnerable_everywhere(pool: PgPool) {
     let r = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all&ubuntu=fixed",
+        "/api/v1/cves?affects=all&releases=all&ubuntu=fixed",
         &hdr(&h),
         None,
     )
@@ -2418,7 +2418,7 @@ async fn kev_flags_only_known_cves_and_failure_is_never_green(pool: PgPool) {
     let r = call(
         &app,
         Method::GET,
-        "/api/v1/cves?releases=all",
+        "/api/v1/cves?affects=all&releases=all",
         &hdr(&h),
         None,
     )
@@ -3649,7 +3649,7 @@ impl FilterEnv {
         let r = call(
             &self.app,
             Method::GET,
-            &format!("/api/v1/cves?limit=500{query}"),
+            &format!("/api/v1/cves?affects=all&limit=500{query}"),
             &hdr(&self.h),
             None,
         )
@@ -4870,7 +4870,7 @@ impl FilterEnv {
         let r = call(
             &self.app,
             Method::GET,
-            &format!("/api/v1/cves/scope-count?x=1{query}"),
+            &format!("/api/v1/cves/scope-count?affects=all&x=1{query}"),
             &hdr(&self.h),
             None,
         )
@@ -5433,7 +5433,7 @@ async fn debian_suites_are_stored_and_drive_chip_filter_and_host_hint(pool: PgPo
             let r = call(
                 &app,
                 Method::GET,
-                &format!("/api/v1/cves?limit=100{q}"),
+                &format!("/api/v1/cves?affects=all&limit=100{q}"),
                 &hdr(&hh),
                 None,
             )
@@ -5594,4 +5594,248 @@ async fn debian_suites_special_characters_do_not_crash(pool: PgPool) {
         s["trixie"]["status"], "unknown",
         "ungültige Version bleibt unbekannt, nie grün"
     );
+}
+
+// ---------- CVE-Liste: „Betrifft meine Hosts“ ----------
+
+async fn list_ids(app: &Router, h: &[(String, String)], query: &str) -> Vec<String> {
+    let r = call(
+        app,
+        Method::GET,
+        &format!("/api/v1/cves?{query}"),
+        &hdr(h),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{query}: {}", r.json);
+    r.json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// A betrifft zwei Hosts, B einen, C ist überall gefixt (neueste Veröffentlichung, höchstes Level), D nur „unbekannt“
+/// (Proxmox), E betrifft einen Host mit Sonderzeichen im Text.
+async fn seed_affects(pool: &PgPool) {
+    let h1 = add_host(pool, "web1").await;
+    let h2 = add_host(pool, "web2").await;
+    let h3 = add_host(pool, "pve1").await;
+    for (id, prio, days, desc) in [
+        ("CVE-2026-10001", "medium", 30, "A zwei Hosts"),
+        ("CVE-2026-10002", "high", 20, "B ein Host"),
+        ("CVE-2026-10003", "critical", 1, "C überall gefixt"),
+        ("CVE-2026-10004", "critical", 2, "D nur unbekannt"),
+        ("CVE-2026-10005", "low", 40, "E café 😀 ünïcode 100% _x_"),
+        ("CVE-2026-10006", "low", 50, "F Neustart nötig"),
+    ] {
+        sqlx::query("INSERT INTO cves (id, description, priority, published_at) VALUES ($1, $2, $3, now() - make_interval(days => $4))")
+            .bind(id)
+            .bind(desc)
+            .bind(prio)
+            .bind(days)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    for (host, cve, st) in [
+        (h1, "CVE-2026-10001", "vulnerable"),
+        (h2, "CVE-2026-10001", "fix_pending"),
+        (h1, "CVE-2026-10002", "vulnerable"),
+        (h2, "CVE-2026-10002", "fixed"),
+        (h1, "CVE-2026-10003", "fixed"),
+        (h2, "CVE-2026-10003", "not_affected"),
+        (h3, "CVE-2026-10004", "unknown"),
+        (h1, "CVE-2026-10005", "vulnerable"),
+        (h1, "CVE-2026-10006", "fixed_installed_reboot_required"),
+    ] {
+        sqlx::query("INSERT INTO host_cve_status (host_id, cve_id, status, reason) VALUES ($1, $2, $3, 'test')")
+            .bind(host)
+            .bind(cve)
+            .bind(st)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    // Quelleneinträge: Debian für A und C, Ubuntu für B (ein Release ohne Host, deshalb mit releases=all).
+    for (cve, src, rel, st) in [
+        ("CVE-2026-10001", "debian", "trixie", "vulnerable"),
+        ("CVE-2026-10003", "debian", "trixie", "fixed"),
+        ("CVE-2026-10002", "ubuntu", "noble", "vulnerable"),
+        ("CVE-2026-10003", "ubuntu", "noble", "vulnerable"),
+    ] {
+        sqlx::query("INSERT INTO cve_source_status (cve_id, source, release, package, status) VALUES ($1, $2, $3, 'linux', $4)")
+            .bind(cve)
+            .bind(src)
+            .bind(rel)
+            .bind(st)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn cve_list_puts_cves_affecting_my_hosts_first(pool: PgPool) {
+    let st = setup(pool.clone(), &[], "", "http://127.0.0.1:9").await;
+    let app = patchwatch_server::router(st);
+    let h = login(&app, &pool).await;
+    seed_affects(&pool).await;
+
+    // Standard = „Meine Hosts“: nur CVEs mit mindestens einem verwundbaren, angekündigten oder Neustart-Host,
+    // zuerst die mit den meisten Hosts. C (gefixt/nicht betroffen) und D (nur unbekannt) fehlen.
+    assert_eq!(
+        list_ids(&app, &h, "").await,
+        [
+            "CVE-2026-10001",
+            "CVE-2026-10002",
+            "CVE-2026-10005",
+            "CVE-2026-10006"
+        ],
+        "A (2 Hosts) vor B (high) vor E, F (je 1 Host, nach Level)"
+    );
+    assert_eq!(
+        list_ids(&app, &h, "affects=mine").await,
+        list_ids(&app, &h, "").await
+    );
+
+    // „Alle“: dieselben zuerst, danach der Rest nach Level und Alter (C vor D: jüngere Veröffentlichung).
+    let all = list_ids(&app, &h, "affects=all").await;
+    assert_eq!(
+        &all[..4],
+        [
+            "CVE-2026-10001",
+            "CVE-2026-10002",
+            "CVE-2026-10005",
+            "CVE-2026-10006"
+        ]
+    );
+    assert_eq!(
+        &all[4..],
+        ["CVE-2026-10003", "CVE-2026-10004"].map(String::from)
+    );
+
+    // Spalte „Hosts“: absteigend (Standard) und aufsteigend nach Anzahl betroffener Hosts.
+    let asc = list_ids(&app, &h, "affects=all&sort=hosts&dir=asc").await;
+    assert_eq!(
+        asc.last().unwrap(),
+        "CVE-2026-10001",
+        "meiste Hosts zuletzt bei aufsteigend"
+    );
+    let r = call(&app, Method::GET, "/api/v1/cves?sort=hosts", &hdr(&h), None).await;
+    assert_eq!(r.json[0]["hosts_vulnerable"], 1);
+    assert_eq!(r.json[0]["hosts_fix_pending"], 1);
+    let f = call(&app, Method::GET, "/api/v1/cves?q=10006", &hdr(&h), None).await;
+    assert_eq!(
+        f.json[0]["hosts_reboot"], 1,
+        "Neustart nötig wird mitgezählt"
+    );
+
+    // Ungültige Werte: 400, nie SQL.
+    for bad in ["affects=x", "sort=hosts;drop", "affects=all'"] {
+        assert_eq!(
+            call(
+                &app,
+                Method::GET,
+                &format!("/api/v1/cves?{bad}"),
+                &hdr(&h),
+                None
+            )
+            .await
+            .status,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+    // Alte Sortierungen funktionieren weiter.
+    assert_eq!(
+        list_ids(&app, &h, "affects=all&sort=latest").await[0],
+        "CVE-2026-10003"
+    );
+    assert_eq!(
+        list_ids(&app, &h, "affects=all&sort=level").await[0],
+        "CVE-2026-10003"
+    );
+
+    // Zähler für die Zeile über der Liste.
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves/scope-count",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(r.json["affecting"], 4, "{}", r.json);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn cve_list_affects_combines_with_debian_ubuntu_filter_search_and_paging(pool: PgPool) {
+    let st = setup(pool.clone(), &[], "", "http://127.0.0.1:9").await;
+    let app = patchwatch_server::router(st);
+    let h = login(&app, &pool).await;
+    seed_affects(&pool).await;
+
+    // Debian offen: nur A (C ist gefixt); mit „Alle“ ändert sich daran nichts, mit Ubuntu offen kommt B (C ist nicht betroffen).
+    assert_eq!(
+        list_ids(&app, &h, "releases=all&debian=open").await,
+        ["CVE-2026-10001"]
+    );
+    assert_eq!(
+        list_ids(&app, &h, "releases=all&ubuntu=open").await,
+        ["CVE-2026-10002"]
+    );
+    assert_eq!(
+        list_ids(&app, &h, "releases=all&ubuntu=open&affects=all").await,
+        ["CVE-2026-10002", "CVE-2026-10003"]
+    );
+    assert_eq!(
+        list_ids(&app, &h, "releases=all&debian=fixed").await,
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        list_ids(&app, &h, "releases=all&debian=fixed&affects=all").await,
+        ["CVE-2026-10003"]
+    );
+    assert_eq!(
+        list_ids(&app, &h, "releases=all&distro=debian").await,
+        ["CVE-2026-10001"]
+    );
+
+    // Gezielte Suche findet jede CVE (auch ohne betroffene Hosts); Sonderzeichen stürzen nicht ab.
+    assert_eq!(
+        list_ids(&app, &h, "q=CVE-2026-10003").await,
+        ["CVE-2026-10003"]
+    );
+    assert_eq!(list_ids(&app, &h, "q=caf%C3%A9").await, ["CVE-2026-10005"]);
+    assert_eq!(
+        list_ids(&app, &h, "q=%F0%9F%98%80").await,
+        ["CVE-2026-10005"]
+    );
+    assert_eq!(list_ids(&app, &h, "q=100%25").await, ["CVE-2026-10005"]);
+    for q in ["%27%3B--", "%00", "%25%25", "%5C"] {
+        let s = call(
+            &app,
+            Method::GET,
+            &format!("/api/v1/cves?q={q}"),
+            &hdr(&h),
+            None,
+        )
+        .await
+        .status;
+        assert!(
+            s == StatusCode::OK || s == StatusCode::BAD_REQUEST,
+            "{q}: {s}"
+        );
+    }
+
+    // Paginierung über mehrere Seiten: dieselbe Reihenfolge wie die ganze Liste, keine Lücke, keine Doppelten.
+    let full = list_ids(&app, &h, "affects=all").await;
+    let mut paged = Vec::new();
+    for off in (0..full.len()).step_by(2) {
+        paged.extend(list_ids(&app, &h, &format!("affects=all&limit=2&offset={off}")).await);
+    }
+    assert_eq!(paged, full);
+    assert_eq!(full.len(), 6);
 }

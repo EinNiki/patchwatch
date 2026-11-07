@@ -243,6 +243,19 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
   Releases“. Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird im Standardumfang nicht als „gefixt“ gefunden;
   sie erscheint dort nur hinter „+ n weitere Releases“. Findet ein Filter nichts, nennt die Seite die aktiven Filter und
   bietet an, den Umfang auf „Alle Releases“ zu stellen oder die Filter zurückzusetzen.
+- **Betrifft** (`?affects=`, Standard „Meine Hosts“, Alternative „Alle“; auch in der URL): „Meine Hosts“ zeigt nur CVEs, bei
+  denen **mindestens ein Host** den Zustand *verwundbar*, *Fix angekündigt* oder *Neustart nötig* hat. *Unbekannt* (z. B.
+  Proxmox), *gefixt* und *nicht betroffen* zählen nicht; unbekannte Hosts werden in der Spalte „Hosts“ trotzdem genannt.
+  Beobachtete CVEs (Watchlist) und die gezielte Suche zeigen unabhängig davon alles. Über der Tabelle steht „N CVEs betreffen
+  deine Hosts“ (die Zahl gilt für den eingestellten Umfang und die übrigen Filter). Ist die Liste im Standard leer, steht
+  „Keine CVE betrifft deine Hosts“ mit dem Knopf „Alle CVEs anzeigen“.
+- **Sortierung** (`?sort=`, serverseitig, feste Liste): Standard `hosts` = zuerst die CVEs mit den meisten betroffenen Hosts, dann
+  Level (hoch zuerst), dann die neuere Veröffentlichung; die Spalte „Hosts“ sortiert danach (Pfeil kehrt um). Daneben `latest`
+  (Veröffentlichung), `level` und `updated`. Beobachtete CVEs stehen immer oben. „Weitere laden“ holt die nächste Seite aus
+  derselben festen Reihenfolge (Tiebreak: CVE-ID), nichts springt.
+- **Zusammenspiel**: *Umfang* bestimmt, welche Release-Chips und Release-Filter zählen. *Debian/Ubuntu* filtern über diese
+  Chips. *Betrifft* filtert über die Hosts und ist davon unabhängig; alle drei sind mit **UND** verknüpft. „Betrifft: Alle“ plus
+  Umfang „Alle Releases“ zeigt alles.
 - Der Filter hängt am **Typ** der Quelle (`debian`, `ubuntu`), nicht an ihrer stabilen ID; abgeschaltete oder gelöschte Quellen
   behalten ihre Daten, die weiter angezeigt und gefiltert werden.
 

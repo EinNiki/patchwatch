@@ -138,6 +138,8 @@ export interface Cve {
   exploited: boolean;
   hosts_vulnerable: number;
   hosts_fix_pending: number;
+  /** Fix installiert, läuft erst nach dem Neustart. */
+  hosts_reboot: number;
   hosts_unknown: number;
 }
 

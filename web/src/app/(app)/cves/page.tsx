@@ -10,7 +10,8 @@ import type { CveDetail, CveListItem } from "@/lib/types";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
-import { NavIcon } from "@/components/Icons";
+import { Icon, NavIcon } from "@/components/Icons";
+import { affectedHosts, affectingLabel, parseAffectsAll, parseSort } from "@/lib/cveList";
 import { useFlash } from "@/lib/useFlash";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ChipLegend, DistroChip } from "@/components/DistroChip";
@@ -57,7 +58,8 @@ function CveView() {
   const legacy = LEGACY_SPLIT[splitRaw];
   const debianFix = fixParam(params.get("debian")) || legacy?.debian || "";
   const ubuntuFix = fixParam(params.get("ubuntu")) || legacy?.ubuntu || "";
-  const sort = ["level", "updated"].includes(params.get("sort") ?? "") ? (params.get("sort") as string) : "latest";
+  const affectsAll = parseAffectsAll(params.get("affects"));
+  const sort = parseSort(params.get("sort"));
   const dir = params.get("dir") === "asc" ? "asc" : "desc";
   /** Klick auf eine Spaltenüberschrift: gleiche Spalte kehrt die Richtung um, eine andere startet absteigend. */
   function sortBy(key: string) {
@@ -68,7 +70,7 @@ function CveView() {
     } else {
       p.delete("dir");
     }
-    if (key === "latest") p.delete("sort");
+    if (key === "hosts") p.delete("sort");
     else p.set("sort", key);
     router.replace(p.toString() ? `${pathname}?${p}` : pathname, { scroll: false });
   }
@@ -86,7 +88,8 @@ function CveView() {
   if (onlyWatch) qs.set("watchlist", "true");
   if (q.trim()) qs.set("q", q.trim());
   if (allReleases) qs.set("releases", "all");
-  if (sort !== "latest") qs.set("sort", sort);
+  if (sort !== "hosts") qs.set("sort", sort);
+  if (affectsAll) qs.set("affects", "all");
   if (dir === "asc") qs.set("dir", "asc");
   if (distro) qs.set("distro", distro);
   if (debianFix) qs.set("debian", debianFix);
@@ -96,8 +99,7 @@ function CveView() {
   // Leere Liste mit Umfang „meine Releases“: wie viele CVEs würden bei „Alle Releases“ passen (gleiche Filterlogik).
   const countQs = new URLSearchParams(qs);
   for (const k of ["limit", "sort", "dir"]) countQs.delete(k);
-  const emptyHere = cves.data?.length === 0 && !allReleases;
-  const scopeCount = useApi<{ mine: number; all: number }>(emptyHere ? `/cves/scope-count?${countQs}` : null);
+  const scopeCount = useApi<{ mine: number; all: number; affecting: number }>(`/cves/scope-count?${countQs}`, 60_000, ["host_cve_status", "report_received"], undefined, { keepPrevious: true });
   // Sofortige Rückmeldung beim Filtern: die bisherige Liste bleibt stehen und wird abgedunkelt, bis die neue da ist.
   const updating = cves.stale || qInput !== q;
   // Beim ersten Aufbau erscheinen zuerst 30 Zeilen, der Rest folgt in kleinen Schritten: kein langer Task, die Seite
@@ -108,9 +110,9 @@ function CveView() {
     const rows = cves.data ?? [];
     if (!cves.stale) return rows;
     const val = (c: CveListItem) =>
-      sort === "level" ? c.level : Date.parse((sort === "updated" ? c.updated_at : c.published_at) ?? "") || 0;
+      sort === "level" ? c.level : sort === "hosts" ? affectedHosts(c) : Date.parse((sort === "updated" ? c.updated_at : c.published_at) ?? "") || 0;
     const sign = dir === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => Number(b.watched) - Number(a.watched) || sign * (val(a) - val(b)) || b.id.localeCompare(a.id));
+    return [...rows].sort((a, b) => Number(b.watched) - Number(a.watched) || sign * (val(a) - val(b)) || (sort === "hosts" ? b.level - a.level : 0) || b.id.localeCompare(a.id));
   }, [cves.data, cves.stale, sort, dir]);
   const total = cves.data?.length ?? 0;
   const [rendered, setRendered] = useState(30);
@@ -185,8 +187,8 @@ function CveView() {
       setHiding(new Map());
     };
   }, [listPath]);
-  const filtered = onlyWatch || q.trim() !== "" || allReleases || distro !== "" || debianFix !== "" || ubuntuFix !== "";
-  const activeFilters = [q.trim(), onlyWatch, allReleases, distro, debianFix, ubuntuFix].filter(Boolean).length;
+  const filtered = onlyWatch || affectsAll || q.trim() !== "" || allReleases || distro !== "" || debianFix !== "" || ubuntuFix !== "";
+  const activeFilters = [q.trim(), onlyWatch, affectsAll, allReleases, distro, debianFix, ubuntuFix].filter(Boolean).length;
   const flashed = useFlash(
     cves.data,
     (c) => c.id,
@@ -277,11 +279,14 @@ function CveView() {
   }
 
   const chips: { key: string; label: string; remove: () => void }[] = [];
+  // Leerer Standard („Meine Hosts“ ohne weitere Filter): freundlicher Hinweis statt „Keine passenden CVEs“.
+  const onlyMineEmpty = cves.data?.length === 0 && !affectsAll && !onlyWatch && q.trim() === "" && !allReleases && !distro && !debianFix && !ubuntuFix;
   if (q.trim()) chips.push({ key: "q", label: `Suche: ${q.trim()}`, remove: () => { setQInput(""); setParam("q", null); } });
   if (distro) chips.push({ key: "distro", label: `Distribution: ${distro === "debian" ? "Debian" : "Ubuntu"}`, remove: () => setParam("distro", null) });
   if (debianFix) chips.push({ key: "debian", label: `Debian: ${FIX_LABEL[debianFix]}`, remove: () => setParam("debian", null) });
   if (ubuntuFix) chips.push({ key: "ubuntu", label: `Ubuntu: ${FIX_LABEL[ubuntuFix]}`, remove: () => setParam("ubuntu", null) });
   if (onlyWatch) chips.push({ key: "watchlist", label: "Nur Watchlist", remove: () => setWatchFilter(false) });
+  if (affectsAll) chips.push({ key: "affects", label: "Betrifft: alle CVEs", remove: () => setParam("affects", null) });
   if (allReleases) chips.push({ key: "releases", label: "Alle Releases", remove: () => setParam("releases", null) });
   const resetAll = () => {
     setQInput("");
@@ -380,12 +385,54 @@ function CveView() {
           </ul>
         ) : null}
 
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="affects-bar">
+          <p className="text-sm font-semibold" aria-live="polite">
+            {scopeCount.data ? (
+              affectsAll ? (
+                <button type="button" onClick={() => setParam("affects", null)} className="text-accent underline max-md:min-h-11">
+                  {affectingLabel(scopeCount.data.affecting)}
+                </button>
+              ) : (
+                <span>{affectingLabel(scopeCount.data.affecting)}</span>
+              )
+            ) : (
+              <span className="text-fg3">CVEs werden gezählt …</span>
+            )}
+          </p>
+          <div role="group" aria-label="Betrifft" className="flex gap-1">
+            {([["mine", "Meine Hosts"], ["all", "Alle"]] as const).map(([v, label]) => {
+              const on = (v === "all") === affectsAll;
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setParam("affects", v === "all" ? "all" : null)}
+                  className={`inline-flex min-h-8 items-center gap-1 rounded-xs border px-2.5 text-sm max-md:min-h-11 ${on ? "border-2 border-accent bg-sunk font-semibold" : "border-line bg-surface hover:bg-sunk"}`}
+                >
+                  {label}
+                  {on ? <Icon name="ok" size={14} /> : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {cves.error && !cves.data ? <ErrorNote message={cves.error} /> : null}
         {!cves.data ? (
           <TableSkeleton what="CVEs" />
         ) : cves.data.length === 0 ? (
-          <Empty title={filtered ? "Keine passenden CVEs" : "Noch keine CVE-Daten"}>
-            {filtered ? (
+          <Empty title={filtered ? (onlyMineEmpty ? "Keine CVE betrifft deine Hosts" : "Keine passenden CVEs") : "Noch keine CVE-Daten"}>
+            {onlyMineEmpty ? (
+              <>
+                <span className="block">Gut so: Zu deinen Hosts gibt es zurzeit keine CVE mit verwundbarem Zustand, angekündigtem Fix oder nötigem Neustart.</span>
+                <span className="mt-2 flex flex-wrap gap-3">
+                  <button type="button" onClick={() => setParam("affects", "all")} className="text-accent underline max-md:min-h-11">
+                    Alle CVEs anzeigen
+                  </button>
+                </span>
+              </>
+            ) : filtered ? (
               <>
                 <span className="block">
                   Aktive Filter: {chips.length > 0 ? chips.map((c) => c.label).join(", ") : "keine"}. Umfang: {allReleases ? "alle Releases" : "nur Releases, die auf deinen Hosts laufen"}.
@@ -425,7 +472,7 @@ function CveView() {
                     <SortTh label="CVE" hint={sort === "latest" ? (dir === "desc" ? "neueste zuerst" : "älteste zuerst") : "nach Datum sortieren"} active={sort === "latest"} dir={dir} onClick={() => sortBy("latest")} />
                     <th scope="col"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col"><span className="th-pad">Distributionen</span></th>
-                    <th scope="col"><span className="th-pad">Hosts</span></th>
+                    <SortTh label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
                     <SortTh label="Level" className="max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
                     <SortTh label="Aktualisiert" className="md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />
                   </tr>
@@ -566,6 +613,7 @@ function HostCounts({ c }: { c: CveListItem }) {
   const parts = [
     c.hosts_vulnerable > 0 && <span key="v" className="whitespace-nowrap font-semibold text-crit">{c.hosts_vulnerable} verwundbar</span>,
     c.hosts_fix_pending > 0 && <span key="p" className="whitespace-nowrap text-warn">{c.hosts_fix_pending} Fix angekündigt</span>,
+    c.hosts_reboot > 0 && <span key="r" className="whitespace-nowrap text-warn">{c.hosts_reboot} Neustart nötig</span>,
     c.hosts_unknown > 0 && <span key="u" className="whitespace-nowrap text-unknown">{c.hosts_unknown} unbekannt</span>,
   ].filter(Boolean);
   if (parts.length === 0) return <span className="text-fg3">keine betroffenen Hosts</span>;
