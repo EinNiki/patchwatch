@@ -24,7 +24,7 @@ export function DistroChip({ d, allScope = false }: { d: Distro; allScope?: bool
   return (
     <span
       title={chipTitle(d, allScope)}
-      className={`chip-fade inline-flex h-(--chip-h) items-center gap-1 whitespace-nowrap rounded-xs border pl-1 pr-1.5 text-xs ${
+      className={`chip-fade inline-flex h-(--chip-h) items-center gap-1 whitespace-nowrap max-md:h-auto max-md:min-h-(--chip-h) max-md:max-w-full max-md:flex-wrap max-md:whitespace-normal rounded-xs border pl-1 pr-1.5 text-xs ${
         outside ? "border-dashed border-line bg-sunk opacity-80" : "border-line"
       }`}
       data-outside={outside ? "yes" : "no"}
