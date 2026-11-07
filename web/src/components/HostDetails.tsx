@@ -5,7 +5,7 @@ import type { Feed, Host } from "@/lib/types";
 import type { FeedNotice } from "@/lib/hostCves";
 import { Uptime } from "@/components/Uptime";
 import { RelTime } from "@/components/RelTime";
-import { Mono } from "@/components/Version";
+import { Mono, Ver } from "@/components/Version";
 import { StatusBadge } from "@/components/StatusBadge";
 import { FEED_STATE } from "@/components/FeedSources";
 import { Icon } from "@/components/Icons";
@@ -13,8 +13,8 @@ import { Icon } from "@/components/Icons";
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
-      <dt className="text-fg3">{label}</dt>
-      <dd className="m-0 min-w-0 break-words">{children}</dd>
+      <dt className="text-xs text-fg3 @sm:text-sm">{label}</dt>
+      <dd className="m-0 mb-1.5 min-w-0 [overflow-wrap:anywhere] @sm:mb-0">{children}</dd>
     </>
   );
 }
@@ -30,17 +30,19 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
   const used = responsibleFeeds(feeds, h.os_id);
   const issue = h.cve_source_issue ?? null;
   return (
-    <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
+    // Container: in der schmalen Spalte steht die Beschriftung über dem Wert, ab 24 rem Breite daneben.
+    <div className="@container">
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-0 text-sm @sm:grid-cols-[max-content_minmax(0,1fr)] @sm:gap-y-1.5">
       <Fact label="Distribution">
         {h.pretty_name ?? "–"} {h.os_codename ? <span className="text-fg3">({h.os_codename})</span> : null}
       </Fact>
       <Fact label="Laufender Kernel">
-        <Mono>{h.running_kernel ?? "–"}</Mono>
+        {h.running_kernel ? <Ver>{h.running_kernel}</Ver> : "–"}
       </Fact>
       <Fact label="Neuester Kernel">
         {h.newest_kernel ? (
           <>
-            <Mono>{h.newest_kernel}</Mono> <Mono className="text-fg2">{h.newest_kernel_version}</Mono>
+            <Ver>{h.newest_kernel}</Ver> <Ver className="text-fg2">{h.newest_kernel_version ?? ""}</Ver>
           </>
         ) : (
           "–"
@@ -49,7 +51,7 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
       <Fact label="Kernel-Paket">
         {h.kernel_package ? (
           <>
-            <Mono>{h.kernel_package}</Mono> <Mono className="text-fg2">{h.kernel_package_version}</Mono>
+            <Ver>{h.kernel_package}</Ver> <Ver className="text-fg2">{h.kernel_package_version ?? ""}</Ver>
           </>
         ) : (
           <span className="text-fg3">nicht ermittelt</span>
@@ -84,7 +86,7 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
           <span className="text-fg3">noch keiner</span>
         )}
       </Fact>
-      <Fact label="Agent">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">unbekannt</span>}</Fact>
+      <Fact label="Agent">{h.agent_version ? <Ver>{h.agent_version}</Ver> : <span className="text-fg3">unbekannt</span>}</Fact>
       <Fact label="Offene Updates">
         {h.updates_pending == null ? (
           <span className="text-fg3">unbekannt</span>
@@ -133,5 +135,6 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
         </Fact>
       ) : null}
     </dl>
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 // Host-Ansicht: Satz, Balken, Kernel-Zeile, Banner. Muss ohne die Logik in src/lib/hostCves.ts fehlschlagen.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { barSegments, feedNotice, kernelLine, openStatusWord, parseCveFilter, stateCounts, summarySentence } from "../src/lib/hostCves.ts";
+import { aptCandidate, announcedText, fixInfo, barSegments, feedNotice, kernelLine, openStatusWord, parseCveFilter, stateCounts, summarySentence } from "../src/lib/hostCves.ts";
 import type { Feed } from "../src/lib/types.ts";
 
 const c = (open: number, reboot: number, fixed = 0, unknown = 0) => ({ open, reboot, fixed, unknown });
@@ -81,4 +81,49 @@ test("alte URL ?cve=not_affected und Fremdwerte führen auf die Standardansicht"
   for (const bad of ["not_affected", "constructor", "__proto__", "", "OPEN", "<script>", "café😀"]) assert.equal(parseCveFilter(bad), null, bad);
   assert.equal(parseCveFilter(null), null);
   for (const ok of ["open", "reboot", "fixed", "unknown"]) assert.equal(parseCveFilter(ok), ok);
+});
+
+const src = (status: string, fix: string | null = null) => ({ source: "ubuntu", release: "resolute", package: "linux", status, fix_version: fix });
+const cve = (status: string, sources: ReturnType<typeof src>[], fix: string | null) => ({ status, sources, fix_version: fix }) as never;
+
+test("fix kinds: only a tracker entry with a version and no pending status counts as released", () => {
+  assert.deepEqual(fixInfo(cve("vulnerable", [src("released", "7.0.0-43.43")], "7.0.0-43.43")), { kind: "released", version: "7.0.0-43.43", source: "ubuntu" });
+  assert.deepEqual(fixInfo(cve("vulnerable", [src("fix_pending", "7.0.0-43.43")], "7.0.0-43.43")), { kind: "announced", version: "7.0.0-43.43", source: "ubuntu" });
+  assert.equal(fixInfo(cve("vulnerable", [src("needed")], null)).kind, "none");
+  // Veröffentlicht schlägt angekündigt, wenn mehrere Einträge vorliegen.
+  assert.equal(fixInfo(cve("vulnerable", [src("fix_pending", "7.0.0-44.44"), src("released", "7.0.0-43.43")], "7.0.0-44.44")).kind, "released");
+});
+
+test("an announced fix is never called 'Fix im Archiv' in the list", () => {
+  assert.equal(openStatusWord({ status: "vulnerable", fix_version: "7.0.0-43.43", sources: [src("fix_pending", "7.0.0-43.43")] }), "Fix angekündigt");
+  assert.equal(openStatusWord({ status: "vulnerable", fix_version: "7.0.0-43.43", sources: [src("released", "7.0.0-43.43")] }), "Fix im Archiv");
+});
+
+test("apt candidate: the kernel package whose update equals the fix version", () => {
+  const items = [
+    { name: "base-files", from: "1", to: "2", origin: "Ubuntu:26.04/resolute-updates", security: false },
+    { name: "linux-generic", from: "7.0.0-42.42", to: "7.0.0-43.43", origin: "Ubuntu:26.04/resolute-updates", security: true },
+  ];
+  assert.equal(aptCandidate(items, "7.0.0-43.43")?.name, "linux-generic");
+  assert.equal(aptCandidate(items, "7.0.0-44.44"), null);
+  assert.equal(aptCandidate(null, "7.0.0-43.43"), null);
+  assert.equal(aptCandidate(items, null), null);
+});
+
+test("announced text states both sources and that they may differ in time, without confirming the fix", () => {
+  const info = fixInfo(cve("vulnerable", [src("fix_pending", "7.0.0-43.43")], "7.0.0-43.43"));
+  const items = [{ name: "linux-generic", from: "7.0.0-42.42", to: "7.0.0-43.43", origin: "resolute-updates", security: true }];
+  const t = announcedText(info, items);
+  assert.equal(t.aptAvailable, true);
+  assert.equal(t.lines[0], "Ubuntus Tracker führt die CVE noch als „Fix in Arbeit“ (voraussichtlich in 7.0.0-43.43).");
+  assert.equal(t.lines[1], "Auf diesem Host ist 7.0.0-43.43 laut apt verfügbar (resolute-updates).");
+  assert.match(t.lines[2]!, /zeitversetzt/);
+  assert.ok(!t.lines.join(" ").includes("Fix im Archiv"));
+  // apt kennt die Version (noch) nicht: das steht da, ohne den Fix zu bestätigen.
+  const none = announcedText(info, []);
+  assert.equal(none.aptAvailable, false);
+  assert.match(none.lines[1]!, /noch nicht an/);
+  // Paketliste noch nicht geladen oder Agent liefert keine: keine Aussage zu apt.
+  assert.equal(announcedText(info, undefined).lines.length, 2);
+  assert.equal(announcedText(info, null).lines.length, 2);
 });

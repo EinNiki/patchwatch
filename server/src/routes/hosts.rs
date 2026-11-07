@@ -330,10 +330,12 @@ pub async fn cves(
     .bind(level_min)
     .fetch_one(&st.pool)
     .await?;
-    // Offene mit Fix in einer Quelle (im Archiv erhältlich, auf dem Host nicht installiert).
-    let open_with_fix: i64 = sqlx::query_scalar(&format!(
-        "SELECT count(*) FROM host_cve_status s WHERE s.host_id = $1 AND s.status IN ('vulnerable', 'fix_pending') AND {FIX_SQL} IS NOT NULL"
-    ))
+    // Offene mit veröffentlichtem Fix (im Archiv erhältlich, auf dem Host nicht installiert). Ein nur angekündigter Fix
+    // (Quellenstatus `fix_pending`, z. B. Ubuntu `pending`) zählt nicht: der Tracker bestätigt ihn noch nicht.
+    let open_with_fix: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM host_cve_status s WHERE s.host_id = $1 AND s.status IN ('vulnerable', 'fix_pending') \
+         AND EXISTS (SELECT 1 FROM jsonb_array_elements(s.sources) e WHERE e->>'fix_version' IS NOT NULL AND e->>'status' IS DISTINCT FROM 'fix_pending')",
+    )
     .bind(id)
     .fetch_one(&st.pool)
     .await?;

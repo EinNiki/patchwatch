@@ -6601,3 +6601,61 @@ async fn sources_run_in_parallel_and_fail_independently(pool: PgPool) {
         "Debian bleibt davon unberührt"
     );
 }
+
+/// Ein nur angekündigter Fix (Ubuntu `pending`) ist kein "Fix im Archiv": `open_with_fix` zählt ihn nicht, die Quelle
+/// bleibt als `fix_pending` sichtbar (die Oberfläche formuliert daraus "angekündigt, nicht bestätigt").
+#[sqlx::test(migrations = "./migrations")]
+async fn announced_fix_is_not_counted_as_fix_in_archive(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let hid = add_host(&pool, "web1").await;
+    assert_eq!(
+        report(&app, &noble("web1", "6.8.0-31.31", "6.8.0-31.31")).await,
+        StatusCode::NO_CONTENT
+    );
+    let now = Utc::now() - Duration::minutes(10);
+    mock.lock().unwrap().ubuntu = vec![
+        ubuntu_cve(
+            "CVE-2026-31001",
+            now,
+            &[("noble", "pending", "6.8.0-99.99")],
+        ),
+        ubuntu_cve(
+            "CVE-2026-31002",
+            now,
+            &[("noble", "released", "6.8.0-98.98")],
+        ),
+    ];
+    refresh::refresh_all(&st).await;
+    let cookies = login(&app, &pool).await;
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/hosts/{hid}/cves?status=vulnerable,fix_pending"),
+        &hdr(&cookies),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.json["open_with_fix"], 1,
+        "nur der veröffentlichte Fix zählt: {}",
+        r.json
+    );
+    let items = r.json["items"].as_array().unwrap();
+    let pending = items
+        .iter()
+        .find(|i| i["cve_id"] == "CVE-2026-31001")
+        .expect("angekündigter Fix ist offen");
+    assert!(pending["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["status"] == "fix_pending"));
+    assert_eq!(
+        pending["fix_version"], "6.8.0-99.99",
+        "die erwartete Version bleibt für die Anzeige erhalten"
+    );
+}

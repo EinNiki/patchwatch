@@ -255,6 +255,14 @@ für neue Bewertungen aber nicht mehr erzeugt. Der Fix-Filter „offen“ der CV
 „behoben“ nur veröffentlichte Fixes. Zeilen abgeschalteter oder gelöschter Quellen werden bei der Bewertung ignoriert
 (seit `0cd2c5e`, `reeval.rs`).
 
+**Anzeige im CVE-Fenster („Fix im Archiv“ und „Fix in Arbeit“).** Beide Angaben stammen aus verschiedenen Quellen und
+dürfen sich nicht widersprechen: „Fix im Archiv“ zählt nur **veröffentlichte** Fixes (Quellenstatus ungleich `fix_pending`;
+Server: `open_with_fix` in `routes/hosts.rs`), „Fix in Arbeit“ ist der angekündigte, noch nicht veröffentlichte Fix.
+Ein angekündigter Fix wird nie als bestätigter Fix gezeigt: Die Zeile trägt den Zusatz „(angekündigt)“, und der
+Tooltip „Fix im Archiv“ erscheint nur bei veröffentlichten Fixes. Das Detail unterscheidet den Stand des Trackers (Quelle)
+vom apt-Kandidaten des Hosts (`/hosts/{id}/updates`): Der Kandidat belegt, dass ein Paketupdate bereitsteht, ersetzt aber
+nicht die Fix-Version des Trackers. `eval.rs` bleibt unverändert.
+
 **Debian: Archiv und Security.** Der Debian Security Tracker führt je Release EINEN Status und EINE Fix-Version und je Suite
 (`trixie`, `trixie-security`) die Version des Quellpakets. Der Adapter legt je Suite Version und Status ab
 (`cve_source_status.suites`): Suite-Version ≥ Fix-Version = gefixt, darunter verwundbar. Die Bewertung eines Hosts bleibt

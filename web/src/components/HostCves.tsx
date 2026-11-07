@@ -6,8 +6,8 @@ import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { CVE_STATUS, type IconName } from "@/lib/status";
-import { LEVEL_FILTERS, barSegments, groupTitle, kernelLine, levelWord, openStatusWord, parseCveFilter, shortText, stateCounts, summarySentence, type FeedNotice, type Tile } from "@/lib/hostCves";
-import type { CveStatus, Host, HostCve, HostCveGroupsResponse, HostCvesResponse } from "@/lib/types";
+import { LEVEL_FILTERS, announcedText, barSegments, fixInfo, groupTitle, kernelLine, levelWord, openStatusWord, parseCveFilter, shortText, stateCounts, summarySentence, type FeedNotice, type Tile } from "@/lib/hostCves";
+import type { CveStatus, Host, HostCve, HostCveGroupsResponse, HostCvesResponse, UpdateItem } from "@/lib/types";
 import { Marker } from "@/components/DistroChip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Dialog } from "@/components/Dialog";
@@ -68,8 +68,11 @@ export function hostState(c: HostCve, running: string | null, proxmox: boolean):
       return c.fix_version ? `Fix ab ${c.fix_version}, läuft ${run}` : `Behoben, läuft ${run}`;
     case "fixed_installed_reboot_required":
       return `Fix installiert, Kernel läuft noch ${run}, Neustart nötig`;
-    case "vulnerable":
-      return c.fix_version ? `Fix ab ${c.fix_version}, läuft ${run}` : `Kein Fix bekannt, läuft ${run}`;
+    case "vulnerable": {
+      const f = fixInfo(c);
+      if (f.kind === "announced") return `Fix angekündigt${f.version ? ` (voraussichtlich in ${f.version})` : ""}, läuft ${run}`;
+      return f.version ? `Fix ab ${f.version}, läuft ${run}` : `Kein Fix bekannt, läuft ${run}`;
+    }
     case "fix_pending":
       return c.fix_version ? `Fix angekündigt ab ${c.fix_version}, läuft ${run}` : `Fix angekündigt, läuft ${run}`;
     default:
@@ -582,7 +585,16 @@ function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number;
   );
   // Quell-Paket(e) laut Quelle (z. B. „linux“); mehrere ohne Wiederholung.
   const packages = [...new Set(c.sources.map((x) => x.package))].join(", ");
-  const fixCell = c.fix_version ? <Mono>{c.fix_version}</Mono> : <span className="text-fg3">–</span>;
+  const fk = fixInfo(c);
+  const fixCell = !c.fix_version ? (
+    <span className="text-fg3">–</span>
+  ) : fk.kind === "announced" ? (
+    <span className="text-fg3" title="Angekündigt, noch nicht als veröffentlicht bestätigt">
+      <Mono>{c.fix_version}</Mono> (angekündigt)
+    </span>
+  ) : (
+    <Mono>{c.fix_version}</Mono>
+  );
   if (narrow) {
     // Mobil gestapelt: Zeile 1 ID, Level, Details; Zeile 2 Status und Fix-Stand.
     return (
@@ -591,7 +603,7 @@ function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number;
         <span className={`font-medium ${lvlTone}`}>{levelWord(c.level)}</span>
         <span className="ml-auto">{more}</span>
         <span className="basis-full truncate text-fg3" title={full}>
-          {[variant !== "group" ? statusLabel : null, c.fix_version, `seit ${since(c.published_at)}`].filter(Boolean).join(" · ")}
+          {[variant !== "group" ? statusLabel : null, c.fix_version ? (fk.kind === "announced" ? `${c.fix_version} (angekündigt)` : c.fix_version) : null, `seit ${since(c.published_at)}`].filter(Boolean).join(" · ")}
         </span>
       </li>
     );
@@ -607,7 +619,7 @@ function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number;
         {text}
       </span>
       {variant !== "group" ? (
-        <span className="min-w-0" title={c.status === "vulnerable" && c.fix_version ? UPDATE_HINT : undefined}>
+        <span className="min-w-0" title={c.status === "vulnerable" && fk.kind === "released" ? UPDATE_HINT : undefined}>
           <StatusBadge info={st} label={statusLabel} />
         </span>
       ) : null}
@@ -629,6 +641,10 @@ function shortLabel(s: CveStatus): string {
 }
 
 function Detail({ c, host, running, busy, onReview }: { c: HostCve; host: Host; running: string | null; busy: boolean; onReview: (v: boolean) => void }) {
+  const fix = fixInfo(c);
+  // Zweite Quelle neben dem Tracker: die Paketliste des letzten Reports (apt-Kandidaten des Hosts); nur bei angekündigtem Fix nötig.
+  const updates = useApi<{ items: UpdateItem[] | null }>(fix.kind === "announced" ? `/hosts/${host.id}/updates` : null, 0);
+  const announced = announcedText(fix, updates.data?.items);
   return (
     <div className="space-y-3 text-sm">
       <p className="flex flex-wrap items-center gap-2">
@@ -639,12 +655,29 @@ function Detail({ c, host, running, busy, onReview }: { c: HostCve; host: Host; 
         {c.level ? <span className="text-xs text-fg3">Level {c.level}/10</span> : null}
       </p>
       <p className="text-fg2">{hostState(c, running, host.is_proxmox)}</p>
-      {c.status === "vulnerable" && c.fix_version ? (
+      {c.status === "vulnerable" && fix.kind === "released" ? (
         <p role="note" className="border-l-4 border-accent bg-sunk px-3 py-1.5">
-          <strong className="font-semibold">Fix im Archiv{c.sources.length ? ` (Paket ${[...new Set(c.sources.map((x) => x.package))].join(", ")}, ab ${c.fix_version})` : ` ab ${c.fix_version}`}.</strong> Update einspielen:
+          <strong className="font-semibold">Fix im Archiv{c.sources.length ? ` (Paket ${[...new Set(c.sources.map((x) => x.package))].join(", ")}, ab ${fix.version})` : ` ab ${fix.version}`}.</strong> Update einspielen:
           <CodeField className="my-1" text={UPDATE_CMD} label="Befehl kopieren" />
           Danach Neustart, falls ein Kernel betroffen ist. Patchwatch führt nichts aus.
         </p>
+      ) : null}
+      {c.status === "vulnerable" && fix.kind === "announced" ? (
+        <div role="note" className="space-y-1 border-l-4 border-warn bg-sunk px-3 py-1.5">
+          <p>
+            <strong className="font-semibold">Fix angekündigt, noch nicht bestätigt.</strong>
+          </p>
+          {announced.lines.map((l) => (
+            <p key={l}>{l}</p>
+          ))}
+          {announced.aptAvailable ? (
+            <>
+              <p>Update einspielen:</p>
+              <CodeField text={UPDATE_CMD} label="Befehl kopieren" />
+              <p>Danach Neustart, falls ein Kernel betroffen ist. Patchwatch führt nichts aus.</p>
+            </>
+          ) : null}
+        </div>
       ) : null}
       <p className="break-words">
         <Linkified text={c.reason} />

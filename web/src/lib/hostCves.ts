@@ -1,6 +1,6 @@
 // Reine Logik der Host-Ansicht (Satz, Balken, Kacheln, Banner); keine React-Importe, damit sie mit node:test prüfbar ist.
 import { clockTime as hhmm } from "./format.ts";
-import type { Feed, HostCve } from "./types.ts";
+import type { Feed, HostCve, UpdateItem } from "./types.ts";
 
 export interface StateCounts {
   open: number;
@@ -68,10 +68,60 @@ export function kernelLine(running: string | null, newest: string | null, reboot
   return `Läuft ${running ?? "–"} · Neuester installiert ${newest ?? "–"}${reboot ? " · Neustart nötig" : ""}`;
 }
 
+/** Was die Quellen zum Fix sagen: veröffentlicht (Tracker führt eine Fix-Version), nur angekündigt (Tracker: „Fix in Arbeit“) oder nichts. */
+export type FixKind = "released" | "announced" | "none";
+
+export interface FixInfo {
+  kind: FixKind;
+  /** Fix-Version (bei „announced“: die voraussichtliche). */
+  version: string | null;
+  /** Quelle, die die Aussage macht (z. B. „ubuntu“). */
+  source: string | null;
+}
+
+/**
+ * Herkunft der Aussage: `sources` sind die Einträge der Tracker. „Veröffentlicht“ nur, wenn ein Eintrag eine Fix-Version
+ * OHNE Status „fix_pending“ trägt. Gibt es nur angekündigte Einträge, ist der Fix nicht bestätigt, auch wenn apt auf dem
+ * Host die Version schon anbietet (das ist eine zweite, zeitversetzte Quelle). Ohne `sources` gilt `fix_version` als veröffentlicht.
+ */
+export function fixInfo(c: Pick<HostCve, "status" | "fix_version" | "sources">): FixInfo {
+  const list = c.sources ?? [];
+  if (list.length === 0) return { kind: c.fix_version ? (c.status === "fix_pending" ? "announced" : "released") : "none", version: c.fix_version, source: null };
+  const released = list.find((e) => e.fix_version && e.status !== "fix_pending");
+  if (released) return { kind: "released", version: released.fix_version, source: released.source };
+  const announced = list.find((e) => e.status === "fix_pending") ?? (c.status === "fix_pending" ? list[0] : undefined);
+  if (announced) return { kind: "announced", version: announced.fix_version ?? c.fix_version, source: announced.source };
+  return { kind: "none", version: null, source: null };
+}
+
 /** Status in Worten für die Offen-Tabelle (Icon kommt von der Komponente, nie nur Farbe). */
-export function openStatusWord(c: Pick<HostCve, "status" | "fix_version">): string {
-  if (c.status === "fix_pending") return "Fix angekündigt";
-  return c.fix_version ? "Fix im Archiv" : "Kein Fix";
+export function openStatusWord(c: Pick<HostCve, "status" | "fix_version"> & { sources?: HostCve["sources"] }): string {
+  const k = fixInfo({ ...c, sources: c.sources ?? [] }).kind;
+  if (c.status === "fix_pending" || k === "announced") return "Fix angekündigt";
+  return k === "released" ? "Fix im Archiv" : "Kein Fix";
+}
+
+/** Kernel-Pakete des Hosts, für die apt genau die Fix-Version als Update anbietet (zweite Quelle neben dem Tracker). */
+export function aptCandidate(items: readonly UpdateItem[] | null | undefined, version: string | null): UpdateItem | null {
+  if (!version || !items) return null;
+  return items.find((u) => /^linux(-|$)/.test(u.name) && u.to === version) ?? null;
+}
+
+const TRACKER: Record<string, string> = { ubuntu: "Ubuntus Tracker", debian: "Debians Tracker" };
+
+/**
+ * Text zu einem nur angekündigten Fix: beide Aussagen mit Herkunft, ehrlich zeitversetzt. `updates`: Paketliste des letzten
+ * Reports (`null` = Agent schickt keine, `undefined` = noch nicht geladen).
+ */
+export function announcedText(info: FixInfo, updates: readonly UpdateItem[] | null | undefined): { lines: string[]; aptAvailable: boolean } {
+  const v = info.version;
+  const who = (info.source && TRACKER[info.source]) ?? "Der Tracker";
+  const lines = [`${who} führt die CVE noch als „Fix in Arbeit“${v ? ` (voraussichtlich in ${v})` : ""}.`];
+  const apt = aptCandidate(updates, v);
+  if (apt) lines.push(`Auf diesem Host ist ${v} laut apt verfügbar (${apt.origin}).`);
+  else if (v && updates) lines.push(`Laut letztem Report bietet apt auf diesem Host ${v} noch nicht an.`);
+  lines.push("Beide Angaben können zeitversetzt sein. Als bestätigt gilt der Fix erst, wenn der Tracker ihn als veröffentlicht führt.");
+  return { lines, aptAvailable: apt !== null };
 }
 
 export interface FeedNotice {
