@@ -71,7 +71,6 @@ function ToastView({ item }: { item: ToastItem }) {
 
   return (
     <li
-      role={item.variant === "error" ? "alert" : "status"}
       data-toast={item.variant}
       data-leaving={leaving || undefined}
       onPointerEnter={() => setPaused(true)}
@@ -85,7 +84,8 @@ function ToastView({ item }: { item: ToastItem }) {
       <span className={`mt-0.5 ${TONE[item.variant].split(" ")[1]}`}>
         <VariantIcon variant={item.variant} />
       </span>
-      <div className="min-w-0 flex-1 text-fg">
+      {/* Die Rolle sitzt innen: ein <li> mit eigener Rolle wäre kein Listeneintrag mehr (axe: list, aria-allowed-role). */}
+      <div role={item.variant === "error" ? "alert" : "status"} className="min-w-0 flex-1 text-fg">
         {item.title ? <p className="font-semibold">{item.title}</p> : null}
         <p className={`${item.title ? "text-sm text-fg2" : ""} break-words`}>
           {item.message}

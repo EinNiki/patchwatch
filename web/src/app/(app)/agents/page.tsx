@@ -10,7 +10,7 @@ import type { Host, NewHost, Settings } from "@/lib/types";
 import { absTime, relTime } from "@/lib/format";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { CopyButton } from "@/components/CopyButton";
+import { CodeField } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
 import { SET_TOKEN_COMMAND, installCommand } from "@/lib/agentCommands";
 import { writeFailure } from "@/lib/apiErrors";
@@ -40,15 +40,9 @@ function TokenStep({ name, token, rotated, onDone }: { name: string; token: stri
         Der Token für <strong>{name}</strong> wird nur jetzt angezeigt. Der Server speichert nur einen Hash und kann ihn nicht erneut anzeigen.
       </p>
       <p className="mb-1 text-xs font-semibold text-fg2">1. Token kopieren</p>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{token}</code>
-        <CopyButton text={token} label="Token kopieren" />
-      </div>
+      <CodeField className="mb-4" text={token} label="Token kopieren" />
       <p className="mb-1 text-xs font-semibold text-fg2">2. Auf dem Host ausführen</p>
-      <div className="mb-1 flex flex-wrap items-center gap-2">
-        <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{cmd}</code>
-        <CopyButton text={cmd} label="Befehl kopieren" />
-      </div>
+      <CodeField className="mb-1" text={cmd} label="Befehl kopieren" />
       {rotated ? (
         <p className="mb-4 text-xs text-fg2">
           Der Befehl fragt den neuen Token ohne Anzeige ab (<Mono>--stdin</Mono> oder <Mono>--token-file /pfad</Mono> gehen auch), prüft ihn mit
@@ -253,13 +247,10 @@ export default function AgentsPage() {
 
       <section aria-labelledby="agent-update" className="mb-3">
         <h2 id="agent-update" className="font-semibold text-fg2">Agent aktualisieren</h2>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <p className="text-fg2">
-            Auf dem Host ausführen (Server-URL und Token bleiben erhalten):
-          </p>
-          <code className="mono rounded-sm border border-line bg-sunk px-2 py-1">sudo patchwatch-agent-update</code>
-          <CopyButton text="sudo patchwatch-agent-update" label="Befehl kopieren" />
-        </div>
+        <p className="mt-2 text-fg2">
+          Auf dem Host ausführen (Server-URL und Token bleiben erhalten):
+        </p>
+        <CodeField className="mt-1" inline text="sudo patchwatch-agent-update" label="Befehl kopieren" />
         <p className="mt-2 text-fg3">
           Agents, die vor diesem Befehl installiert wurden, aktualisierst du einmalig mit dem Installationsbefehl aus „Agent hinzufügen“ (ohne neuen Token; vorhandene Einstellungen bleiben). Mit <code className="mono">--auto-update</code> prüft der Host danach wöchentlich selbst.
         </p>

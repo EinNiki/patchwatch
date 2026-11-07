@@ -15,7 +15,7 @@ import { Mono } from "@/components/Version";
 import { ErrorNote } from "@/components/States";
 import { Linkified } from "@/components/Linkified";
 import { Icon, NavIcon } from "@/components/Icons";
-import { CopyButton } from "@/components/CopyButton";
+import { CodeField } from "@/components/CopyButton";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 const ROW_H = 32; // dichte Zeilen (DESIGN.md): 32 px
@@ -240,7 +240,7 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg2">
         <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>{kernelLine(running ?? null, newest ?? null, Boolean(rebootNeeded))}</span>
-          {rebootNeeded ? <CopyButton text="sudo reboot" label="Befehl kopieren" /> : null}
+          {rebootNeeded ? <CodeField inline text="sudo reboot" label="Befehl kopieren" /> : null}
         </span>
       </div>
       {details}
@@ -641,8 +641,9 @@ function Detail({ c, host, running, busy, onReview }: { c: HostCve; host: Host; 
       <p className="text-fg2">{hostState(c, running, host.is_proxmox)}</p>
       {c.status === "vulnerable" && c.fix_version ? (
         <p role="note" className="border-l-4 border-accent bg-sunk px-3 py-1.5">
-          <strong className="font-semibold">Fix im Archiv{c.sources.length ? ` (Paket ${[...new Set(c.sources.map((x) => x.package))].join(", ")}, ab ${c.fix_version})` : ` ab ${c.fix_version}`}.</strong> Update einspielen:{" "}
-          <Mono>{UPDATE_CMD}</Mono> <CopyButton text={UPDATE_CMD} label="Befehl kopieren" />, danach Neustart, falls ein Kernel betroffen ist. Patchwatch führt nichts aus.
+          <strong className="font-semibold">Fix im Archiv{c.sources.length ? ` (Paket ${[...new Set(c.sources.map((x) => x.package))].join(", ")}, ab ${c.fix_version})` : ` ab ${c.fix_version}`}.</strong> Update einspielen:
+          <CodeField className="my-1" text={UPDATE_CMD} label="Befehl kopieren" />
+          Danach Neustart, falls ein Kernel betroffen ist. Patchwatch führt nichts aus.
         </p>
       ) : null}
       <p className="break-words">
