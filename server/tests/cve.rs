@@ -3370,6 +3370,130 @@ async fn retry_after_extends_the_next_attempt_and_is_capped_at_15_minutes(pool: 
     assert!((got - 15.0).abs() < 0.2, "{got}");
 }
 
+/// Ein Lauf, der länger als Anfrage-Timeout plus Puffer in "Verbinden" steht, endet als fehlgeschlagen mit der Meldung
+/// "Zeitüberschreitung beim Verbinden" (lange vor dem Fortschrittswächter), behält die Phase und zeigt den nächsten Versuch.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_stuck_in_connect_fails_with_connect_timeout(pool: PgPool) {
+    use patchwatch_server::cve::runs;
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    // Anfrage-Timeout 1 s + Puffer 1 s, aber 6 Versuche: alle Wiederholungen stehen in "Verbinden" und überschreiten
+    // zusammen das Limit (2 s), bevor die Versuche selbst enden. Der Fortschrittswächter (600 s) greift hier nicht.
+    let toml = format!(
+        "[cve]\nsources = [\"ubuntu\"]\nubuntu_url = \"{base}\"\nretries = 6\nretry_base_delay_ms = 10\n\
+         request_timeout_secs = 1\nconnect_buffer_secs = 1\nstall_timeout_secs = 600\nubuntu_page_pause_ms = 0\nubuntu_mode = \"api\"\n\
+         [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
+    );
+    let st = AppState::new(
+        pool.clone(),
+        Config::from_sources(Some(&toml), &|_| None).unwrap(),
+    )
+    .unwrap();
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_hang = true;
+    }
+    let runs::Start::Created(id) = runs::start(&pool, "ubuntu", runs::Trigger::Manual, None)
+        .await
+        .unwrap()
+    else {
+        panic!("Lauf nicht angelegt");
+    };
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        runs::execute(&st, id, "ubuntu"),
+    )
+    .await
+    .expect("hängender Lauf wurde nicht beendet");
+    assert!(
+        matches!(&out, Outcome::Failed(m) if m == "Zeitüberschreitung beim Verbinden"),
+        "{out:?}"
+    );
+    let row = runs::get(&pool, id).await.unwrap().unwrap();
+    assert_eq!(row.status, "failed");
+    assert_eq!(row.phase, "connect", "die Phase, in der er hing");
+    assert_eq!(
+        row.error.as_deref(),
+        Some("Zeitüberschreitung beim Verbinden")
+    );
+    assert!(row.finished_at.is_some());
+    let f = ubuntu_feed(&app, &h).await;
+    let text = f["error_text"].as_str().unwrap();
+    assert!(
+        text.starts_with("Zeitüberschreitung beim Verbinden") && text.contains("nächster Versuch"),
+        "{text}"
+    );
+    // Die Sperre ist frei: ein neuer Lauf kann angelegt werden.
+    assert!(matches!(
+        runs::start(&pool, "ubuntu", runs::Trigger::Manual, None)
+            .await
+            .unwrap(),
+        runs::Start::Created(_)
+    ));
+}
+
+/// Nach einem Neustart/Absturz bleibt kein Lauf als "läuft" stehen, auch nicht mit frischem Lebenszeichen; die
+/// Liste aktiver Läufe zeigt ihn nicht mehr als laufend, und Läufe anderer Zustände bleiben unberührt.
+#[sqlx::test(migrations = "./migrations")]
+async fn orphaned_runs_are_not_shown_as_running_after_restart(pool: PgPool) {
+    use patchwatch_server::cve::runs;
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 1, 10, 600, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    // Der "alte Prozess" hinterließ einen laufenden Lauf mit eben erst gemeldetem Lebenszeichen und einen wartenden.
+    sqlx::query("INSERT INTO feed_runs (source, trigger, status, phase, started_at, heartbeat_at) VALUES ('ubuntu', 'scheduled', 'running', 'download', now(), now())")
+        .execute(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO feed_runs (source, trigger, status) VALUES ('osv', 'scheduled', 'queued')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO feed_runs (source, trigger, status, finished_at) VALUES ('debian', 'scheduled', 'ok', now() - interval '1 hour')")
+        .execute(&pool).await.unwrap();
+    runs::recover_on_start(&pool).await;
+    let statuses: Vec<(String, String)> =
+        sqlx::query_as("SELECT source, status FROM feed_runs ORDER BY source")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        statuses,
+        vec![
+            ("debian".into(), "ok".into()),
+            ("osv".into(), "interrupted".into()),
+            ("ubuntu".into(), "interrupted".into())
+        ]
+    );
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/feeds/runs?active=true",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    for r in r.json["runs"].as_array().unwrap() {
+        assert!(
+            r["status"] != "running" && r["status"] != "queued",
+            "kein toter Lauf als aktiv: {r}"
+        );
+    }
+    // Die Quelle ist wieder frei für einen neuen Lauf.
+    assert!(matches!(
+        runs::start(&pool, "ubuntu", runs::Trigger::Manual, None)
+            .await
+            .unwrap(),
+        runs::Start::Created(_)
+    ));
+}
+
 /// Timeout: eine Quelle, die nicht antwortet, ist ein Fehllauf mit verständlichem Text (kein Hängenbleiben).
 #[sqlx::test(migrations = "./migrations")]
 async fn retry_timeout_is_a_failed_run(pool: PgPool) {

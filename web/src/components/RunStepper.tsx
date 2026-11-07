@@ -1,6 +1,7 @@
 "use client";
 
-import { PHASES, PHASE_LABEL, detail, formatDuration, isActive, isFailure, stepStates, type FeedRun, type StepState } from "@/lib/feedRuns";
+import { useEffect, useState } from "react";
+import { PHASES, PHASE_LABEL, detail, formatDuration, isActive, isFailure, runText, stepStates, type FeedRun, type StepState } from "@/lib/feedRuns";
 
 /** Eigene Symbole (SVG, currentColor): Haken, Kreuz, Strich (übersprungen), drehender Ring (aktiv), leerer Kreis (offen). */
 function StepIcon({ state }: { state: StepState }) {
@@ -50,15 +51,15 @@ const TONE: Record<StepState, string> = {
 
 const STATE_WORD: Record<StepState, string> = { done: "erledigt", active: "läuft", failed: "fehlgeschlagen", skipped: "übersprungen", pending: "ausstehend" };
 
-/** Kurzer Statustext zu einem Lauf (für Screenreader und Mini-Stepper). */
-export function runText(r: FeedRun): string {
-  if (r.status === "queued") return "Wartet auf freien Platz";
-  if (r.status === "running") return PHASE_LABEL[r.phase];
-  if (r.status === "not_modified") return "Unverändert";
-  if (r.status === "incomplete") return "Unvollständig abgeschlossen";
-  if (r.status === "interrupted") return "Unterbrochen";
-  if (r.status === "failed") return `Fehlgeschlagen bei „${PHASE_LABEL[r.phase]}“`;
-  return "Abgeschlossen";
+/** Sekundentakt, solange ein Lauf aktiv ist (für „läuft seit N Sekunden“); sonst kein Timer. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
 }
 
 /** Vollständiger Stepper: sechs Schritte mit Dauer, darunter Zähler und bei Fehlern die Meldung samt Aktionen. */
@@ -66,6 +67,7 @@ export function RunStepper({ run, label, onRetry, onClose }: { run: FeedRun; lab
   const states = stepStates(run);
   const failed = isFailure(run);
   const d = detail(run);
+  const now = useNow(run.status === "running");
   return (
     <div className="rounded-[3px] border border-line bg-sunk px-3 py-2" role="group" aria-label={`Abruf ${label}`}>
       <ol className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -83,7 +85,7 @@ export function RunStepper({ run, label, onRetry, onClose }: { run: FeedRun; lab
         })}
       </ol>
       <p className="mt-1 text-xs text-fg2" role="status">
-        {runText(run)}
+        {runText(run, now)}
         {d ? ` · ${d}` : ""}
       </p>
       {failed && run.error ? <p className="mt-1 text-sm text-crit">{run.error}</p> : null}
@@ -108,8 +110,9 @@ export function RunStepper({ run, label, onRetry, onClose }: { run: FeedRun; lab
 /** Mini-Stepper in der Tabellenzeile: sechs Segmente und der aktuelle Schritt als Text. */
 export function MiniStepper({ run, onToggle, open }: { run: FeedRun; onToggle: () => void; open: boolean }) {
   const states = stepStates(run);
+  const now = useNow(run.status === "running");
   return (
-    <button type="button" onClick={onToggle} aria-expanded={open} className="mt-1 flex min-h-6 flex-col items-start gap-1 text-left max-md:min-h-11" aria-label={`Abruf-Details: ${runText(run)}`}>
+    <button type="button" onClick={onToggle} aria-expanded={open} className="mt-1 flex min-h-6 flex-col items-start gap-1 text-left max-md:min-h-11" aria-label={`Abruf-Details: ${runText(run, now)}`}>
       <span className="flex gap-0.5" aria-hidden="true">
         {states.map((s, i) => (
           <span
@@ -118,7 +121,7 @@ export function MiniStepper({ run, onToggle, open }: { run: FeedRun; onToggle: (
           />
         ))}
       </span>
-      <span className={`text-xs ${isFailure(run) ? "text-crit" : "text-fg2"}`}>{runText(run)}</span>
+      <span className={`text-xs ${isFailure(run) ? "text-crit" : "text-fg2"}`}>{runText(run, now)}</span>
     </button>
   );
 }

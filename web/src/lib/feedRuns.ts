@@ -42,6 +42,39 @@ export function isFailure(r: Pick<FeedRun, "status">): boolean {
   return r.status === "failed" || r.status === "interrupted";
 }
 
+/** Meldungen des Servers, wenn ein Lauf nicht von selbst endete, sondern vom Wächter beendet wurde. */
+const HUNG_ERRORS = ["Zeitüberschreitung beim Verbinden", "Lauf ohne Fortschritt"];
+
+/** Der Lauf hing und wurde abgebrochen (Verbinden-Zeitlimit oder Fortschrittswächter), er ist nicht regulär fehlgeschlagen. */
+export function isHung(r: Pick<FeedRun, "status" | "error">): boolean {
+  return r.status === "failed" && r.error !== null && HUNG_ERRORS.some((m) => r.error!.startsWith(m));
+}
+
+/** „seit 30 Sekunden“ / „seit 2 Minuten“ für einen laufenden Lauf; ohne Startzeit leer. */
+export function runningSince(r: Pick<FeedRun, "started_at" | "created_at">, nowMs: number): string {
+  const from = Date.parse(r.started_at ?? r.created_at);
+  if (Number.isNaN(from)) return "";
+  const s = Math.max(0, Math.floor((nowMs - from) / 1000));
+  if (s < 60) return `seit ${s} ${s === 1 ? "Sekunde" : "Sekunden"}`;
+  const m = Math.floor(s / 60);
+  return `seit ${m} ${m === 1 ? "Minute" : "Minuten"}`;
+}
+
+/** Kurzer Statustext zu einem Lauf (für Screenreader und Mini-Stepper). Läuft er, steht die Dauer dabei. */
+export function runText(r: FeedRun, nowMs?: number): string {
+  if (r.status === "queued") return "Wartet auf freien Platz";
+  if (r.status === "running") {
+    const since = nowMs === undefined ? "" : runningSince(r, nowMs);
+    return since ? `${PHASE_LABEL[r.phase]}: läuft ${since}` : PHASE_LABEL[r.phase];
+  }
+  if (r.status === "not_modified") return "Unverändert";
+  if (r.status === "incomplete") return "Unvollständig abgeschlossen";
+  if (r.status === "interrupted") return "Unterbrochen (Server beendet oder neu gestartet)";
+  if (isHung(r)) return `Lauf hängt, abgebrochen (bei „${PHASE_LABEL[r.phase]}“)`;
+  if (r.status === "failed") return `Fehlgeschlagen bei „${PHASE_LABEL[r.phase]}“`;
+  return "Abgeschlossen";
+}
+
 /** Zustand jedes Schritts. Fehlschlag: die Phase, in der er auftrat, ist „failed“, danach „pending“. */
 export function stepStates(r: Pick<FeedRun, "status" | "phase">): StepState[] {
   const at = PHASES.indexOf(r.phase);

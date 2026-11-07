@@ -157,7 +157,13 @@ erreichbar ist. Das stündliche Blättern der ersten Seiten läuft unabhängig d
   entsteht keine Lücke. Ohne Cursor beginnt die Verfolgung mit der ersten Seite.
 * **Anzeige:** Feed-Tabelle zeigt je Release Zeitpunkt, Dateigröße, „importiert“ oder „unverändert (304)“ bzw. den Fehler
   samt Statuscode und `Retry-After`, nächsten Versuch sowie für den stündlichen Abruf Seitengröße, Fehler, nächsten Versuch
-  und einen Hinweis bei dauerhaftem 503/504. „Aktuell“ erscheint nur bei „vollständig“ und ohne dauerhaften Ausfall des
-  stündlichen Abrufs (ab drei Fehlläufen in Folge „unvollständig“).
+  und einen Hinweis bei dauerhaftem 503/504. „Aktuell“ erscheint nur bei „vollständig“, ohne dauerhaften Ausfall des
+  stündlichen Abrufs (ab drei Fehlläufen in Folge „unvollständig“) und nur, wenn der stündliche Abruf zuletzt erfolgreich
+  war und höchstens drei Intervalle zurückliegt (nie erfolgreich = „unvollständig“). Ein laufender Abruf ändert den Zustand
+  nicht; er hängt nur an den gespeicherten Zeitstempeln.
+* **Hängende Läufe:** steht ein Lauf länger als Anfrage-Timeout (`request_timeout_secs`) plus `connect_buffer_secs`
+  (Standard 30 s) in „Verbinden“, endet er als fehlgeschlagen mit „Zeitüberschreitung beim Verbinden“; spätere Phasen
+  deckt der Fortschrittswächter ab (`stall_timeout_secs`). Beim Serverstart werden zurückgebliebene Läufe sofort als
+  „unterbrochen“ beendet, im Betrieb nach 120 s ohne Lebenszeichen.
 * **Speicher:** je Release werden die behobenen Kernel-Einträge (einige Zehntausend CVEs) vor dem Speichern im Speicher
   gehalten, die Datei selbst nie.

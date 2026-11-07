@@ -100,6 +100,13 @@ impl Sink {
         }
     }
 
+    /// Aktuelle Phase und wie lange der Lauf schon darin steht.
+    pub fn phase_age(&self) -> (Phase, Duration) {
+        self.0.lock().map_or((Phase::Connect, Duration::ZERO), |i| {
+            (i.phase, i.since.elapsed())
+        })
+    }
+
     pub fn add_bytes(&self, n: u64) {
         if let Ok(mut i) = self.0.lock() {
             i.bytes = i.bytes.saturating_add(n);
@@ -155,6 +162,39 @@ tokio::task_local! {
 pub fn report_phase(p: Phase) {
     let _ = SINK.try_with(|s| s.set_phase(p));
 }
+/// Phase und Verweildauer des laufenden Abrufs (None außerhalb eines Laufs).
+pub fn current_phase_age() -> Option<(Phase, Duration)> {
+    SINK.try_with(|s| s.phase_age()).ok()
+}
+
+/// Ein Lauf hängt, wenn er länger als Anfrage-Timeout plus Puffer in "Verbinden" steht (Phasen gehen nie zurück,
+/// spätere Phasen deckt der Fortschrittswächter ab).
+pub fn connect_hung(
+    phase: Phase,
+    age: Duration,
+    request_timeout_secs: u64,
+    buffer_secs: u64,
+) -> bool {
+    phase == Phase::Connect
+        && age > Duration::from_secs(request_timeout_secs.saturating_add(buffer_secs))
+}
+
+/// Beim Start: Läufe, die ein beendeter Prozess hinterließ, sofort als unterbrochen markieren (statt erst nach
+/// `STALE_AFTER_SECS`). Es gibt genau einen Server-Prozess je Datenbank, also kann hier nichts mehr wirklich laufen.
+pub async fn recover_on_start(pool: &PgPool) {
+    let rows: Vec<RunRow> = sqlx::query_as(&format!(
+        "UPDATE feed_runs SET status = 'interrupted', finished_at = now(), \
+         error = 'Der Lauf wurde unterbrochen (Server beendet oder neu gestartet).' \
+         WHERE status IN ('queued', 'running') RETURNING {RUN_COLS}"
+    ))
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    for r in &rows {
+        publish(pool, r).await;
+    }
+}
+
 pub fn report_bytes(n: u64) {
     let _ = SINK.try_with(|s| s.add_bytes(n));
 }
@@ -536,6 +576,45 @@ mod tests {
         let snap = s.take(false).unwrap();
         assert_eq!(snap.bytes, 15);
         assert!(s.take(true).is_some(), "force liefert immer");
+    }
+
+    #[test]
+    fn connect_hang_needs_connect_phase_and_timeout_plus_buffer() {
+        let limit = 120 + 30;
+        let over = Duration::from_secs(limit + 1);
+        assert!(connect_hung(Phase::Connect, over, 120, 30));
+        assert!(
+            !connect_hung(Phase::Connect, Duration::from_secs(limit), 120, 30),
+            "genau am Limit noch nicht"
+        );
+        assert!(
+            !connect_hung(Phase::Connect, Duration::from_secs(30), 120, 30),
+            "läuft erst 30 s"
+        );
+        assert!(
+            !connect_hung(Phase::Download, over, 120, 30),
+            "andere Phasen deckt der Fortschrittswächter ab"
+        );
+    }
+
+    #[tokio::test]
+    async fn phase_age_follows_phase_changes() {
+        let sink = Arc::new(Sink::default());
+        SINK.scope(sink.clone(), async {
+            assert_eq!(current_phase_age().unwrap().0, Phase::Connect);
+            report_phase(Phase::Download);
+            let (p, age) = current_phase_age().unwrap();
+            assert_eq!(p, Phase::Download);
+            assert!(
+                age < Duration::from_secs(5),
+                "Zeit zählt ab dem Phasenwechsel neu"
+            );
+        })
+        .await;
+        assert!(
+            current_phase_age().is_none(),
+            "außerhalb eines Laufs nichts"
+        );
     }
 
     #[test]

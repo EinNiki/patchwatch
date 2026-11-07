@@ -223,6 +223,8 @@ pub enum FeedError {
     TooLarge(u64),
     /// Watchdog: der Lauf meldete so viele Minuten keinen Fortschritt und wurde abgebrochen.
     Stalled(u64),
+    /// Watchdog: die Verbindung kam nicht zustande bzw. der Server antwortete innerhalb von Anfrage-Timeout plus Puffer nicht.
+    ConnectTimeout,
     /// Antwort hat nicht das erwartete Format (Quelle hat das Format geändert?).
     Format(String),
 }
@@ -233,6 +235,7 @@ impl fmt::Display for FeedError {
             Self::Network(m) => write!(f, "Netzwerkfehler: {m}"),
             Self::Http(c) | Self::Throttled { status: c, .. } => write!(f, "HTTP {c}"),
             Self::Stalled(m) => write!(f, "Lauf ohne Fortschritt seit {m} Minuten abgebrochen"),
+            Self::ConnectTimeout => write!(f, "Zeitüberschreitung beim Verbinden"),
             Self::TooLarge(n) => write!(f, "Antwort größer als das Limit von {n} Bytes"),
             Self::Format(m) => write!(f, "unerwartetes Format: {m}"),
         }

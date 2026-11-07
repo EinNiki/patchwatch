@@ -308,7 +308,9 @@ fn classify(
         .and_then(|v| serde_json::from_value::<crate::cve::Bulk>(v.clone()).ok())
     {
         let hourly_broken = b.incr.failures >= 3;
-        if !b.complete || b.ok.values().any(|u| *u <= now) || hourly_broken {
+        // Der stündliche Teil (offene Fälle) muss zuletzt erfolgreich und frisch sein; ein laufender Abruf ändert daran nichts.
+        let hourly_fresh = b.incr.last_ok_at.is_some_and(|t| now - t <= max_age);
+        if !b.complete || b.ok.values().any(|u| *u <= now) || hourly_broken || !hourly_fresh {
             return ("incomplete", f.last_success_at);
         }
     }
@@ -858,6 +860,8 @@ pub async fn runs_list(
         .unwrap_or(runs::KEEP_PER_SOURCE)
         .clamp(1, runs::KEEP_PER_SOURCE);
     let rows: Vec<runs::RunRow> = if q.active.unwrap_or(false) {
+        // Verwaiste Läufe vor der Anzeige beenden, damit der Stepper nie einen toten Lauf als "läuft" zeigt.
+        runs::sweep_stale(&st.pool).await;
         sqlx::query_as(&format!(
             "SELECT {} FROM feed_runs WHERE status IN ('queued', 'running') OR finished_at > now() - interval '30 seconds' ORDER BY id DESC",
             runs::RUN_COLS
@@ -1034,6 +1038,53 @@ mod tests {
         f.backfill = marker;
         assert_eq!(classify(&f, true, now, max).0, "incomplete");
         assert_eq!(classify(&f, false, now, max).0, "disabled");
+    }
+
+    /// Hybridquelle mit gültigen Massendaten für `noble`; `hourly_ok_h` = Alter des letzten erfolgreichen stündlichen Abrufs.
+    fn hybrid(
+        hourly_ok_h: Option<i64>,
+        bulk_fresh: bool,
+        failures: u32,
+    ) -> (FeedDb, DateTime<Utc>) {
+        let (mut f, now) = feed(Some(1), 0);
+        let mut b = crate::cve::Bulk {
+            complete: true,
+            relevant: vec!["noble".into()],
+            ..Default::default()
+        };
+        let until = if bulk_fresh {
+            now + Duration::hours(30)
+        } else {
+            now - Duration::minutes(1)
+        };
+        b.ok.insert("noble".into(), until);
+        b.incr.last_ok_at = hourly_ok_h.map(|h| now - Duration::hours(h));
+        b.incr.failures = failures;
+        f.bulk = Some(serde_json::to_value(b).unwrap());
+        (f, now)
+    }
+
+    #[test]
+    fn ubuntu_is_current_only_when_bulk_and_hourly_part_are_fresh() {
+        let max = Duration::hours(3);
+        // Beides erfüllt: Aktuell.
+        let (f, now) = hybrid(Some(0), true, 0);
+        assert_eq!(classify(&f, true, now, max).0, "ok");
+        // Stündlicher Teil nie erfolgreich: nicht aktuell (auch ohne gezählte Fehlläufe).
+        let (f, now) = hybrid(None, true, 0);
+        assert_eq!(classify(&f, true, now, max).0, "incomplete");
+        // Stündlicher Teil zu lange her.
+        let (f, now) = hybrid(Some(5), true, 0);
+        assert_eq!(classify(&f, true, now, max).0, "incomplete");
+        // Massendaten abgelaufen, obwohl der stündliche Teil frisch ist.
+        let (f, now) = hybrid(Some(0), false, 0);
+        assert_eq!(classify(&f, true, now, max).0, "incomplete");
+        // Dauerhafter Ausfall des stündlichen Abrufs.
+        let (f, now) = hybrid(Some(0), true, 3);
+        assert_eq!(classify(&f, true, now, max).0, "incomplete");
+        // Der Zustand hängt nur an den gespeicherten Zeitstempeln, nicht an einem laufenden Abruf: gleiche Eingabe, gleiches Ergebnis.
+        let (f, now) = hybrid(Some(0), true, 0);
+        assert_eq!(classify(&f, true, now, max), classify(&f, true, now, max));
     }
 
     #[test]

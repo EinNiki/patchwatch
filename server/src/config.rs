@@ -150,6 +150,9 @@ pub struct CveConfig {
     /// freigegeben (`PATCHWATCH_CVE_STALL_TIMEOUT_SECS`).
     pub stall_timeout_secs: u64,
     pub request_timeout_secs: u64,
+    /// Puffer auf `request_timeout_secs`: steht ein Lauf länger in "Verbinden", gilt er als hängend und endet mit
+    /// "Zeitüberschreitung beim Verbinden" (nur über die Konfigurationsdatei einstellbar).
+    pub connect_buffer_secs: u64,
     pub retries: u32,
     pub retry_base_delay_ms: u64,
 }
@@ -182,6 +185,7 @@ impl Default for CveConfig {
             ubuntu_page_pause_ms: 2000,
             stall_timeout_secs: 30 * 60,
             request_timeout_secs: 120,
+            connect_buffer_secs: 30,
             retries: 3,
             retry_base_delay_ms: 2000,
         }

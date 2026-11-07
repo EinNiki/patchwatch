@@ -277,7 +277,8 @@ async fn fetch_watched(
     ctx: &FetchCtx,
 ) -> Result<FetchOutcome, FeedError> {
     let stall = Duration::from_secs(state.cfg.cve.stall_timeout_secs);
-    let tick = (stall / 4).clamp(Duration::from_millis(100), Duration::from_secs(10));
+    // Höchstens 1 s Takt, damit auch das Verbinden-Zeitlimit zeitnah erkannt wird.
+    let tick = (stall / 4).clamp(Duration::from_millis(100), Duration::from_secs(1));
     ctx.progress.beat();
     let fetch = src.fetch(&state.http, feed_state, ctx);
     tokio::pin!(fetch);
@@ -285,6 +286,13 @@ async fn fetch_watched(
         tokio::select! {
             r = &mut fetch => return r,
             () = tokio::time::sleep(tick) => {
+                // Steht der Lauf zu lange in "Verbinden" (Anfrage-Timeout + Puffer), hängt er: nicht erst nach dem
+                // langen Fortschrittswächter, sondern sofort mit eigener Meldung beenden.
+                if let Some((phase, age)) = runs::current_phase_age() {
+                    if runs::connect_hung(phase, age, state.cfg.cve.request_timeout_secs, state.cfg.cve.connect_buffer_secs) {
+                        return Err(FeedError::ConnectTimeout);
+                    }
+                }
                 if ctx.progress.idle() > stall {
                     return Err(FeedError::Stalled(stall.as_secs().div_ceil(60)));
                 }
@@ -621,6 +629,8 @@ fn is_due(
 /// Hintergrund-Scheduler: prüft alle 30 s, welche Quellen nach ihrem eigenen Intervall fällig sind.
 /// Die Intervalle stehen in den Einstellungen und werden bei jedem Durchlauf neu gelesen (wirkt ohne Neustart).
 pub async fn run(state: AppState) {
+    // Nach einem Neustart/Absturz zeigt nichts mehr "läuft", was kein Prozess mehr ausführt.
+    runs::recover_on_start(&state.pool).await;
     if !state.cfg.cve.enabled {
         tracing::info!("CVE-Feeds sind deaktiviert");
         return;
