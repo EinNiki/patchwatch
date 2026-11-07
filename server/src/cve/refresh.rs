@@ -2,6 +2,7 @@
 //! und im UI sichtbar ("veraltet seit …"); ein Feed wird nie stillschweigend als gesund gewertet.
 
 use super::http::jitter;
+use super::runs;
 use super::{
     ingest, reeval, sources, CveSource, FeedError, FeedState, FetchCtx, FetchOutcome, Record,
 };
@@ -131,7 +132,7 @@ async fn gate_hosts(state: &AppState, kind: Option<&str>) {
     }
 }
 
-async fn record_failure(
+pub(crate) async fn record_failure(
     state: &AppState,
     name: &str,
     error: &str,
@@ -422,6 +423,8 @@ async fn store(
     new_state: FeedState,
     partial: Option<(Option<String>, Option<Duration>)>,
 ) -> Result<Outcome> {
+    runs::report_phase(runs::Phase::Store);
+    runs::report_items(records.len());
     let enrich = sources::enrich_only(kind);
     let records = if enrich {
         restrict_to_known(state, records).await?
@@ -511,7 +514,9 @@ async fn store(
         }
     }
     tx.commit().await?;
+    runs::report_phase(runs::Phase::Evaluate);
     let hosts = reeval::reevaluate_affected(state, &stats.changed_pairs).await?;
+    runs::report_hosts(hosts);
     // Ob die Quelle für die Bewertung nutzbar ist, kann sich geändert haben (Abbau fertig, Teilabruf, ...).
     gate_hosts(state, Some(kind)).await;
     tracing::info!(
@@ -559,6 +564,28 @@ pub async fn refresh_all(state: &AppState) -> Vec<(String, Outcome)> {
     out
 }
 
+/// Ruft genau eine Quelle ab (für das Laufprotokoll in `runs`): baut sie neu aus den Einstellungen, damit Änderungen
+/// (Adresse, Schlüssel, abgeschaltet) auch für Läufe gelten, die in der Warteschlange standen.
+pub async fn refresh_one(state: &AppState, id: &str) -> Outcome {
+    let Some(b) = sources::build_enabled(state)
+        .await
+        .into_iter()
+        .find(|b| b.id == id)
+    else {
+        return Outcome::Skipped;
+    };
+    match b.source {
+        Ok(src) => match refresh_source(state, &b.id, src.as_ref()).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::error!(source = %b.id, error = %e, "Feed-Verarbeitung fehlgeschlagen");
+                Outcome::Failed(e.to_string())
+            }
+        },
+        Err(e) => Outcome::Failed(fail_unbuildable(state, &b.id, &e).await),
+    }
+}
+
 /// Eine nicht baubare Quelle (z. B. Spiegel nicht mehr erlaubt, Schlüssel nicht entschlüsselbar) zählt als Fehlschlag.
 async fn fail_unbuildable(state: &AppState, name: &str, e: &anyhow::Error) -> String {
     let msg = format!("Quelle nicht nutzbar: {e}");
@@ -600,11 +627,13 @@ pub async fn run(state: AppState) {
     }
     tokio::time::sleep(Duration::from_secs(20) + jitter(10_000)).await;
     loop {
-        // Läuft nie parallel zu einem manuell ausgelösten Abruf.
-        if let Ok(_guard) = state.refresh_lock.try_lock() {
+        // Verwaiste Läufe (Prozess beendet) als unterbrochen markieren, damit nichts dauerhaft als "läuft" erscheint.
+        runs::sweep_stale(&state.pool).await;
+        {
+            // Jede fällige Quelle wird als eigener Lauf protokolliert; die Ausführungssperre in `runs::execute`
+            // sorgt dafür, dass nie zwei Quellen (und nie ein manueller Abruf parallel) gleichzeitig laufen.
             for b in sources::build_enabled(&state).await {
                 let name = b.id.clone();
-                let built = b.source;
                 let minutes = crate::schedule::feed_interval_minutes(
                     &state.pool,
                     &name,
@@ -626,14 +655,14 @@ pub async fn run(state: AppState) {
                 if !is_due(last, next, minutes, chrono::Utc::now()) {
                     continue;
                 }
-                match built {
-                    Ok(src) => {
-                        if let Err(e) = refresh_source(&state, &name, src.as_ref()).await {
-                            tracing::error!(source = name, error = %e, "Feed-Verarbeitung fehlgeschlagen");
-                        }
+                match runs::start(&state.pool, &name, runs::Trigger::Scheduled, None).await {
+                    Ok(runs::Start::Created(run)) => {
+                        runs::execute(&state, run, &name).await;
                     }
+                    // Läuft oder wartet schon (z. B. von Hand gestartet): nicht doppelt abrufen.
+                    Ok(runs::Start::Running(_)) => {}
                     Err(e) => {
-                        fail_unbuildable(&state, &name, &e).await;
+                        tracing::error!(source = name, error = %e, "Lauf konnte nicht angelegt werden")
                     }
                 }
             }

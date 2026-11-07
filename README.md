@@ -289,6 +289,31 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
 - Der Filter hängt am **Typ** der Quelle (`debian`, `ubuntu`), nicht an ihrer stabilen ID; abgeschaltete oder gelöschte Quellen
   behalten ihre Daten, die weiter angezeigt und gefiltert werden.
 
+### Abruf-Läufe der CVE-Quellen
+
+Jeder Abruf (Zeitplan, „Jetzt abrufen“ je Quelle, „Alle abrufen“) ist ein **Lauf** in der Tabelle `feed_runs`
+(Migration `0017`, nur additiv). Ein Lauf durchläuft die Phasen *Verbinden → Herunterladen → Auswerten → Speichern →
+Hosts prüfen → Fertig*; Dauer je Phase, Bytes, Einträge und Hosts werden mitgeschrieben, nie Antwortinhalte oder Schlüssel.
+Je Quelle bleiben die letzten 50 beendeten Läufe.
+
+| Endpunkt | Wirkung |
+| --- | --- |
+| `POST /api/v1/feeds/{id}/run` (`{confirm?}`) | `202 {run}`; `409 {code:"running", run_id}` hängt sich an den laufenden Lauf an; `428 {code:"backoff"}` verlangt Bestätigung (`confirm:true`); `429 {code:"too_soon"\|"backoff_limited", retry_after}` |
+| `POST /api/v1/feeds/refresh` | alle aktiven Quellen nacheinander: `202 {runs, running, skipped}` oder `409` |
+| `GET /api/v1/feeds/runs?active=true` | laufende und vor <30 s beendete Läufe; mit `?source=&limit=` der Verlauf |
+
+Regeln: mindestens **60 s** zwischen zwei Abrufen derselben Quelle; in der Wartezeit nach Fehlern (Backoff) braucht ein
+manueller Abruf eine Bestätigung und ist auf **einen Versuch je 5 Minuten** begrenzt. Pro Quelle läuft höchstens ein Lauf
+(eindeutiger Teilindex); die Läufe mehrerer Quellen laufen nacheinander.
+Fortschritt kommt als Live-Ereignis `feed_run` (höchstens 2 je Sekunde), die Oberfläche fragt zusätzlich alle 3 s nach,
+solange ein Lauf aktiv ist.
+
+**Ursache von „Ein Abruf läuft bereits“:** Der alte Abruf hielt eine globale Sperre für *alle* Quellen, solange irgendeine
+Quelle lud, speicherte oder Hosts bewertete. Nur das Laden hatte einen Fortschrittswächter; Speichern und Bewerten hatten
+keine Obergrenze, und der Knopf lieferte in dieser Zeit nur den 409-Fehler ohne Hinweis, was läuft. Jetzt gilt: Herzschlag
+je Lauf, eine harte Obergrenze (4 × `CVE_STALL_TIMEOUT_SECS`), beim Start werden verwaiste Läufe als „unterbrochen“
+markiert (`sweep_stale`), und ein zweiter Klick zeigt den laufenden Lauf an, statt einen Fehler.
+
 ### Grenzen der CVE-Bewertung
 
 - **Proxmox-Kernel (`-pve`) haben keine belastbare CVE-Quelle.** Sie werden immer als **UNKNOWN** bewertet („manuell

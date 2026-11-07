@@ -3520,6 +3520,19 @@ async fn hung_run_is_released_by_the_watchdog(pool: PgPool) {
         .unwrap()
         .contains("hing und wurde abgebrochen"));
     assert_eq!(f["failed_runs"], 1);
+    // Ein Fehlschlag behält die Phase, in der er auftrat (nicht "done").
+    let phase: Option<String> = sqlx::query_scalar(
+        "SELECT phase FROM feed_runs WHERE status = 'failed' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    if let Some(p) = phase {
+        assert_ne!(
+            p, "done",
+            "fehlgeschlagener Lauf darf nicht als abgeschlossen gelten"
+        );
+    }
     // Sperre freigegeben: der nächste Lauf läuft und schließt ab.
     mock.lock().unwrap().ubuntu_hang = false;
     let out = refresh::refresh_all(&st).await;
@@ -5999,4 +6012,312 @@ async fn cve_updated_shows_source_date_never_import_time(pool: PgPool) {
     .await;
     assert_eq!(d.json["last_change_at"], Value::Null);
     assert!(d.json["last_synced_at"].is_string());
+}
+
+// ---------- Abruf-Läufe (feed_runs) ----------
+
+async fn post_json(app: &Router, h: &[(String, String)], uri: &str, body: Option<Value>) -> Resp {
+    call(
+        app,
+        Method::POST,
+        uri,
+        &hdr(h),
+        Some(body.unwrap_or_else(|| json!({}))),
+    )
+    .await
+}
+
+/// Wartet, bis der Lauf beendet ist (höchstens `secs` Sekunden), und liefert seinen Status.
+async fn wait_run(pool: &PgPool, id: i64, secs: u64) -> String {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        let s: String = sqlx::query_scalar("SELECT status FROM feed_runs WHERE id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        if s != "queued" && s != "running" {
+            return s;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "Lauf {id} endet nicht (Status {s})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// Ein manueller Abruf legt einen Lauf an, durchläuft die Phasen und endet mit Ergebnis und Zählern.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_manual_fetch_is_logged_with_phases_and_result(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 5, Utc::now());
+    let st = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let r = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.json);
+    let id = r.json["run"]["id"].as_i64().unwrap();
+    assert_eq!(wait_run(&pool, id, 30).await, "ok");
+    let row = call(
+        &app,
+        Method::GET,
+        "/api/v1/feeds/runs?source=ubuntu",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    let run = &row.json["runs"][0];
+    assert_eq!(run["id"], id);
+    assert_eq!(run["trigger"], "manual");
+    assert_eq!(run["started_by"], "admin");
+    assert_eq!(run["phase"], "done");
+    assert!(
+        run["bytes"].as_i64().unwrap() > 0,
+        "geladene Bytes werden gezählt: {run}"
+    );
+    assert!(
+        run["items"].as_i64().unwrap() > 0,
+        "Einträge werden gezählt: {run}"
+    );
+    assert!(run["finished_at"].is_string() && run["error"].is_null());
+    for p in ["connect", "download", "store", "done"] {
+        assert!(
+            run["phases"].get(p).is_some(),
+            "Phase {p} fehlt: {}",
+            run["phases"]
+        );
+    }
+}
+
+/// Ein zweiter Start hängt sich an den laufenden an (409 mit dessen Nummer), statt "läuft bereits" ohne Bezug zu melden.
+/// Zugleich: ein hängender Abruf wird vom Wächter beendet und gibt die Quelle frei; danach gilt der Mindestabstand.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_second_start_attaches_and_hung_run_is_ended(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_cfg(pool.clone(), &base, 1, 120, 2, 0).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    {
+        let mut m = mock.lock().unwrap();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_hang = true;
+    }
+    let first = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(first.status, StatusCode::ACCEPTED);
+    let id = first.json["run"]["id"].as_i64().unwrap();
+    let again = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(again.status, StatusCode::CONFLICT);
+    assert_eq!(again.json["code"], "running");
+    assert_eq!(
+        again.json["run_id"], id,
+        "der Aufrufer bekommt den laufenden Lauf"
+    );
+    let all = post_json(&app, &h, "/api/v1/feeds/refresh", None).await;
+    assert_eq!(
+        all.status,
+        StatusCode::CONFLICT,
+        "alle Quellen laufen schon: {}",
+        all.json
+    );
+    let active = call(
+        &app,
+        Method::GET,
+        "/api/v1/feeds/runs?active=true",
+        &hdr(&h),
+        None,
+    )
+    .await;
+    assert!(active.json["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["id"] == id));
+    // Der Wächter beendet den hängenden Abruf; der Lauf endet als Fehler mit Text, die Quelle ist frei.
+    assert_eq!(wait_run(&pool, id, 30).await, "failed");
+    let err: String = sqlx::query_scalar("SELECT error FROM feed_runs WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(err.contains("ohne Fortschritt"), "{err}");
+    assert!(
+        !err.contains("http://"),
+        "keine Adressen in der Meldung: {err}"
+    );
+    // Mindestabstand von 60 s zwischen zwei Abrufen derselben Quelle.
+    let soon = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(soon.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(soon.json["code"], "too_soon");
+    assert!(soon.json["retry_after"].as_u64().unwrap() <= 60);
+}
+
+/// Im Backoff braucht der Abruf eine Bestätigung, und von Hand ist dann nur ein Versuch je 5 Minuten erlaubt.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_in_backoff_needs_confirmation_and_is_limited_to_one_per_five_minutes(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 5, Utc::now());
+    let st = setup(pool.clone(), &["ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    // Zustand "im Backoff": Fehllauf, nächster Versuch in 10 Minuten; letzter Lauf vor 2 Minuten (Mindestabstand eingehalten).
+    sqlx::query("INSERT INTO feed_state (source, consecutive_failures, next_attempt_at, last_error) VALUES ('ubuntu', 3, now() + interval '10 minutes', 'x') ON CONFLICT (source) DO UPDATE SET consecutive_failures = 3, next_attempt_at = now() + interval '10 minutes'")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO feed_runs (source, trigger, status, created_at, finished_at) VALUES ('ubuntu', 'scheduled', 'failed', now() - interval '2 minutes', now() - interval '2 minutes')")
+        .execute(&pool).await.unwrap();
+    let no = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(no.status, StatusCode::PRECONDITION_REQUIRED, "{}", no.json);
+    assert_eq!(no.json["code"], "backoff");
+    assert_eq!(no.json["failures"], 3);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM feed_runs WHERE trigger = 'manual'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0,
+        "ohne Bestätigung entsteht kein Lauf"
+    );
+    // Eine kürzlich von Hand gestartete Abfrage (vor 90 s) sperrt weitere im Backoff für 5 Minuten.
+    sqlx::query("INSERT INTO feed_runs (source, trigger, status, created_at, finished_at) VALUES ('ubuntu', 'manual', 'failed', now() - interval '90 seconds', now() - interval '80 seconds')")
+        .execute(&pool).await.unwrap();
+    let limited = post_json(
+        &app,
+        &h,
+        "/api/v1/feeds/ubuntu/run",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(
+        limited.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "{}",
+        limited.json
+    );
+    assert_eq!(limited.json["code"], "backoff_limited");
+    assert!(limited.json["retry_after"].as_u64().unwrap() > 150);
+    // Älter als 5 Minuten: mit Bestätigung erlaubt.
+    sqlx::query(
+        "UPDATE feed_runs SET created_at = now() - interval '6 minutes' WHERE trigger = 'manual'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let go = post_json(
+        &app,
+        &h,
+        "/api/v1/feeds/ubuntu/run",
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    assert_eq!(go.status, StatusCode::ACCEPTED, "{}", go.json);
+    wait_run(&pool, go.json["run"]["id"].as_i64().unwrap(), 30).await;
+    // "Alle abrufen" überspringt Quellen im Backoff und nennt den Grund.
+    sqlx::query("UPDATE feed_state SET consecutive_failures = 2, next_attempt_at = now() + interval '5 minutes' WHERE source = 'ubuntu'").execute(&pool).await.unwrap();
+    sqlx::query("UPDATE feed_runs SET created_at = now() - interval '10 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let all = post_json(&app, &h, "/api/v1/feeds/refresh", None).await;
+    assert_eq!(all.status, StatusCode::ACCEPTED, "{}", all.json);
+    assert_eq!(all.json["skipped"][0]["source"], "ubuntu");
+    assert_eq!(all.json["skipped"][0]["reason"], "backoff");
+}
+
+/// Aufbewahrung: je Quelle bleiben 50 beendete Läufe; Läufe ohne Lebenszeichen gelten als unterbrochen.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_history_is_pruned_and_orphaned_runs_are_marked_interrupted(pool: PgPool) {
+    use patchwatch_server::cve::runs;
+    for i in 0..55 {
+        sqlx::query("INSERT INTO feed_runs (source, trigger, status, finished_at, bytes) VALUES ('ubuntu', 'scheduled', 'ok', now(), $1)")
+            .bind(i as i64).execute(&pool).await.unwrap();
+    }
+    sqlx::query("INSERT INTO feed_runs (source, trigger, status, finished_at) VALUES ('debian', 'scheduled', 'ok', now())").execute(&pool).await.unwrap();
+    runs::prune(&pool, "ubuntu").await;
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM feed_runs WHERE source = 'ubuntu'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 50);
+    let oldest: i64 =
+        sqlx::query_scalar("SELECT min(bytes) FROM feed_runs WHERE source = 'ubuntu'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(oldest, 5, "die ältesten fallen weg");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM feed_runs WHERE source = 'debian'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1,
+        "andere Quellen bleiben unberührt"
+    );
+    sqlx::query("INSERT INTO feed_runs (source, trigger, status, heartbeat_at) VALUES ('osv', 'scheduled', 'running', now() - interval '10 minutes')").execute(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO feed_runs (source, trigger, status) VALUES ('nvd', 'scheduled', 'running')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    runs::sweep_stale(&pool).await;
+    let st = |s: &'static str| {
+        sqlx::query_scalar::<_, String>("SELECT status FROM feed_runs WHERE source = $1").bind(s)
+    };
+    assert_eq!(st("osv").fetch_one(&pool).await.unwrap(), "interrupted");
+    assert_eq!(
+        st("nvd").fetch_one(&pool).await.unwrap(),
+        "running",
+        "frische Läufe bleiben"
+    );
+    let fin: bool =
+        sqlx::query_scalar("SELECT finished_at IS NOT NULL FROM feed_runs WHERE source = 'osv'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(fin);
+    // Je Quelle höchstens ein offener Lauf (eindeutiger Teilindex).
+    let dup = sqlx::query(
+        "INSERT INTO feed_runs (source, trigger, status) VALUES ('nvd', 'manual', 'queued')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(
+        dup.is_err(),
+        "zweiter offener Lauf derselben Quelle muss scheitern"
+    );
+}
+
+/// "Alle abrufen": ein Lauf je eingeschalteter Quelle, nacheinander ausgeführt; Fortschritt steht in der Laufliste.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_all_creates_one_run_per_source_and_runs_them_in_sequence(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 3, Utc::now());
+    let st = setup(pool.clone(), &["ubuntu", "debian"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let r = post_json(&app, &h, "/api/v1/feeds/refresh", None).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.json);
+    let runs = r.json["runs"].as_array().unwrap();
+    assert!(runs.len() >= 2, "{}", r.json);
+    for run in runs {
+        wait_run(&pool, run["run_id"].as_i64().unwrap(), 60).await;
+    }
+    let order: Vec<(i64, chrono::DateTime<Utc>)> =
+        sqlx::query_as("SELECT id, started_at FROM feed_runs ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for w in order.windows(2) {
+        let finished: chrono::DateTime<Utc> =
+            sqlx::query_scalar("SELECT finished_at FROM feed_runs WHERE id = $1")
+                .bind(w[0].0)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(w[1].1 >= finished, "Läufe überlappen nicht: {w:?}");
+    }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
@@ -14,6 +14,9 @@ import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { writeFailure } from "@/lib/apiErrors";
 import { toast } from "@/lib/toastStore";
+import { useFeedRuns } from "@/lib/useFeedRuns";
+import { isActive, isFailure, latestBySource, summary, type FeedRun } from "@/lib/feedRuns";
+import { MiniStepper, RunStepper } from "@/components/RunStepper";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Mono } from "@/components/Version";
 
@@ -100,15 +103,126 @@ export function FeedSources() {
   const [removing, setRemoving] = useState<Feed | null>(null);
   const deleting = useRef(false);
 
-  async function refresh() {
+  const runs = useFeedRuns();
+  const latest = latestBySource(runs.runs);
+  // Läufe, die in dieser Ansicht aktiv gesehen wurden (nur für diese gibt es Zusammenfassung und Einklappen).
+  const [seen, setSeen] = useState<ReadonlySet<number>>(new Set());
+  // Eingeklappt (Erfolg nach 5 s oder per Hand) bzw. von Hand aufgeklappt.
+  const [closed, setClosed] = useState<ReadonlySet<number>>(new Set());
+  const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
+  const [backoff, setBackoff] = useState<{ feed: Feed; failures: number; next: string | null } | null>(null);
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
+  const [allBusy, setAllBusy] = useState(false);
+  const done = useRef(new Set<number>());
+  const labels = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const f of feeds.data ?? []) labels.current.set(f.source, f.label);
+  }, [feeds.data]);
+  const reloadFeeds = feeds.reload;
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const newlySeen: number[] = [];
+    let finished = false;
+    for (const r of runs.runs) {
+      if (isActive(r)) {
+        if (!seen.has(r.id)) newlySeen.push(r.id);
+        continue;
+      }
+      if (!seen.has(r.id) || done.current.has(r.id)) continue;
+      done.current.add(r.id);
+      finished = true;
+      const name = labels.current.get(r.source) ?? r.source;
+      if (r.status === "ok" || r.status === "not_modified") {
+        toast.success(summary(name, r));
+        timers.push(setTimeout(() => setClosed((c) => new Set(c).add(r.id)), 5000));
+      } else if (r.status === "incomplete") {
+        toast.warning(`${name}: nur teilweise abgerufen.`);
+      } else if (isFailure(r)) {
+        toast.error(`${name}: Abruf fehlgeschlagen${r.error ? `: ${r.error}` : "."}`);
+      }
+    }
+    // Asynchron gesetzt (kein setState direkt im Effekt).
+    if (newlySeen.length) timers.push(setTimeout(() => setSeen((s) => new Set([...s, ...newlySeen])), 0));
+    if (finished) void reloadFeeds();
+    // Nur der 0-ms-Timer wird aufgeräumt; die 5-s-Timer laufen weiter, auch wenn sich die Läufe ändern.
+    return undefined;
+  }, [runs.runs, seen, reloadFeeds]);
+
+  /** Sichtbar: aktiv, Fehlschlag bis zum Schließen, Erfolg bis 5 s nach Ende; per Hand umschaltbar. */
+  function expanded(r: FeedRun | undefined): boolean {
+    if (!r) return false;
+    if (opened.has(r.id)) return !closed.has(r.id);
+    if (isActive(r)) return true;
+    if (closed.has(r.id)) return false;
+    return isFailure(r) || r.status === "incomplete" || seen.has(r.id);
+  }
+  function toggleRun(r: FeedRun) {
+    if (expanded(r)) setClosed((c) => new Set(c).add(r.id));
+    else {
+      setClosed((c) => {
+        const n = new Set(c);
+        n.delete(r.id);
+        return n;
+      });
+      setOpened((o) => new Set(o).add(r.id));
+    }
+  }
+
+  async function runOne(f: Feed, confirm = false) {
+    if (starting.has(f.source)) return;
+    setStarting((s) => new Set(s).add(f.source));
     try {
-      await api.post("/feeds/refresh", undefined, { silent: true });
-      toast.info("Abruf gestartet. Die Anzeige aktualisiert sich in einigen Sekunden.");
-      setTimeout(() => void feeds.reload(), 5000);
-      setTimeout(() => void feeds.reload(), 20_000);
+      const r = await api.post<{ run: FeedRun }>(`/feeds/${f.source}/run`, confirm ? { confirm: true } : undefined, { silent: true });
+      // Gleich als gesehen markieren: auch ein sehr schneller Lauf zeigt dann Zusammenfassung.
+      if (r?.run) setSeen((s) => new Set(s).add(r.run.id));
+      await runs.reload();
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) toast.info("Ein Abruf läuft bereits.");
-      else if (e instanceof ApiError) toast.error(writeFailure("Abruf konnte nicht gestartet werden", e.status, e.message, e.retryAfter));
+      if (!(e instanceof ApiError)) return;
+      const code = typeof e.data?.code === "string" ? e.data.code : "";
+      if (e.status === 409 && code === "running") {
+        // Es läuft schon einer: an ihn anhängen statt Fehler zu zeigen.
+        const id = typeof e.data?.run_id === "number" ? e.data.run_id : null;
+        if (id !== null) setSeen((s) => new Set(s).add(id));
+        toast.info(`${f.label}: Ein Abruf läuft bereits. Der Fortschritt wird angezeigt.`);
+        await runs.reload();
+      } else if (e.status === 428 && code === "backoff") {
+        setBackoff({ feed: f, failures: Number(e.data?.failures ?? 0), next: typeof e.data?.next_attempt_at === "string" ? e.data.next_attempt_at : null });
+      } else if (e.status === 429) {
+        toast.warning(e.retryAfter ? `${f.label}: ${e.message} Nächster Versuch in ${e.retryAfter} s möglich.` : `${f.label}: ${e.message}`);
+      } else {
+        toast.error(writeFailure(`${f.label}: Abruf konnte nicht gestartet werden`, e.status, e.message, e.retryAfter));
+      }
+    } finally {
+      setStarting((s) => {
+        const n = new Set(s);
+        n.delete(f.source);
+        return n;
+      });
+    }
+  }
+
+  async function refreshAll() {
+    if (allBusy) return;
+    setAllBusy(true);
+    try {
+      const r = await api.post<{ runs?: { run_id: number }[]; running?: { run_id: number }[]; skipped?: { source: string }[] }>("/feeds/refresh", undefined, { silent: true });
+      const ids = [...(r?.runs ?? []), ...(r?.running ?? [])].map((x) => x.run_id);
+      setSeen((s) => new Set([...s, ...ids]));
+      const n = r?.runs?.length ?? 0;
+      if (n > 0) toast.info(`${n} ${n === 1 ? "Quelle wird" : "Quellen werden"} nacheinander abgerufen.`);
+      if ((r?.running?.length ?? 0) > 0) toast.info("Ein Teil der Abrufe läuft bereits; der Fortschritt wird angezeigt.");
+      const sk = r?.skipped?.length ?? 0;
+      if (sk > 0) toast.warning(`${sk} ${sk === 1 ? "Quelle wurde" : "Quellen wurden"} übersprungen (zu kurz nach dem letzten Abruf oder im Wartezustand nach Fehlern).`);
+      await runs.reload();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        const ids = Array.isArray(e.data?.running) ? (e.data.running as { run_id?: number }[]).map((x) => x.run_id).filter((x): x is number => typeof x === "number") : [];
+        setSeen((s) => new Set([...s, ...ids]));
+        toast.info("Ein Abruf läuft bereits. Der Fortschritt wird angezeigt.");
+        await runs.reload();
+      } else if (e instanceof ApiError) toast.error(writeFailure("Abruf konnte nicht gestartet werden", e.status, e.message, e.retryAfter));
+    } finally {
+      setAllBusy(false);
     }
   }
 
@@ -144,8 +258,8 @@ export function FeedSources() {
         <h2 id="feeds-h" className="mr-1 text-lg font-semibold">
           CVE-Quellen
         </h2>
-        <Button className={BTN} onClick={() => void refresh()}>
-          Jetzt abrufen
+        <Button className={BTN} onClick={() => void refreshAll()} busy={allBusy} disabled={runs.runs.some(isActive)}>
+          Alle abrufen
         </Button>
         <Button className={BTN} variant="primary" onClick={() => setAdding(true)} >
           <NavIcon name="plus" />
@@ -156,7 +270,7 @@ export function FeedSources() {
       {!feeds.data ? null : feeds.data.length === 0 ? (
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>
       ) : (
-        <div className="max-xl:overflow-x-auto">
+        <div className="max-lg:overflow-x-auto">
           <table className="tbl stack">
             <caption>Zustand der CVE-Quellen</caption>
             <thead>
@@ -171,7 +285,8 @@ export function FeedSources() {
             </thead>
             <tbody>
               {feeds.data.map((f) => (
-                <tr key={f.source}>
+                <Fragment key={f.source}>
+                <tr>
                   <td className="cell-primary">
                     <span className="font-semibold">{f.label}</span>
                     <div className="text-xs text-fg3">
@@ -184,6 +299,7 @@ export function FeedSources() {
                   </td>
                   <td className="cell-status lead">
                     <StatusBadge info={FEED_STATE[f.state]} label={(f.state === "stale" || f.state === "incomplete") && f.stale_since ? `${f.state === "stale" ? "Veraltet" : "Unvollständig"} seit ${absTime(f.stale_since)}` : undefined} />
+                    {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}
                   </td>
                   <td data-label="Letzter Erfolg">
                     <RelTime iso={f.last_success_at} />
@@ -207,6 +323,9 @@ export function FeedSources() {
                   </td>
                   <td>
                     <div className="flex flex-wrap gap-2">
+                      <Button className={BTN} onClick={() => void runOne(f)} busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })} disabled={!f.enabled} aria-label={`${f.label} jetzt abrufen`}>
+                        Jetzt abrufen
+                      </Button>
                       <Button className={BTN} onClick={() => void toggle(f)} aria-label={`${f.label} ${f.enabled ? "abschalten" : "einschalten"}`}>
                         {f.enabled ? "Abschalten" : "Einschalten"}
                       </Button>
@@ -219,6 +338,14 @@ export function FeedSources() {
                     </div>
                   </td>
                 </tr>
+                {expanded(latest.get(f.source)) ? (
+                  <tr className="run-row">
+                    <td colSpan={6}>
+                      <RunStepper run={latest.get(f.source)!} label={f.label} onRetry={() => void runOne(f)} onClose={() => toggleRun(latest.get(f.source)!)} />
+                    </td>
+                  </tr>
+                ) : null}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -230,6 +357,19 @@ export function FeedSources() {
 
       <AddDialog open={adding} onClose={() => setAdding(false)} onDone={() => { setAdding(false); void feeds.reload(); }} />
       <EditDialog feed={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); void feeds.reload(); }} />
+      <ConfirmDialog
+        open={backoff !== null}
+        title={`${backoff?.feed.label ?? "Quelle"} trotzdem abrufen?`}
+        confirmLabel="Trotzdem abrufen"
+        onConfirm={() => {
+          const b = backoff;
+          setBackoff(null);
+          if (b) void runOne(b.feed, true);
+        }}
+        onCancel={() => setBackoff(null)}
+      >
+        Die Quelle ist nach {backoff?.failures ?? 0} Fehlversuchen in Wartezeit{backoff?.next ? ` (nächster automatischer Versuch ${absTime(backoff.next)})` : ""}. Ein zusätzlicher Abruf belastet den Server der Quelle und kann das Limit verlängern. Von Hand ist nur ein Versuch alle 5 Minuten erlaubt.
+      </ConfirmDialog>
       <ConfirmDialog open={removing !== null} danger title={`Quelle „${removing?.label ?? ""}“ löschen?`} confirmLabel="Löschen" onConfirm={() => void remove()} onCancel={() => setRemoving(null)}>
         Hosts, die auf diese Quelle angewiesen sind, werden auf „unbekannt“ gesetzt. Die gespeicherten Daten der Quelle zählen nicht mehr und werden nach 30 Tagen gelöscht. Du kannst die Quelle jederzeit wieder hinzufügen.
       </ConfirmDialog>

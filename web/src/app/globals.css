@@ -592,3 +592,22 @@ summary {
 main:has([data-outside="yes"]) .chip-legend {
   display: flex;
 }
+
+/* Abruf-Stepper: drehender Ring und pulsierendes Segment; bei prefers-reduced-motion stehen beide still. */
+.run-spin {
+  animation: run-spin 0.9s linear infinite;
+}
+.run-pulse {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+@keyframes run-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-spin,
+  .run-pulse {
+    animation: none;
+  }
+}

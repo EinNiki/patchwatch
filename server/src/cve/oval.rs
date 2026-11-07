@@ -311,6 +311,7 @@ async fn import_inner(
     if let Some(m) = &prev.last_modified {
         req = req.header(reqwest::header::IF_MODIFIED_SINCE, m);
     }
+    super::runs::report_phase(super::runs::Phase::Connect);
     let mut resp = req
         .send()
         .await
@@ -348,6 +349,7 @@ async fn import_inner(
         header(reqwest::header::LAST_MODIFIED),
     );
 
+    super::runs::report_phase(super::runs::Phase::Download);
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<Vec<u8>>>(8);
     let (rel, max_xml) = (release.to_owned(), p.max_xml_bytes);
     let parser = tokio::task::spawn_blocking(move || {
@@ -369,6 +371,7 @@ async fn import_inner(
                     break;
                 }
                 beat.beat();
+                super::runs::report_bytes(chunk.len() as u64);
                 if tx.send(Ok(chunk.to_vec())).await.is_err() {
                     break; // der Parser hat schon aufgehört (Fehler); sein Ergebnis folgt unten
                 }
@@ -387,6 +390,8 @@ async fn import_inner(
         }
     }
     drop(tx);
+    // Der Download ist durch; der Parser liest noch den Rest der Warteschlange.
+    super::runs::report_phase(super::runs::Phase::Parse);
     let parsed = parser
         .await
         .map_err(|e| FeedError::Format(format!("Auswertung abgebrochen: {e}")))?;

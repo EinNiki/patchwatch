@@ -63,6 +63,8 @@ fn retryable(e: &FeedError) -> bool {
 }
 
 async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
+    use crate::cve::runs::{report_bytes, report_phase, Phase};
+    report_phase(Phase::Connect);
     let mut resp = req
         .timeout(lim.timeout)
         .send()
@@ -95,6 +97,7 @@ async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
         return Err(FeedError::TooLarge(lim.max_bytes));
     }
     let headers = resp.headers().clone();
+    report_phase(Phase::Download);
     let mut body = Vec::new();
     // Chunkweise lesen und hart begrenzen (auch nach dem Entpacken von gzip).
     while let Some(chunk) = resp
@@ -105,8 +108,11 @@ async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
         if body.len() as u64 + chunk.len() as u64 > lim.max_bytes {
             return Err(FeedError::TooLarge(lim.max_bytes));
         }
+        report_bytes(chunk.len() as u64);
         body.extend_from_slice(&chunk);
     }
+    // Ab hier wird ausgewertet, bis der Adapter seine Records liefert.
+    report_phase(Phase::Parse);
     Ok(Fetched {
         status: status.as_u16(),
         headers,

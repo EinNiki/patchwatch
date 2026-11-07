@@ -169,6 +169,16 @@ und ein kleiner Hook genügen (Messung: First-Load-JS +0,4 KB gegenüber +30–4
 - **Live-Anzeige:** Punkt-Icon + Text „Live“ (verbunden) / „Getrennt, verbinde neu …“; Änderungen aktualisieren die Zeile ohne Sprung
   (`aria-live="polite"` nur für Zusammenfassungen, nicht für jede Zeile).
 
+## Abruf-Stepper (CVE-Quellen)
+
+- Sechs Schritte (Verbinden, Herunterladen, Auswerten, Speichern, Hosts prüfen, Fertig) als `<ol>` in einer Gruppe
+  „Abruf <Quelle>“; Zustand je Schritt zusätzlich als `sr-only`-Text, der aktuelle Schritt trägt `aria-current="step"`.
+- Symbole sind eigene SVGs (`currentColor`): Haken, Kreuz, gestrichelter Kreis (übersprungen), drehender Ring (aktiv),
+  leerer Kreis (offen). Farbe ist nie der einzige Hinweis. Bei `prefers-reduced-motion` stehen Ring und Puls still.
+- Mini-Stepper in der Tabellenzeile: sechs Segmente plus aktueller Schritt als Text; die Schaltfläche klappt die Details auf.
+- Erfolg: Zusammenfassung als Toast, Details klappen nach 5 s ein. Fehlschlag: Details bleiben mit Meldung und
+  „Erneut versuchen“, bis sie geschlossen werden.
+
 ## Barrierefreiheit
 
 - Text ≥ 4,5:1 (Tabellen oben), UI-Ränder/Icons ≥ 3:1, Fokusring auf allem Fokussierbaren.

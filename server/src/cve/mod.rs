@@ -10,6 +10,7 @@ pub mod osv;
 pub mod oval;
 pub mod reeval;
 pub mod refresh;
+pub mod runs;
 pub mod sources;
 pub mod ubuntu;
 

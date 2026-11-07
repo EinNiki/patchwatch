@@ -1,9 +1,11 @@
+use crate::cve::runs::{self, Gate, Start, Trigger};
 use crate::cve::{refresh, sources};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{Admin, CsrfAdmin};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -719,42 +721,262 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize, Default)]
+pub struct RunBody {
+    /// Bestätigt einen Abruf trotz Backoff (die Quelle ist fehlerhaft, der nächste Versuch noch nicht fällig).
+    confirm: Option<bool>,
+}
+
+fn run_json(r: &runs::RunRow) -> Value {
+    serde_json::to_value(r).unwrap_or(Value::Null)
+}
+
+/// Antwort mit Statuscode, Fehlertext, maschinenlesbarem `code` und optionalen Zusatzfeldern.
+fn refusal(
+    status: StatusCode,
+    message: &str,
+    code: &str,
+    extra: Value,
+    retry_after: Option<u64>,
+) -> Response {
+    let mut body = json!({ "error": message, "code": code });
+    if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {
+        b.extend(e.clone());
+    }
+    let mut resp = (status, Json(body)).into_response();
+    if let Some(s) = retry_after {
+        if let Ok(v) = s.to_string().parse() {
+            resp.headers_mut().insert(header::RETRY_AFTER, v);
+        }
+    }
+    resp
+}
+
+/// Ob die Quelle von Hand abgerufen werden darf. `Ok(None)` = ja; sonst die fertige Ablehnung.
+async fn manual_gate(st: &AppState, source: &str, confirm: bool) -> ApiResult<Option<Response>> {
+    Ok(match runs::gate(&st.pool, source, confirm, Utc::now()).await? {
+        Gate::Allowed => None,
+        Gate::TooSoon(wait) => Some(refusal(
+            StatusCode::TOO_MANY_REQUESTS,
+            &format!("Diese Quelle wurde gerade erst abgerufen. Erneut möglich in {wait} Sek."),
+            "too_soon",
+            json!({ "retry_after": wait }),
+            Some(wait),
+        )),
+        Gate::NeedsConfirm { next_attempt_at, failures } => Some(refusal(
+            StatusCode::PRECONDITION_REQUIRED,
+            "Die Quelle ist im Backoff (letzte Abrufe schlugen fehl). Ein Abruf jetzt belastet die Gegenseite zusätzlich; bitte bestätigen.",
+            "backoff",
+            json!({ "next_attempt_at": next_attempt_at, "failures": failures }),
+            None,
+        )),
+        Gate::BackoffLimited(wait) => Some(refusal(
+            StatusCode::TOO_MANY_REQUESTS,
+            &format!("Im Backoff ist ein manueller Abruf nur alle 5 Minuten erlaubt. Erneut möglich in {wait} Sek."),
+            "backoff_limited",
+            json!({ "retry_after": wait }),
+            Some(wait),
+        )),
+    })
+}
+
+fn already_running(run_id: i64) -> Response {
+    refusal(
+        StatusCode::CONFLICT,
+        "Ein Abruf dieser Quelle läuft bereits",
+        "running",
+        json!({ "run_id": run_id }),
+        None,
+    )
+}
+
+/// Eine Quelle sofort abrufen. 202 mit dem Lauf; läuft schon einer, 409 mit dessen Nummer (der Client hängt sich daran an).
+pub async fn run_source(
+    CsrfAdmin(admin): CsrfAdmin,
+    State(st): State<AppState>,
+    Path(name): Path<String>,
+    body: Option<Json<RunBody>>,
+) -> ApiResult<Response> {
+    let confirm = body.and_then(|b| b.0.confirm).unwrap_or(false);
+    sources::ensure_seeded(&st).await?;
+    let known: Option<bool> =
+        sqlx::query_scalar("SELECT enabled FROM cve_sources WHERE id = $1 AND deleted_at IS NULL")
+            .bind(&name)
+            .fetch_optional(&st.pool)
+            .await?;
+    match known {
+        None => return Err(ApiError::NotFound),
+        Some(false) => return Err(ApiError::BadRequest("Die Quelle ist abgeschaltet".into())),
+        Some(true) => {}
+    }
+    // Läuft schon einer, hängt sich der Aufrufer an ihn an (vor den Mindestabstands-Regeln).
+    if let Some(id) = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM feed_runs WHERE source = $1 AND status IN ('queued', 'running') ORDER BY id DESC LIMIT 1",
+    )
+    .bind(&name)
+    .fetch_optional(&st.pool)
+    .await?
+    {
+        return Ok(already_running(id));
+    }
+    if let Some(refused) = manual_gate(&st, &name, confirm).await? {
+        return Ok(refused);
+    }
+    match runs::start(&st.pool, &name, Trigger::Manual, Some(&admin.username)).await? {
+        Start::Running(id) => Ok(already_running(id)),
+        Start::Created(id) => {
+            let row = runs::get(&st.pool, id).await?;
+            let st2 = st.clone();
+            tokio::spawn(async move {
+                runs::execute(&st2, id, &name).await;
+            });
+            Ok((
+                StatusCode::ACCEPTED,
+                Json(json!({ "run": row.as_ref().map(run_json) })),
+            )
+                .into_response())
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RunsQuery {
+    /// Offene Läufe plus die in den letzten 30 Sekunden beendeten (damit der Client das Ende auch nach einer Lücke sieht).
+    active: Option<bool>,
+    source: Option<String>,
+    limit: Option<i64>,
+}
+
+/// Läufe auflisten: `?active=true` für die Anzeige im Fortschritt, sonst der Verlauf (neueste zuerst, höchstens 50).
+pub async fn runs_list(
+    _: Admin,
+    State(st): State<AppState>,
+    Query(q): Query<RunsQuery>,
+) -> ApiResult<Json<Value>> {
+    let limit = q
+        .limit
+        .unwrap_or(runs::KEEP_PER_SOURCE)
+        .clamp(1, runs::KEEP_PER_SOURCE);
+    let rows: Vec<runs::RunRow> = if q.active.unwrap_or(false) {
+        sqlx::query_as(&format!(
+            "SELECT {} FROM feed_runs WHERE status IN ('queued', 'running') OR finished_at > now() - interval '30 seconds' ORDER BY id DESC",
+            runs::RUN_COLS
+        ))
+        .fetch_all(&st.pool)
+        .await?
+    } else {
+        sqlx::query_as(&format!(
+            "SELECT {} FROM feed_runs WHERE ($1::text IS NULL OR source = $1) ORDER BY id DESC LIMIT $2",
+            runs::RUN_COLS
+        ))
+        .bind(q.source.as_deref())
+        .bind(limit)
+        .fetch_all(&st.pool)
+        .await?
+    };
+    Ok(Json(
+        json!({ "runs": rows.iter().map(run_json).collect::<Vec<_>>() }),
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct RefreshQuery {
     wait: Option<bool>,
 }
 
-/// Feeds sofort abrufen. Mit `?wait=true` wird auf das Ergebnis gewartet, sonst im Hintergrund (202).
+/// Alle eingeschalteten Quellen nacheinander abrufen (202 mit den angelegten Läufen). Quellen, die schon laufen, werden
+/// gemeldet (`running`), Quellen, die wegen Mindestabstand oder Backoff nicht dürfen, mit Grund unter `skipped`.
+/// Mit `?wait=true` wird synchron und ohne Laufprotokoll abgerufen (für Skripte und Tests).
 pub async fn refresh(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAdmin(admin): CsrfAdmin,
     State(st): State<AppState>,
     Query(q): Query<RefreshQuery>,
-) -> ApiResult<(StatusCode, Json<Value>)> {
+    body: Option<Json<RunBody>>,
+) -> ApiResult<Response> {
+    if !q.wait.unwrap_or(false) {
+        let confirm = body.and_then(|b| b.0.confirm).unwrap_or(false);
+        sources::ensure_seeded(&st).await?;
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM cve_sources WHERE enabled AND deleted_at IS NULL ORDER BY created_at, id",
+        )
+        .fetch_all(&st.pool)
+        .await?;
+        let (mut started, mut running, mut skipped) = (Vec::new(), Vec::new(), Vec::new());
+        for id in ids {
+            if let Some(active) = sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM feed_runs WHERE source = $1 AND status IN ('queued', 'running') ORDER BY id DESC LIMIT 1",
+            )
+            .bind(&id)
+            .fetch_optional(&st.pool)
+            .await?
+            {
+                running.push(json!({ "source": id, "run_id": active }));
+                continue;
+            }
+            match runs::gate(&st.pool, &id, confirm, Utc::now()).await? {
+                Gate::Allowed => {}
+                Gate::TooSoon(w) | Gate::BackoffLimited(w) => {
+                    skipped.push(json!({ "source": id, "reason": "too_soon", "retry_after": w }));
+                    continue;
+                }
+                Gate::NeedsConfirm {
+                    next_attempt_at,
+                    failures,
+                } => {
+                    skipped.push(json!({ "source": id, "reason": "backoff", "next_attempt_at": next_attempt_at, "failures": failures }));
+                    continue;
+                }
+            }
+            match runs::start(&st.pool, &id, Trigger::Manual, Some(&admin.username)).await? {
+                Start::Created(run) => started.push((run, id)),
+                Start::Running(run) => running.push(json!({ "source": id, "run_id": run })),
+            }
+        }
+        if started.is_empty() && skipped.is_empty() && !running.is_empty() {
+            return Ok(refusal(
+                StatusCode::CONFLICT,
+                "Alle Abrufe laufen bereits",
+                "running",
+                json!({ "running": running }),
+                None,
+            ));
+        }
+        let created: Vec<Value> = started
+            .iter()
+            .map(|(run, src)| json!({ "source": src, "run_id": run }))
+            .collect();
+        if !started.is_empty() {
+            let st2 = st.clone();
+            tokio::spawn(async move { runs::execute_all(&st2, started).await });
+        }
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({ "runs": created, "running": running, "skipped": skipped })),
+        )
+            .into_response());
+    }
+    refresh_wait(st).await
+}
+
+async fn refresh_wait(st: AppState) -> ApiResult<Response> {
     let guard = st
         .refresh_lock
         .clone()
         .try_lock_owned()
         .map_err(|_| ApiError::Conflict("Ein Feed-Abruf läuft bereits".into()))?;
-    if q.wait.unwrap_or(false) {
-        let results = refresh::refresh_all(&st).await;
-        drop(guard);
-        let body: Vec<Value> = results
-            .into_iter()
-            .map(|(source, o)| match o {
-                refresh::Outcome::NotModified => json!({ "source": source, "result": "not_modified" }),
-                refresh::Outcome::Updated { changed_rows, events } => json!({ "source": source, "result": "updated", "changed_rows": changed_rows, "events": events }),
-                refresh::Outcome::Incomplete { changed_rows, events } => json!({ "source": source, "result": "incomplete", "changed_rows": changed_rows, "events": events }),
-                refresh::Outcome::Failed(e) => json!({ "source": source, "result": "failed", "error": e }),
-                refresh::Outcome::Skipped => json!({ "source": source, "result": "skipped" }),
-            })
-            .collect();
-        return Ok((StatusCode::OK, Json(json!({ "results": body }))));
-    }
-    tokio::spawn(async move {
-        refresh::refresh_all(&st).await;
-        drop(guard);
-    });
-    Ok((StatusCode::ACCEPTED, Json(json!({ "status": "gestartet" }))))
+    let results = refresh::refresh_all(&st).await;
+    drop(guard);
+    let body: Vec<Value> = results
+        .into_iter()
+        .map(|(source, o)| match o {
+            refresh::Outcome::NotModified => json!({ "source": source, "result": "not_modified" }),
+            refresh::Outcome::Updated { changed_rows, events } => json!({ "source": source, "result": "updated", "changed_rows": changed_rows, "events": events }),
+            refresh::Outcome::Incomplete { changed_rows, events } => json!({ "source": source, "result": "incomplete", "changed_rows": changed_rows, "events": events }),
+            refresh::Outcome::Failed(e) => json!({ "source": source, "result": "failed", "error": e }),
+            refresh::Outcome::Skipped => json!({ "source": source, "result": "skipped" }),
+        })
+        .collect();
+    Ok((StatusCode::OK, Json(json!({ "results": body }))).into_response())
 }
 
 #[cfg(test)]

@@ -87,6 +87,8 @@ pub fn router(state: AppState) -> Router {
         .route("/live", get(live::live))
         .route("/feeds", get(feeds::list).post(feeds::create))
         .route("/feeds/refresh", post(feeds::refresh))
+        .route("/feeds/runs", get(feeds::runs_list))
+        .route("/feeds/{name}/run", post(feeds::run_source))
         .route(
             "/feeds/{name}",
             axum::routing::put(feeds::update).delete(feeds::delete),

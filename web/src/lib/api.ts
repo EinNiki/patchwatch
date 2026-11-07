@@ -10,6 +10,8 @@ export class ApiError extends Error {
     message: string,
     /** Sekunden bis zum nächsten erlaubten Versuch (Header Retry-After bei 429). */
     public retryAfter?: number,
+    /** Rohe JSON-Antwort des Servers (z. B. `code`, `run_id`); nie Geheimnisse, nur die API-Felder. */
+    public data?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -55,8 +57,10 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Wr
   }
   if (!res.ok) {
     let message = res.statusText;
+    let data: Record<string, unknown> | undefined;
     try {
-      message = ((await res.json()) as { error?: string }).error ?? message;
+      data = (await res.json()) as Record<string, unknown>;
+      if (typeof data.error === "string") message = data.error;
     } catch {
       /* keine JSON-Antwort */
     }
@@ -68,9 +72,9 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Wr
     const ra = Number(res.headers.get("retry-after"));
     const retryAfter = Number.isFinite(ra) && ra > 0 ? ra : undefined;
     notify(res.status, message, retryAfter);
-    throw new ApiError(res.status, message, retryAfter);
+    throw new ApiError(res.status, message, retryAfter, data);
   }
-  if (res.status === 204 || res.status === 202) return undefined as T;
+  if (res.status === 204) return undefined as T;
   // Leere 2xx-Antworten (z. B. 201 ohne Body) sind ein Erfolg, kein Parse-Fehler.
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
