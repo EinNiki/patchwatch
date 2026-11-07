@@ -1,4 +1,5 @@
 // Reine Logik der Host-Ansicht (Satz, Balken, Kacheln, Banner); keine React-Importe, damit sie mit node:test prüfbar ist.
+import { clockTime as hhmm } from "./format.ts";
 import type { Feed, HostCve } from "./types.ts";
 
 export interface StateCounts {
@@ -80,7 +81,6 @@ export interface FeedNotice {
   restricted: boolean;
 }
 
-const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 
 /** Banner nur, wenn die für den Host zuständige Quelle eingeschränkt ist (nicht bei beliebigen anderen Feeds). */
 export function feedNotice(feeds: Feed[] | undefined, osId: string | null, codename: string | null, issue: string | null): FeedNotice {

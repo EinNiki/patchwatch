@@ -23,3 +23,9 @@ export function affectedHosts(c: Pick<CveListItem, "hosts_vulnerable" | "hosts_f
 export function affectingLabel(n: number): string {
   return n === 1 ? "1 CVE betrifft deine Hosts" : `${n.toLocaleString("de-DE")} CVEs betreffen deine Hosts`;
 }
+
+/** Tooltip der Spalte „Aktualisiert“: Quelldatum und, getrennt davon, der letzte Abgleich (beide Europe/Berlin). */
+export function updatedTitle(updatedAt: string | null, syncedAt: string | null, abs: (iso: string | null) => string): string {
+  const src = updatedAt ? `Laut Quelle geändert: ${abs(updatedAt)}` : "Änderungsdatum: unbekannt (keine Quelle liefert eines)";
+  return syncedAt ? `${src}\nZuletzt abgeglichen: ${abs(syncedAt)}` : src;
+}

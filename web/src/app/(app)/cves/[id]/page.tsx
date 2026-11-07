@@ -35,7 +35,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
   }
   if (!d.data) return <Loading what="CVE-Daten" />;
 
-  const { cve, distros, links, sources, hosts, last_change_at } = d.data;
+  const { cve, distros, links, sources, hosts, last_change_at, last_synced_at } = d.data;
   const mine = distros.filter((x) => x.mine);
   const other = distros.filter((x) => !x.mine);
   return (
@@ -46,7 +46,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
       {cve.exploited ? <p className="mb-2 font-semibold text-crit">Aktiv ausgenutzt (CISA KEV). Der Fix-Stand der Hosts bleibt davon unberührt.</p> : null}
       {cve.note ? <p className="mb-2 text-accent">Notiz: {cve.note}</p> : null}
       <div className="wide:hidden">
-        <CveMeta cve={cve} lastChange={last_change_at} links={links} />
+        <CveMeta cve={cve} lastChange={last_change_at} lastSynced={last_synced_at} links={links} />
       </div>
       <div className="wide:grid wide:grid-cols-[minmax(0,1fr)_22rem] wide:gap-x-8">
       <div className="min-w-0">
@@ -162,7 +162,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
       </div>
       <aside aria-label="Metadaten" className="hidden wide:block">
         <div className="sticky top-4">
-          <CveMeta cve={cve} lastChange={last_change_at} links={links} />
+          <CveMeta cve={cve} lastChange={last_change_at} lastSynced={last_synced_at} links={links} />
         </div>
       </aside>
       </div>
@@ -171,7 +171,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
 }
 
 /** Metadaten der CVE; unter 1600 px unter der Beschreibung, darüber in der rechten Spalte. */
-function CveMeta({ cve, lastChange, links }: { cve: CveDetail["cve"]; lastChange: string; links: CveDetail["links"] }) {
+function CveMeta({ cve, lastChange, lastSynced, links }: { cve: CveDetail["cve"]; lastChange: string | null; lastSynced: string | null; links: CveDetail["links"] }) {
   return (
     <>
       <dl className="mb-4 flex flex-wrap gap-x-8 gap-y-1 text-sm wide:flex-col wide:gap-y-2 wide:border-y wide:border-line wide:py-3">
@@ -184,7 +184,25 @@ function CveMeta({ cve, lastChange, links }: { cve: CveDetail["cve"]; lastChange
         <div>
           <dt className="inline text-fg3 wide:block">Letzte Änderung </dt>
           <dd className="inline">
-            <RelTime iso={lastChange} /> <span className="text-fg3">({absTime(lastChange)})</span>
+            {lastChange ? (
+              <>
+                <RelTime iso={lastChange} /> <span className="text-fg3">({absTime(lastChange)})</span>
+              </>
+            ) : (
+              <span className="text-fg3" title="Keine Quelle liefert ein Änderungsdatum">unbekannt</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="inline text-fg3 wide:block">Zuletzt abgeglichen </dt>
+          <dd className="inline">
+            {lastSynced ? (
+              <>
+                <RelTime iso={lastSynced} /> <span className="text-fg3">({absTime(lastSynced)})</span>
+              </>
+            ) : (
+              <span className="text-fg3">noch nie</span>
+            )}
           </dd>
         </div>
         {cve.published_at ? (

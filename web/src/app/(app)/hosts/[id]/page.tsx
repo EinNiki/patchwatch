@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/useApi";
-import { absTime, kernelBase, uptime } from "@/lib/format";
+import { absTime, kernelBase } from "@/lib/format";
+import { Uptime } from "@/components/Uptime";
 import { HOST_STATUS } from "@/lib/status";
 import type { Feed, HistoryRow, Host, UpdateItem } from "@/lib/types";
 import { HostCves, parseCveFilter } from "@/components/HostCves";
@@ -83,7 +84,7 @@ export default function HostDetailPage() {
           <Fact label="Laufender Kernel">
             <Mono>{h.running_kernel ?? "–"}</Mono>
           </Fact>
-          <Fact label="Uptime">{uptime(h.uptime_seconds)}</Fact>
+          <Fact label="Uptime"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} withBoot /></Fact>
           <Fact label="Kernel-Paket">
             {h.kernel_package ? (
               <>

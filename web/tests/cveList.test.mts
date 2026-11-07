@@ -23,3 +23,10 @@ test("Zeile über der Liste", () => {
   assert.equal(affectingLabel(0), "0 CVEs betreffen deine Hosts");
   assert.equal(affectingLabel(1204), "1.204 CVEs betreffen deine Hosts");
 });
+test("Tooltip „Aktualisiert“: Quelldatum und Abgleich getrennt, ohne Datum „unbekannt“", async () => {
+  const { updatedTitle } = await import("../src/lib/cveList.ts");
+  const abs = (iso: string | null) => `<${iso}>`;
+  assert.equal(updatedTitle("A", "B", abs), "Laut Quelle geändert: <A>\nZuletzt abgeglichen: <B>");
+  assert.match(updatedTitle(null, "B", abs), /unbekannt.*\nZuletzt abgeglichen: <B>/);
+  assert.ok(!updatedTitle(null, null, abs).includes("abgeglichen"));
+});

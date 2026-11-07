@@ -131,7 +131,10 @@ export interface Cve {
   /** Priorität als Stufe 0–10 (0 = unbekannt). */
   level: number;
   published_at: string | null;
-  updated_at: string;
+  /** Letzte Änderung laut Quelle; `null` = keine Quelle liefert ein Datum (nie der Importzeitpunkt). */
+  updated_at: string | null;
+  /** Zuletzt mit einer Quelle abgeglichen. */
+  last_synced_at: string | null;
   watched: boolean;
   note: string | null;
   /** In der CISA-KEV-Liste (aktiv ausgenutzt). */
@@ -177,7 +180,8 @@ export interface CveDetail {
   sources: CveSourceRow[];
   distros: Distro[];
   links: { source: string; url: string }[];
-  last_change_at: string;
+  last_change_at: string | null;
+  last_synced_at: string | null;
   hosts: { id: number; name: string; os_codename: string | null; status: CveStatus; reason: string }[];
 }
 

@@ -74,7 +74,7 @@ export function hostState(c: HostCve, running: string | null, proxmox: boolean):
   }
 }
 
-const dateFmt = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+const dateFmt = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Berlin" });
 const since = (iso: string | null) => (iso ? dateFmt.format(new Date(iso)) : "–");
 
 const TILE_META: Record<Tile, { word: string; icon: IconName; tone: "crit" | "warn" | "ok" | "grey" | "unknown"; line: (kernel: string | null) => React.ReactNode }> = {

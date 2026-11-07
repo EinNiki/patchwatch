@@ -7,7 +7,8 @@ import { prefetchApi, useApi } from "@/lib/useApi";
 import { patchHostRows } from "@/lib/hostsLive";
 import type { Feed, Host, HostStatus } from "@/lib/types";
 import { HOST_STATUS, HOST_STATUS_ORDER } from "@/lib/status";
-import { kernelBase, uptime } from "@/lib/format";
+import { kernelBase } from "@/lib/format";
+import { Uptime } from "@/components/Uptime";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Marker } from "@/components/DistroChip";
 import { Icon, NavIcon } from "@/components/Icons";
@@ -338,7 +339,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </div>
         ) : null}
       </td>
-      <td className="mono max-wide:hidden">{uptime(h.uptime_seconds)}</td>
+      <td className="mono max-wide:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
     </tr>
   );

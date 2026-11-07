@@ -7,11 +7,11 @@ import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { cacheGet, cacheSet } from "@/lib/apiCache";
 import type { CveDetail, CveListItem } from "@/lib/types";
-import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
 import { Icon, NavIcon } from "@/components/Icons";
-import { affectedHosts, affectingLabel, parseAffectsAll, parseSort } from "@/lib/cveList";
+import { affectedHosts, affectingLabel, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
+import { absTime, relTime } from "@/lib/format";
 import { useFlash } from "@/lib/useFlash";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ChipLegend, DistroChip } from "@/components/DistroChip";
@@ -568,7 +568,15 @@ const CveRow = memo(function CveRow({
         </td>
         <td className="mono max-wide:hidden" title={c.priority ?? undefined}>{c.level ? `${c.level}/10` : "–"}</td>
         <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
-          <RelTime iso={c.updated_at} />
+          {c.updated_at ? (
+            <time dateTime={c.updated_at} title={updatedTitle(c.updated_at, c.last_synced_at, absTime)}>
+              {relTime(c.updated_at)}
+            </time>
+          ) : (
+            <span className="text-fg3" title={updatedTitle(null, c.last_synced_at, absTime)}>
+              unbekannt
+            </span>
+          )}
         </td>
       </tr>
   );

@@ -253,6 +253,15 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
   Level (hoch zuerst), dann die neuere Veröffentlichung; die Spalte „Hosts“ sortiert danach (Pfeil kehrt um). Daneben `latest`
   (Veröffentlichung), `level` und `updated`. Beobachtete CVEs stehen immer oben. „Weitere laden“ holt die nächste Seite aus
   derselben festen Reihenfolge (Tiebreak: CVE-ID), nichts springt.
+- **Aktualisiert** (Spalte, Sortierung `updated`) ist die **letzte Änderung laut Quelle**, bei mehreren Quellen die neueste
+  (`cves.source_updated_at`). Liefert keine Quelle ein Datum, steht „unbekannt“, nie der Importzeitpunkt. Daten liefern die Ubuntu-API
+  (`updated_at`), NVD (`lastModified`) und OSV (`modified`); die Ubuntu-OVAL-Massendaten und der Debian Security Tracker enthalten kein
+  Änderungsdatum. Der Importzeitpunkt steht getrennt als „Zuletzt abgeglichen“ (`cves.last_synced_at`, Tooltip und CVE-Detail).
+  Ein erneuter Import ändert „Aktualisiert“ nicht. Bestehende Zeilen behalten ihre Daten (Migration 0016 ist additiv); ein Quelldatum
+  lässt sich aus den gespeicherten Rohdaten nicht rekonstruieren und wird beim nächsten Import der Quelle nachgefüllt, sofern sie eines liefert.
+- **Zeiten** erscheinen in der Oberfläche in **Europe/Berlin** (absolut im Tooltip), unabhängig von Server (UTC) und Browser; „vor n Tagen“
+  zählt Berliner Kalendertage, auch über den Sommerzeitwechsel. Die **Uptime** der Hosts wird aus der Bootzeit berechnet
+  (Reportzeit minus vom Agenten gemeldete Uptime) und läuft zwischen den Reports weiter; die Host-Seite nennt die Bootzeit („gestartet 06.11. 22:27“).
 - **Zusammenspiel**: *Umfang* bestimmt, welche Release-Chips und Release-Filter zählen. *Debian/Ubuntu* filtern über diese
   Chips. *Betrifft* filtert über die Hosts und ist davon unabhängig; alle drei sind mit **UND** verknüpft. „Betrifft: Alle“ plus
   Umfang „Alle Releases“ zeigt alles.
