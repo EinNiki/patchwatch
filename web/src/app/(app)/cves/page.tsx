@@ -9,7 +9,7 @@ import { cacheGet, cacheSet } from "@/lib/apiCache";
 import type { CveDetail, CveListItem } from "@/lib/types";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
-import { Icon, NavIcon } from "@/components/Icons";
+import { NavIcon } from "@/components/Icons";
 import { affectedHosts, affectingLabel, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
 import { useFlash } from "@/lib/useFlash";
@@ -333,6 +333,13 @@ function CveView() {
             <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-64 max-w-full font-normal max-md:w-full" />
           </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
+            Betrifft
+            <select value={affectsAll ? "all" : "mine"} onChange={(e) => setParam("affects", e.target.value === "all" ? "all" : null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
+              <option value="mine">Meine Hosts</option>
+              <option value="all">Alle</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
             Distribution
             <select value={distro} onChange={(e) => setParam("distro", e.target.value || null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
               <option value="">Alle</option>
@@ -387,38 +394,9 @@ function CveView() {
           </ul>
         ) : null}
 
-        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="affects-bar">
-          <p className="text-sm font-semibold" aria-live="polite">
-            {scopeCount.data ? (
-              affectsAll ? (
-                <button type="button" onClick={() => setParam("affects", null)} className="text-accent underline max-md:min-h-11">
-                  {affectingLabel(scopeCount.data.affecting)}
-                </button>
-              ) : (
-                <span>{affectingLabel(scopeCount.data.affecting)}</span>
-              )
-            ) : (
-              <span className="text-fg3">CVEs werden gezählt …</span>
-            )}
-          </p>
-          <div role="group" aria-label="Betrifft" className="flex gap-1">
-            {([["mine", "Meine Hosts"], ["all", "Alle"]] as const).map(([v, label]) => {
-              const on = (v === "all") === affectsAll;
-              return (
-                <button
-                  key={v}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setParam("affects", v === "all" ? "all" : null)}
-                  className={`inline-flex min-h-8 items-center gap-1 rounded-xs border px-2.5 text-sm max-md:min-h-11 ${on ? "border-2 border-accent bg-sunk font-semibold" : "border-line bg-surface hover:bg-sunk"}`}
-                >
-                  {label}
-                  {on ? <Icon name="ok" size={14} /> : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <p className="mb-2 text-sm font-semibold" aria-live="polite" data-testid="affects-count">
+          {scopeCount.data ? <span>{affectingLabel(scopeCount.data.affecting)}</span> : <span className="text-fg3">CVEs werden gezählt …</span>}
+        </p>
 
         {cves.error && !cves.data ? <ErrorNote message={cves.error} /> : null}
         {!cves.data ? (

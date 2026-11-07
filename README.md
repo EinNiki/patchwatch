@@ -264,12 +264,12 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
   Releases“. Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird im Standardumfang nicht als „gefixt“ gefunden;
   sie erscheint dort nur hinter „+ n weitere Releases“. Findet ein Filter nichts, nennt die Seite die aktiven Filter und
   bietet an, den Umfang auf „Alle Releases“ zu stellen oder die Filter zurückzusetzen.
-- **Betrifft** (`?affects=`, Standard „Meine Hosts“, Alternative „Alle“; auch in der URL): „Meine Hosts“ zeigt nur CVEs, bei
+- **Betrifft** (Auswahlfeld in der Filterzeile, `?affects=all` in der URL, Standard „Meine Hosts“, Alternative „Alle“): „Meine Hosts“ zeigt nur CVEs, bei
   denen **mindestens ein Host** den Zustand *verwundbar*, *Fix angekündigt* oder *Neustart nötig* hat. *Unbekannt* (z. B.
   Proxmox), *gefixt* und *nicht betroffen* zählen nicht; unbekannte Hosts werden in der Spalte „Hosts“ trotzdem genannt.
   Beobachtete CVEs (Watchlist) und die gezielte Suche zeigen unabhängig davon alles. Über der Tabelle steht „N CVEs betreffen
-  deine Hosts“ (die Zahl gilt für den eingestellten Umfang und die übrigen Filter). Ist die Liste im Standard leer, steht
-  „Keine CVE betrifft deine Hosts“ mit dem Knopf „Alle CVEs anzeigen“.
+  deine Hosts“ als reiner Text (die Zahl gilt für den eingestellten Umfang und die übrigen Filter). Ist die Liste im Standard
+  leer, steht „Keine CVE betrifft deine Hosts“ mit dem Textlink „Alle CVEs anzeigen“, der das Feld auf „Alle“ stellt.
 - **Sortierung** (`?sort=`, serverseitig, feste Liste): Standard `hosts` = zuerst die CVEs mit den meisten betroffenen Hosts, dann
   Level (hoch zuerst), dann die neuere Veröffentlichung; die Spalte „Hosts“ sortiert danach (Pfeil kehrt um). Daneben `latest`
   (Veröffentlichung), `level` und `updated`. Beobachtete CVEs stehen immer oben. „Weitere laden“ holt die nächste Seite aus
