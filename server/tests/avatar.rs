@@ -200,7 +200,7 @@ async fn upload_serve_and_remove_with_fixed_headers(pool: PgPool) {
 async fn rejects_bad_uploads_and_never_stores_them(pool: PgPool) {
     let (app, s) = setup(&pool).await;
     let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>".to_vec();
-    let mut cases: Vec<(&str, &str, Vec<u8>)> = vec![
+    let cases: Vec<(&str, &str, Vec<u8>)> = vec![
         ("SVG", "image/svg+xml", svg.clone()),
         ("SVG als PNG deklariert", "image/png", svg),
         (
