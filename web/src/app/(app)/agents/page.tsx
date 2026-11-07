@@ -12,6 +12,7 @@ import { Button, Field, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
+import { SET_TOKEN_COMMAND, installCommand } from "@/lib/agentCommands";
 import { Icon, NavIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -24,14 +25,13 @@ const NO_ANSWER_MS = 10 * 60 * 1000;
 const RELEASE_BASE = "https://github.com/EinNiki/patchwatch/releases/latest/download";
 const LIVE_TYPES = ["report_received", "report_requested", "checkin", "host_status"] as const;
 
-/** Der Befehl enthält den Token nicht: install.sh fragt ihn ohne Echo ab (oder liest ihn mit --token-file). */
-function installCommand(): string {
+function installCmd(): string {
   const origin = typeof window === "undefined" ? "https://patchwatch.example.org" : window.location.origin;
-  return `curl -fsSL -o install.sh ${RELEASE_BASE}/install.sh && sudo sh install.sh --server-url ${origin}`;
+  return installCommand(origin, RELEASE_BASE);
 }
 
-function TokenStep({ name, token, onDone }: { name: string; token: string; onDone: () => void }) {
-  const cmd = installCommand();
+function TokenStep({ name, token, rotated, onDone }: { name: string; token: string; rotated?: boolean; onDone: () => void }) {
+  const cmd = rotated ? SET_TOKEN_COMMAND : installCmd();
   return (
     <>
       <p className="mb-3 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
@@ -47,10 +47,19 @@ function TokenStep({ name, token, onDone }: { name: string; token: string; onDon
         <code className="min-w-0 flex-1 break-all border border-line bg-sunk px-2 py-1">{cmd}</code>
         <CopyButton text={cmd} label="Befehl kopieren" />
       </div>
-      <p className="mb-4 text-xs text-fg2">
-        Der Installer prüft die SHA256-Summe des Binarys und fragt den Token ab (Eingabe wird nicht angezeigt). Alternativ liest{" "}
-        <Mono>--token-file /pfad</Mono> ihn aus einer Datei. Der Token steht danach nur in <Mono>/etc/patchwatch/token</Mono> (root, 0600).
-      </p>
+      {rotated ? (
+        <p className="mb-4 text-xs text-fg2">
+          Der Befehl fragt den neuen Token ohne Anzeige ab (<Mono>--stdin</Mono> oder <Mono>--token-file /pfad</Mono> gehen auch), prüft ihn mit
+          einem Test-Report und schreibt ihn atomar nach <Mono>/etc/patchwatch/token</Mono> (root, 0600). Danach:{" "}
+          <Mono>sudo systemctl start patchwatch-agent</Mono>.
+        </p>
+      ) : (
+        <p className="mb-4 text-xs text-fg2">
+          Der Installer prüft die SHA256-Summe des Binarys und fragt den Token ab (Eingabe wird nicht angezeigt). Alternativ liest{" "}
+          <Mono>--token-file /pfad</Mono> ihn aus einer Datei. Der Token steht danach nur in <Mono>/etc/patchwatch/token</Mono> (root, 0600).
+          Später ändern: <Mono>{SET_TOKEN_COMMAND}</Mono>.
+        </p>
+      )}
       <div className="flex justify-end">
         <Button variant="primary" onClick={onDone}>
           Fertig, Token gesichert
@@ -345,7 +354,7 @@ export default function AgentsPage() {
 
       <AddDialog open={adding} onClose={() => setAdding(false)} onCreated={() => void hosts.reload()} />
       <Dialog open={shown !== null} title={`Neuer Token für ${shown?.name ?? ""}`} onClose={() => setShown(null)} dismissible={false}>
-        {shown ? <TokenStep name={shown.name} token={shown.token} onDone={() => setShown(null)} /> : null}
+        {shown ? <TokenStep name={shown.name} token={shown.token} rotated onDone={() => setShown(null)} /> : null}
       </Dialog>
       <ConfirmDialog
         open={confirm !== null}

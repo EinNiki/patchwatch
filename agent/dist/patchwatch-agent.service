@@ -10,6 +10,9 @@ User=patchwatch
 Group=patchwatch
 # Token-Datei gehört root:root 0600; systemd stellt sie dem Dienst als Credential bereit.
 LoadCredential=token:/etc/patchwatch/token
+# Ergebnis des letzten Laufs für `patchwatch-agent status`; gehört dem Dienstbenutzer.
+StateDirectory=patchwatch-agent
+StateDirectoryMode=0700
 ExecStart=/usr/local/bin/patchwatch-agent --config /etc/patchwatch/agent.toml
 TimeoutStartSec=120
 

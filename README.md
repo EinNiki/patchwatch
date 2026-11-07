@@ -106,6 +106,27 @@ curl -b jar -H "x-csrf-token: <csrf_token aus der Antwort>" -H 'content-type: ap
      -d '{"name":"web1"}' https://patchwatch.example.org/api/v1/hosts
 ```
 
+### Agent-Token ändern und prüfen
+
+Der Token steht nie in einem Befehlsargument (sichtbar in `ps` und der Shell-History); `--token <wert>` wird abgelehnt.
+
+```sh
+sudo patchwatch-agent set-token                      # Eingabe ohne Echo
+sudo patchwatch-agent set-token --stdin < datei      # aus Standardeingabe (nur eine Zeile)
+sudo patchwatch-agent set-token --token-file /pfad   # aus Datei (kein Symlink)
+sudo patchwatch-agent set-token --no-test            # ohne Test-Report
+sudo patchwatch-agent set-token --migrate            # Token aus agent.toml nach /etc/patchwatch/token verschieben
+patchwatch-agent status                              # Version, Konfiguration, Token-Herkunft, Fingerabdruck, Rechte, letzter Lauf
+```
+
+`set-token` prüft das Format (`pw_…`, 16–128 Zeichen aus `A-Za-z0-9_-`), schreibt atomar mit `0600 root:root` und sendet
+danach einen Test-Report: „Token akzeptiert (Host: …)“, „Token abgelehnt (401)“ oder „Server nicht erreichbar“. Der Dienst
+wird nicht neu gestartet; danach `sudo systemctl start patchwatch-agent`. Steht ein Token in `agent.toml`, meldet der Befehl das
+und bietet `--migrate` an (Sicherung der Konfiguration ohne Token). `status` zeigt nur die ersten 8 Hex-Zeichen des SHA-256 als Fingerabdruck.
+Lehnt der Server den Token ab, beendet sich der Agent mit Exit-Code 4 und einer Zeile im Journal. `install.sh` und
+`patchwatch-agent-update` ändern weder Token noch Konfiguration; der Test-Lauf danach unterscheidet „Update ok, Report ok“,
+„Update ok, Token abgelehnt“ und „Update fehlgeschlagen“.
+
 Konfiguration per Datei (`/etc/patchwatch/server.toml`, Pfad über `PATCHWATCH_CONFIG`) oder
 Umgebungsvariablen `PATCHWATCH_*` (siehe `docker-compose.yml`). Wichtige Werte:
 `stale_after_hours` (26), `report_retention_days` (180), `timezone`, `daily_summary_time`,

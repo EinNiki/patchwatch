@@ -60,11 +60,11 @@ if [ -n "$TOKEN_FILE" ]; then
   # Nur die erste Zeile; Leerraum am Rand entfernen.
   TOKEN="$(head -n 1 "$TOKEN_FILE" | tr -d '[:space:]')"
 fi
-# Bereits installiert: vorhandenen Token weiterverwenden (Update ohne Eingabe).
-if [ -z "$TOKEN" ] && [ -r /etc/patchwatch/token ]; then
-  TOKEN="$(head -n 1 /etc/patchwatch/token | tr -d '[:space:]')"
-fi
-if [ -z "$TOKEN" ]; then
+# Bereits installiert und kein neuer Token angegeben: die vorhandene Token-Datei bleibt unangetastet
+# (Token ändern: `sudo patchwatch-agent set-token`).
+KEEP_TOKEN=no
+if [ -z "$TOKEN" ] && [ -e /etc/patchwatch/token ]; then KEEP_TOKEN=yes; fi
+if [ -z "$TOKEN" ] && [ "$KEEP_TOKEN" = no ]; then
   # Eingabe vom Terminal (auch wenn das Skript per Pipe läuft), ohne Echo.
   if [ -r /dev/tty ]; then TTY=/dev/tty; else TTY=/dev/stdin; fi
   printf 'Agent-Token (Eingabe bleibt unsichtbar): ' >&2
@@ -73,7 +73,7 @@ if [ -z "$TOKEN" ]; then
   stty echo <"$TTY" 2>/dev/null || true
   echo >&2
 fi
-[ -n "$TOKEN" ] || die "kein Token angegeben"
+[ -n "$TOKEN" ] || [ "$KEEP_TOKEN" = yes ] || die "kein Token angegeben"
 
 if [ "$VERSION" = "latest" ]; then
   URL_BASE="$BASE/latest/download"
@@ -154,6 +154,16 @@ pw_latest_in_major() {
     || { echo "Neueste Version $_tag gehört zu einer anderen Hauptversion als $2; bitte bewusst von Hand aktualisieren" >&2; return 1; }
   printf '%s\n' "$_tag"
 }
+
+# Test-Lauf des Dienstes. Rückgabe: 0 = Report gesendet, 4 = Server lehnt den Token ab (Exit-Code 4 des Agents),
+# 1 = anderer Fehler. Aufrufer entscheiden über die Meldung; so wird ein abgelehnter Token nie als
+# "erster Lauf fehlgeschlagen" gemeldet.
+pw_test_run() {
+  if systemctl start patchwatch-agent.service; then return 0; fi
+  _st="$(systemctl show -p ExecMainStatus --value patchwatch-agent.service 2>/dev/null || true)"
+  if [ "$_st" = 4 ]; then return 4; fi
+  return 1
+}
 PWLIB
 }
 
@@ -232,14 +242,26 @@ done
 pw_verify_all "\$T/\$NAME" "\$T/\$NAME.sha256" "\$T/\$NAME.minisig" || fail "Prüfung fehlgeschlagen, nichts geändert"
 pw_apply_update "\$T/\$NAME" "\$BIN" || fail "Update nicht angewendet"
 echo "Aktualisiert auf \$VERSION"
+# Token und Konfiguration bleiben unberührt. Test-Lauf trennt "Update fehlgeschlagen" (oben, Abbruch) von
+# "Update ok, aber Token abgelehnt" und "Update ok, Report gesendet".
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  rc=0; pw_test_run || rc=\$?
+  case "\$rc" in
+    0) echo "Update ok, Report gesendet." ;;
+    4) echo "Update ok, aber der Server lehnt den Token ab (HTTP 401/403). Das Update ist nicht die Ursache. Neuen Token in der Weboberfläche unter Agents erzeugen, dann: sudo patchwatch-agent set-token" >&2 ;;
+    *) echo "Update ok, aber der Test-Report ist fehlgeschlagen. Details: journalctl -u patchwatch-agent; Zustand: patchwatch-agent status" >&2 ;;
+  esac
+fi
 UPDATER
 chmod 0755 /usr/local/bin/patchwatch-agent-update
 
 install -d -m 0755 /etc/patchwatch
 # Token: nur root lesbar; systemd reicht ihn per LoadCredential an den Dienst.
-( umask 077; printf '%s\n' "$TOKEN" > /etc/patchwatch/token )
-chown root:root /etc/patchwatch/token
-chmod 0600 /etc/patchwatch/token
+if [ "$KEEP_TOKEN" = no ]; then
+  ( umask 077; printf '%s\n' "$TOKEN" > /etc/patchwatch/token )
+  chown root:root /etc/patchwatch/token
+  chmod 0600 /etc/patchwatch/token
+fi
 if [ ! -e /etc/patchwatch/agent.toml ]; then
   cat > /etc/patchwatch/agent.toml <<EOF
 server_url = "$SERVER_URL"
@@ -264,6 +286,9 @@ User=patchwatch
 Group=patchwatch
 # Token-Datei gehört root:root 0600; systemd stellt sie dem Dienst als Credential bereit.
 LoadCredential=token:/etc/patchwatch/token
+# Ergebnis des letzten Laufs für `patchwatch-agent status`; gehört dem Dienstbenutzer.
+StateDirectory=patchwatch-agent
+StateDirectoryMode=0700
 ExecStart=/usr/local/bin/patchwatch-agent --config /etc/patchwatch/agent.toml
 TimeoutStartSec=120
 
@@ -378,8 +403,12 @@ systemctl enable --now patchwatch-agent.timer
 # Check-in-Timer: weckt den Agent minütlich; bei checkin_enabled = false beendet er sich sofort.
 systemctl enable --now patchwatch-agent-checkin.timer
 echo "Test-Lauf ..."
-systemctl start patchwatch-agent.service && echo "OK: erster Report gesendet" \
-  || echo "Hinweis: erster Lauf fehlgeschlagen, siehe: journalctl -u patchwatch-agent" >&2
+rc=0; pw_test_run || rc=$?
+case "$rc" in
+  0) echo "OK: erster Report gesendet" ;;
+  4) echo "Hinweis: Installation ok, aber der Server lehnt den Token ab (HTTP 401/403). Neuen Token in der Weboberfläche unter Agents erzeugen, dann: sudo patchwatch-agent set-token" >&2 ;;
+  *) echo "Hinweis: erster Lauf fehlgeschlagen, siehe: journalctl -u patchwatch-agent" >&2 ;;
+esac
 if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
   echo "Aktualisiert: $OLD_VERSION -> $NEW_VERSION"
 else

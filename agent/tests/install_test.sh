@@ -163,6 +163,36 @@ expect_fail "andere Hauptversion wird nicht automatisch geladen" latest https://
 expect_fail "unerwartete Versionsangabe" latest https://example.invalid/releases/tag/latest
 expect_fail "Versionsangabe mit Anhang" latest "https://example.invalid/releases/tag/v0.4.7;rm"
 
+# --- Test-Lauf nach Installation/Update: abgelehnter Token ist kein "erster Lauf fehlgeschlagen" ---
+mkdir "$T/sysbin"
+cat > "$T/sysbin/systemctl" <<'STUB'
+#!/bin/sh
+# Attrappe: "start" scheitert, wenn FAKE_START_FAIL=1; "show" liefert FAKE_EXEC_STATUS.
+case "$1" in
+  start) [ "${FAKE_START_FAIL:-0}" = 1 ] && exit 1; exit 0 ;;
+  show) printf '%s\n' "${FAKE_EXEC_STATUS:-0}" ;;
+esac
+STUB
+chmod +x "$T/sysbin/systemctl"
+testrun() { env PATH="$T/sysbin:$PATH" FAKE_START_FAIL="$1" FAKE_EXEC_STATUS="$2" sh -c ". '$T/lib.sh'; pw_test_run"; }
+testrun 0 0; [ $? -eq 0 ] && ok || bad "Test-Lauf ok soll 0 liefern"
+testrun 1 4; [ $? -eq 4 ] && ok || bad "abgelehnter Token (Exit 4) soll 4 liefern"
+testrun 1 2; [ $? -eq 1 ] && ok || bad "anderer Fehler soll 1 liefern"
+testrun 1 ""; [ $? -eq 1 ] && ok || bad "unbekannter Status soll 1 liefern"
+# Updater und Installer unterscheiden die drei Ausgänge und nennen set-token.
+grep -q 'Update ok, aber der Server lehnt den Token ab' "$INSTALLER" && ok || bad "Updater meldet abgelehnten Token nicht getrennt"
+grep -q 'Update ok, Report gesendet' "$INSTALLER" && ok || bad "Updater meldet erfolgreichen Report nicht"
+grep -q 'sudo patchwatch-agent set-token' "$INSTALLER" && ok || bad "Hinweis auf set-token fehlt"
+# Token und Konfiguration werden bei Update/Neuinstallation nicht überschrieben.
+grep -q 'KEEP_TOKEN=yes' "$INSTALLER" && grep -q 'if \[ "\$KEEP_TOKEN" = no \]; then' "$INSTALLER" && ok || bad "vorhandene Token-Datei wird nicht geschont"
+grep -q 'if \[ ! -e /etc/patchwatch/agent.toml \]' "$INSTALLER" && ok || bad "vorhandene agent.toml wird nicht geschont"
+UPD="$(sed -n '/<<UPDATER/,/^UPDATER$/p' "$INSTALLER")"
+printf '%s' "$UPD" | grep -Eq '/etc/patchwatch/(token|agent\.toml)[^ ]* *(>|>>)|rm .*patchwatch/(token|agent)|sed -i.*(token|agent\.toml)' && bad "Updater schreibt Token oder Konfiguration" || ok
+# Der Hauptdienst bekommt ein Zustandsverzeichnis für `patchwatch-agent status`.
+SVC="$(sed -n "/> \/etc\/systemd\/system\/patchwatch-agent.service <<'EOF'/,/^EOF\$/p" "$INSTALLER")"
+printf '%s' "$SVC" | grep -q '^StateDirectory=patchwatch-agent' && ok || bad "Hauptdienst ohne StateDirectory"
+grep -q '^StateDirectory=patchwatch-agent' "$HERE/../dist/patchwatch-agent.service" && ok || bad "Unit-Datei ohne StateDirectory"
+
 # --- Eigenschaften des Installers selbst ---
 grep -Eq 'sha256sum +-c|ignore-missing' "$INSTALLER" && bad "sha256sum -c / --ignore-missing im Installer" || ok
 grep -q 'latest/download/install.sh' "$INSTALLER" && bad "Installer lädt ein Skript aus latest" || ok

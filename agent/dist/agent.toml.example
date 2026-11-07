@@ -1,4 +1,4 @@
-# /etc/patchwatch/agent.toml  (enthält keinen Token; der liegt in /etc/patchwatch/token)
+# /etc/patchwatch/agent.toml  (enthält keinen Token; der liegt in /etc/patchwatch/token, ändern mit: sudo patchwatch-agent set-token)
 server_url = "https://patchwatch.example.org"
 # Liste aller installierten Pakete mitsenden (für die spätere CVE-Matrix über alle Pakete)
 include_packages = false
