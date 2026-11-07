@@ -3,28 +3,18 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/useApi";
-import { absTime, kernelBase } from "@/lib/format";
-import { Uptime } from "@/components/Uptime";
+import { absTime } from "@/lib/format";
+import { HostDetails } from "@/components/HostDetails";
 import { HOST_STATUS } from "@/lib/status";
 import type { Feed, HistoryRow, Host, UpdateItem } from "@/lib/types";
 import { HostCves, parseCveFilter } from "@/components/HostCves";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Icon } from "@/components/Icons";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { feedNotice } from "@/lib/hostCves";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <>
-      <dt className="text-fg3">{label}</dt>
-      <dd className="m-0 min-w-0">{children}</dd>
-    </>
-  );
-}
 
 export default function HostDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -47,7 +37,6 @@ export default function HostDetailPage() {
   if (!h) return <Loading what="Hostdaten" />;
 
   const info = HOST_STATUS[h.status];
-  const newer = h.newest_kernel && h.running_kernel && h.newest_kernel !== h.running_kernel;
   const notice = feedNotice(feeds.data, h.os_id, h.os_codename, h.cve_source_issue ?? null);
 
   return (
@@ -65,83 +54,23 @@ export default function HostDetailPage() {
         ) : null}
       </div>
 
-      {/* Die CVE-Lage steht oben und über die volle Breite (zwei Spalten ab 1280 px), damit sie ohne Seitenscroll sichtbar ist. */}
-      <HostCves host={h} initialFilter={initialFilter} notice={notice} />
-
-      {/* Ab 1600 px: Updates und Verlauf links, Stand rechts (DOM-Reihenfolge bleibt Stand zuerst). */}
-      <div className="wide:grid wide:grid-cols-[minmax(0,1fr)_26rem] wide:gap-x-8">
-      <section aria-labelledby="facts" className="mb-6 wide:col-start-2 wide:row-start-1">
-        <h2 id="facts" className="mb-2 text-lg font-semibold">
-          Stand
-        </h2>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 border-y border-line py-3 md:grid-cols-[max-content_1fr_max-content_1fr] wide:grid-cols-[max-content_1fr]">
-          <Fact label="Distribution">
-            {h.pretty_name ?? "–"} {h.os_codename ? <span className="text-fg3">({h.os_codename})</span> : null}
-          </Fact>
-          <Fact label="Letzter Report">
-            <RelTime iso={h.last_report_at} /> <span className="text-fg3">· {absTime(h.last_report_at)}</span>
-          </Fact>
-          <Fact label="Laufender Kernel">
-            <Mono>{h.running_kernel ?? "–"}</Mono>
-          </Fact>
-          <Fact label="Uptime"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} withBoot /></Fact>
-          <Fact label="Kernel-Paket">
-            {h.kernel_package ? (
-              <>
-                <Mono>{h.kernel_package}</Mono> <Mono className="text-fg2">{h.kernel_package_version}</Mono>
-              </>
-            ) : (
-              <span className="text-fg3">nicht ermittelt</span>
-            )}
-          </Fact>
-          <Fact label="Offene Updates">
-            {h.updates_pending == null ? (
-              <span className="text-fg3">unbekannt</span>
-            ) : (
-              <>
-                {h.updates_pending ? (
-                  <a href="#updates" className="underline">
-                    {h.updates_pending} anzeigen
-                  </a>
-                ) : (
-                  h.updates_pending
-                )}
-                {h.updates_security ? <span className="font-semibold text-crit"> · davon {h.updates_security} Sicherheit</span> : null}
-              </>
-            )}
-          </Fact>
-          <Fact label="Neuester Kernel">
-            {h.newest_kernel ? (
-              <>
-                <Mono>{h.newest_kernel}</Mono> <Mono className="text-fg2">{h.newest_kernel_version}</Mono>
-              </>
-            ) : (
-              "–"
-            )}
-          </Fact>
-          <Fact label="Neustart nötig">
-            {h.reboot_needed ? (
-              <span className="inline-flex flex-wrap items-center gap-x-2 text-warn">
-                <Icon name="reboot" /> Ja
-                <span className="text-fg2">
-                  {newer ? `Kernel ${kernelBase(h.running_kernel)} → ${kernelBase(h.newest_kernel)}` : null}
-                  {newer && h.reboot_required_file ? " · " : null}
-                  {h.reboot_required_file ? "/var/run/reboot-required vorhanden" : null}
-                </span>
-              </span>
-            ) : (
-              "Nein"
-            )}
-          </Fact>
-          {h.is_proxmox ? (
-            <Fact label="Proxmox VE">
-              <Mono>{h.proxmox_version}</Mono>
-            </Fact>
-          ) : null}
-        </dl>
-      </section>
-
-      <div className="min-w-0 wide:col-start-1 wide:row-start-1">
+      {/* Ab 1280 px: CVE-Lage links, Host-Details rechts (mitlaufend). Darunter stehen die Details aufklappbar unter den Kacheln. */}
+      <div className="hd:grid hd:grid-cols-[minmax(0,1fr)_20rem] hd:items-start hd:gap-x-6">
+      <div className="min-w-0">
+      <HostCves
+        host={h}
+        initialFilter={initialFilter}
+        notice={notice}
+        details={
+          <details className="mb-2 rounded-xs border border-line bg-surface hd:hidden">
+            <summary className="flex min-h-8 cursor-pointer items-center px-3 text-sm font-semibold max-md:min-h-11">Host-Details</summary>
+            <div className="border-t border-line px-3 py-2">
+              <HostDetails host={h} feeds={feeds.data} notice={notice} />
+            </div>
+          </details>
+        }
+      />
+      <div>
       <UpdatesSection hostId={h.id} pending={h.updates_pending ?? 0} />
 
       <section aria-labelledby="hist" className="mt-6">
@@ -189,6 +118,13 @@ export default function HostDetailPage() {
         )}
       </section>
       </div>
+      </div>
+      <aside aria-labelledby="facts" className="max-hd:hidden hd:sticky hd:top-4 hd:max-h-[calc(100dvh-2rem)] hd:overflow-y-auto rounded-xs border border-line bg-surface p-3">
+        <h2 id="facts" className="mb-2 text-base font-semibold">
+          Host-Details
+        </h2>
+        <HostDetails host={h} feeds={feeds.data} notice={notice} />
+      </aside>
       </div>
     </>
   );

@@ -23,6 +23,9 @@ const ROW_H_TOUCH = 64; // unter 768 px: zweizeilig
 const PAGE = 200;
 const GROUP_PAGE = 1000; // Obergrenze der API je Anfrage
 const VIRTUAL_FROM = 60; // ab dieser Zeilenzahl wird nur der sichtbare Ausschnitt gerendert
+/** Weg zum Fix (nur Anzeige, es wird nichts ausgeführt). */
+const UPDATE_CMD = "sudo apt update && sudo apt upgrade";
+const UPDATE_HINT = `Fix im Archiv. Update einspielen: ${UPDATE_CMD}, danach Neustart, falls ein Kernel betroffen ist.`;
 const PROXMOX_ADVISORIES = "https://forum.proxmox.com/forums/security-advisories.26/";
 
 /** Kacheln der Kopfzeile; jede gehört zu genau einer Liste. */
@@ -87,7 +90,7 @@ const TONE_BORDER = { crit: "border-crit", warn: "border-warn", ok: "border-ok",
 const TONE_TEXT = { crit: "text-crit", warn: "text-warn", ok: "text-ok", grey: "text-fg2", unknown: "text-unknown" } as const;
 const TONE_BG = { crit: "bg-crit", warn: "bg-warn", ok: "bg-ok", grey: "bg-fg3", unknown: "bg-unknown" } as const;
 
-export function HostCves({ host, initialFilter, notice }: { host: Host; initialFilter: CveFilter | null; notice: FeedNotice }) {
+export function HostCves({ host, initialFilter, notice, details }: { host: Host; initialFilter: CveFilter | null; notice: FeedNotice; details?: React.ReactNode }) {
   // Proxmox: es gibt nur "unbekannt, manuell prüfen"; diese Einträge stehen sofort im Blick (nie grün, kein Alarm).
   const [tile, setTile] = useState<Tile>(initialFilter ?? (host.is_proxmox ? "unknown" : "open"));
   const [text, setText] = useState("");
@@ -157,6 +160,8 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
   const sentence = sc ? summarySentence(sc, { newest, proxmox: host.is_proxmox, restricted: notice.restricted }) : "CVE-Lage wird geladen …";
   const segments = sc ? barSegments(sc) : [];
   const bigTiles: Tile[] = ["open", "reboot", "fixed"];
+  // „Unbekannt“ nur als Kachel, wenn es etwas gibt (oder die Liste gerade gewählt ist); sonst steht es ruhig in den Host-Details.
+  const showUnknown = Boolean(sc) && (numbers.unknown > 0 || tile === "unknown");
 
   return (
     <section aria-labelledby="cve" className="mb-6">
@@ -202,7 +207,7 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
           <span key={sg.tile} style={{ width: `${sg.pct}%` }} className={`${TONE_BG[TILE_META[sg.tile].tone]} ${sg.tile === "unknown" ? "opacity-60" : ""}`} title={`${TILE_META[sg.tile].word}: ${sg.count}`} />
         ))}
       </div>
-      <div className="mb-2 grid grid-cols-3 gap-2 max-md:flex max-md:overflow-x-auto max-md:pb-1 max-md:[scroll-snap-type:x_proximity]" role="group" aria-label="CVE-Zustände">
+      <div className={`mb-2 grid gap-2 max-md:flex max-md:overflow-x-auto max-md:pb-1 max-md:[scroll-snap-type:x_proximity] ${showUnknown ? "grid-cols-[repeat(3,minmax(0,1fr))_auto]" : "grid-cols-3"}`} role="group" aria-label="CVE-Zustände">
         {bigTiles.map((t) => (
           <TileButton
             key={t}
@@ -216,33 +221,29 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
             warn={t === "open" && notice.restricted}
           />
         ))}
-        <button
-          type="button"
-          aria-pressed={tile === "unknown"}
-          onClick={() => pick("unknown")}
-          className={`flex shrink-0 flex-col justify-center rounded-xs border px-3 py-1.5 text-left text-xs max-md:min-h-11 ${tile === "unknown" ? "border-2 border-unknown bg-unknown-soft" : "border-line bg-surface hover:bg-sunk"} md:hidden`}
-        >
-          <span className="flex items-center gap-1 font-semibold text-unknown">
-            <Icon name="unknown" size={14} /> Unbekannt <span className="tabular-nums">{sc ? numbers.unknown : "…"}</span>
-            {tile === "unknown" ? <Icon name="ok" size={14} /> : null}
-          </span>
-        </button>
+        {showUnknown ? (
+          <button
+            type="button"
+            aria-pressed={tile === "unknown"}
+            onClick={() => pick("unknown")}
+            className={`flex shrink-0 flex-col justify-center gap-0.5 rounded-xs border px-3 py-2 text-left max-md:min-h-11 ${tile === "unknown" ? "border-2 border-unknown bg-unknown-soft" : "border-line bg-surface hover:bg-sunk"}`}
+          >
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-unknown">
+              <Icon name="unknown" size={16} /> Unbekannt
+              {tile === "unknown" ? <Icon name="ok" size={14} /> : null}
+            </span>
+            <span className="text-2xl font-semibold leading-none tabular-nums text-fg">{numbers.unknown.toLocaleString("de-DE")}</span>
+            <span className="text-xs text-fg2">ohne Aussage</span>
+          </button>
+        ) : null}
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg2">
-        <button
-          type="button"
-          aria-pressed={tile === "unknown"}
-          onClick={() => pick("unknown")}
-          className={`inline-flex h-6 items-center gap-1 rounded-xs border px-1.5 font-medium max-md:hidden ${tile === "unknown" ? "border-2 border-unknown bg-unknown-soft text-unknown" : "border-line bg-surface text-fg2 hover:bg-sunk"}`}
-        >
-          <Icon name="unknown" size={14} /> Unbekannt <span className="tabular-nums font-semibold">{sc ? numbers.unknown : "…"}</span>
-          {tile === "unknown" ? <Icon name="ok" size={14} /> : null}
-        </button>
         <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>{kernelLine(running ?? null, newest ?? null, Boolean(rebootNeeded))}</span>
           {rebootNeeded ? <CopyButton text="sudo reboot" label="Befehl kopieren" /> : null}
         </span>
       </div>
+      {details}
       <div ref={sentinel} aria-hidden="true" className="h-px" />
 
       {/* Verkürzte Leiste: erscheint erst beim Scrollen und nimmt keinen Platz ein (keine Layoutsprünge). */}
@@ -335,7 +336,8 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
             variant={tile === "open" ? "open" : "plain"}
             onOpen={setDetail}
             onMore={() => setLimit((l) => l + PAGE)}
-            empty={tile === "open" ? (notice.restricted ? "Keine offenen CVEs bekannt, aber die Quelle ist unvollständig." : "Nichts offen.") : host.is_proxmox ? "Setze CVEs auf die Watchlist, dann erscheinen sie hier als „manuell prüfen“." : "Keine Einträge für diese Auswahl."}
+            expected={sc ? numbers[tile] : null}
+            empty={tile === "open" ? (notice.restricted ? "Keine offenen CVEs bekannt, aber die Quelle ist unvollständig." : "Keine offenen CVEs. Für den laufenden Kernel ist keine CVE ohne installierten Fix bekannt.") : host.is_proxmox ? "Setze CVEs auf die Watchlist, dann erscheinen sie hier als „manuell prüfen“." : "Keine Einträge für diese Auswahl."}
           />
         )}
       </div>
@@ -372,13 +374,17 @@ function TileButton({ t, n, active, loaded, onPick, line, sub, warn }: { t: Tile
       </span>
       <span className="text-2xl font-semibold leading-none tabular-nums text-fg">{loaded ? n.toLocaleString("de-DE") : "…"}</span>
       <span className="text-xs text-fg2">{line}</span>
-      {sub ? <span className="text-xs text-fg3">{sub}</span> : null}
+      {sub ? (
+        <span className="text-xs text-fg3" title={t === "open" && /Fix im Archiv/.test(sub) ? UPDATE_HINT : undefined}>
+          {sub}
+        </span>
+      ) : null}
     </button>
   );
 }
 
 /** Virtualisierte, dichte Zeilenliste mit fester Höhe und eigener Bildlaufleiste. */
-function VirtualRows({ items, rowH, height, label, render }: { items: HostCve[]; rowH: number; height: string; label: string; render: (c: HostCve, style: React.CSSProperties | undefined) => React.ReactNode }) {
+function VirtualRows({ items, rowH, height, label, render }: { items: HostCve[]; rowH: number; height?: string; label: string; render: (c: HostCve, style: React.CSSProperties | undefined) => React.ReactNode }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState(0);
   const [viewH, setViewH] = useState(480);
@@ -394,7 +400,7 @@ function VirtualRows({ items, rowH, height, label, render }: { items: HostCve[];
   const first = virtual ? Math.max(0, Math.floor(scroll / rowH) - 8) : 0;
   const last = virtual ? Math.min(items.length, Math.ceil((scroll + viewH) / rowH) + 8) : items.length;
   return (
-    <div ref={scroller} onScroll={(e) => setScroll(e.currentTarget.scrollTop)} tabIndex={0} role="region" aria-label={label} className="overflow-y-auto overflow-x-hidden rounded-xs border border-line bg-surface" style={{ height }}>
+    <div ref={scroller} onScroll={(e) => setScroll(e.currentTarget.scrollTop)} tabIndex={0} role="region" aria-label={label} className="overflow-y-auto overflow-x-hidden rounded-xs border border-line bg-surface" style={{ height: height ?? `min(${items.length * rowH + 2}px, ${LIST_MAX})` }}>
       <ul className="m-0 list-none p-0" style={virtual ? { position: "relative", height: items.length * rowH } : undefined}>
         {items.slice(first, last).map((c, i) => render(c, virtual ? { position: "absolute", top: (first + i) * rowH, left: 0, right: 0 } : undefined))}
       </ul>
@@ -402,35 +408,49 @@ function VirtualRows({ items, rowH, height, label, render }: { items: HostCve[];
   );
 }
 
-/** Spaltenraster der Zeilen: ID | Level | Text | [Status] | [Fix-Version] | Seit | Details. */
-function gridCols(variant: "open" | "plain" | "group"): string {
+/**
+ * Spaltenraster der Zeilen: ID | Level | Text | [Status] | [Fix-Version] | Seit | Details.
+ * Ab 1600 px (`wide`) kommen Fix-Version (falls noch nicht da), Paket und Quelle dazu; die Beschreibung behält `1fr`.
+ */
+function gridCols(variant: "open" | "plain" | "group", wide = false): string {
   const fix = "minmax(8rem,11rem)";
   const status = "9.5rem";
   const cols = ["9.5rem", "6.5rem", "minmax(0,1fr)"];
   if (variant === "open") cols.push(status);
   if (variant === "group") cols.push(fix);
   if (variant === "plain") cols.push(status, fix);
+  if (wide) {
+    if (variant === "open") cols.push(fix);
+    cols.push("minmax(7rem,10rem)", "minmax(5rem,8rem)");
+  }
   cols.push("5.5rem", "1.5rem");
   return cols.join(" ");
 }
 
+/** Raster per CSS-Variablen: unter 1600 px das schmale, ab 1600 px das breite Raster. */
+function gridStyle(variant: "open" | "plain" | "group"): React.CSSProperties {
+  return { "--cols": gridCols(variant), "--cols-wide": gridCols(variant, true) } as React.CSSProperties;
+}
 function ListHead({ variant }: { variant: "open" | "plain" | "group" }) {
   return (
-    <div className="mb-px hidden items-center gap-2 px-2 text-xs font-semibold text-fg3 md:grid" style={{ gridTemplateColumns: gridCols(variant) }}>
+    <div className="mb-px hidden items-center gap-2 px-2 text-xs font-semibold text-fg3 md:grid md:[grid-template-columns:var(--cols)] wide:[grid-template-columns:var(--cols-wide)]" style={gridStyle(variant)}>
       <span>CVE</span>
       <span>Level</span>
       <span>Beschreibung</span>
       {variant !== "group" ? <span>Status</span> : null}
       {variant !== "open" ? <span>Fix-Version</span> : null}
+      {variant === "open" ? <span className="hidden wide:inline">Fix-Version</span> : null}
+      <span className="hidden wide:inline">Paket</span>
+      <span className="hidden wide:inline">Quelle</span>
       <span>Seit</span>
       <span className="sr-only">Details</span>
     </div>
   );
 }
 
-const LIST_H = "clamp(17rem, calc(100dvh - 26rem), 48rem)";
+const LIST_MAX = "clamp(12rem, calc(100dvh - 22rem), 56rem)";
 
-function CveList({ title, state, proxmox, variant, onOpen, onMore, empty }: { title: string; state: ReturnType<typeof useApi<HostCvesResponse>>; proxmox: boolean; variant: "open" | "plain"; onOpen: (c: HostCve) => void; onMore: () => void; empty: string }) {
+function CveList({ title, state, proxmox, variant, onOpen, onMore, empty, expected }: { expected: number | null; title: string; state: ReturnType<typeof useApi<HostCvesResponse>>; proxmox: boolean; variant: "open" | "plain"; onOpen: (c: HostCve) => void; onMore: () => void; empty: string }) {
   const items = useMemo(() => state.data?.items ?? [], [state.data]);
   const total = state.data?.total ?? 0;
   const rowH = useNarrow() ? ROW_H_TOUCH : ROW_H;
@@ -443,7 +463,7 @@ function CveList({ title, state, proxmox, variant, onOpen, onMore, empty }: { ti
       </h3>
       <ListHead variant={variant} />
       {loading ? (
-        <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3" style={{ height: LIST_H }}>
+        <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3" style={{ height: expected === null ? "8rem" : `min(${Math.max(expected, 1) * rowH + 2}px, ${LIST_MAX})` }}>
           Lädt …
         </div>
       ) : items.length === 0 ? (
@@ -452,7 +472,6 @@ function CveList({ title, state, proxmox, variant, onOpen, onMore, empty }: { ti
         <VirtualRows
           items={items}
           rowH={rowH}
-          height={LIST_H}
           label={`${title}, Liste`}
           render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} variant={variant} proxmox={proxmox} onOpen={onOpen} style={style} />}
         />
@@ -561,6 +580,8 @@ function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number;
       <span aria-hidden="true">⋯</span>
     </button>
   );
+  // Quell-Paket(e) laut Quelle (z. B. „linux“); mehrere ohne Wiederholung.
+  const packages = [...new Set(c.sources.map((x) => x.package))].join(", ");
   const fixCell = c.fix_version ? <Mono>{c.fix_version}</Mono> : <span className="text-fg3">–</span>;
   if (narrow) {
     // Mobil gestapelt: Zeile 1 ID, Level, Details; Zeile 2 Status und Fix-Stand.
@@ -576,7 +597,7 @@ function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number;
     );
   }
   return (
-    <li style={{ height: h, gridTemplateColumns: gridCols(variant), ...style }} className="grid items-center gap-2 border-b border-line px-2 text-xs last:border-b-0">
+    <li style={{ height: h, ...gridStyle(variant), ...style }} className="grid items-center gap-2 border-b border-line px-2 text-xs [grid-template-columns:var(--cols)] last:border-b-0 wide:[grid-template-columns:var(--cols-wide)]">
       {link}
       <span className={`font-medium ${lvlTone}`} title={c.level ? `Level ${c.level}/10` : undefined}>
         {levelWord(c.level)}
@@ -586,11 +607,16 @@ function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number;
         {text}
       </span>
       {variant !== "group" ? (
-        <span className="min-w-0">
+        <span className="min-w-0" title={c.status === "vulnerable" && c.fix_version ? UPDATE_HINT : undefined}>
           <StatusBadge info={st} label={statusLabel} />
         </span>
       ) : null}
       {variant === "plain" || variant === "group" ? <span className="min-w-0 whitespace-nowrap">{fixCell}</span> : null}
+      {variant === "open" ? <span className="hidden min-w-0 whitespace-nowrap wide:block">{fixCell}</span> : null}
+      <span className="hidden min-w-0 truncate wide:block" title={packages}>
+        {packages ? <Mono>{packages}</Mono> : <span className="text-fg3">–</span>}
+      </span>
+      <span className="hidden min-w-0 truncate text-fg2 wide:block">{c.source ?? "–"}</span>
       <span className="tabular-nums text-fg3">{since(c.published_at)}</span>
       {more}
     </li>
@@ -613,6 +639,12 @@ function Detail({ c, host, running, busy, onReview }: { c: HostCve; host: Host; 
         {c.level ? <span className="text-xs text-fg3">Level {c.level}/10</span> : null}
       </p>
       <p className="text-fg2">{hostState(c, running, host.is_proxmox)}</p>
+      {c.status === "vulnerable" && c.fix_version ? (
+        <p role="note" className="border-l-4 border-accent bg-sunk px-3 py-1.5">
+          <strong className="font-semibold">Fix im Archiv{c.sources.length ? ` (Paket ${[...new Set(c.sources.map((x) => x.package))].join(", ")}, ab ${c.fix_version})` : ` ab ${c.fix_version}`}.</strong> Update einspielen:{" "}
+          <Mono>{UPDATE_CMD}</Mono> <CopyButton text={UPDATE_CMD} label="Befehl kopieren" />, danach Neustart, falls ein Kernel betroffen ist. Patchwatch führt nichts aus.
+        </p>
+      ) : null}
       <p className="break-words">
         <Linkified text={c.reason} />
       </p>

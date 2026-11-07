@@ -141,11 +141,12 @@
   --radius-sm: 3px;
   --radius-md: 6px;
 
-  /* Breakpoints (min-width): md 768 Tablet, lg 1024 Desktop, xl 1440, wide 1600 (Zusatzspalten), 2xl 1920. */
+  /* Breakpoints (min-width): md 768 Tablet, lg 1024 Desktop, hd 1280 (Host-Details rechts), xl 1440, wide 1600 (Zusatzspalten), 2xl 1920. */
   --breakpoint-xs: 30rem;
   --breakpoint-sm: 40rem;
   --breakpoint-md: 48rem;
   --breakpoint-lg: 64rem;
+  --breakpoint-hd: 80rem;
   --breakpoint-xl: 90rem;
   --breakpoint-wide: 100rem;
   --breakpoint-2xl: 120rem;

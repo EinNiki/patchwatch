@@ -20,7 +20,7 @@ import { MiniStepper, RunStepper } from "@/components/RunStepper";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Mono } from "@/components/Version";
 
-const FEED_STATE: Record<Feed["state"], StatusInfo> = {
+export const FEED_STATE: Record<Feed["state"], StatusInfo> = {
   ok: { label: "Aktuell", tone: "ok", icon: "ok", rank: 0 },
   stale: { label: "Veraltet", tone: "warn", icon: "clock", rank: 1 },
   incomplete: { label: "Unvollständig", tone: "warn", icon: "clock", rank: 1 },
