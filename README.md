@@ -260,7 +260,7 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
 - Chips außerhalb des Umfangs (Release läuft auf keinem deiner Hosts) sind gestrichelt und gedämpft; die Legende darüber
   erscheint nur, wenn ein solcher Chip auf der Seite steht.
 - **egal** = keine Bedingung. Debian und Ubuntu sind mit **UND** verknüpft.
-- **Umfang** (im Filterbereich, gilt für Anzeige und Filter gleich): „Releases auf meinen Hosts“ (Standard) oder „Alle
+- **Umfang** (im Filterbereich, gilt für Anzeige und Filter gleich): „Meine Releases“ (Standard; im Auswahlfeld „Releases auf meinen Hosts“) oder „Alle
   Releases“. Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird im Standardumfang nicht als „gefixt“ gefunden;
   sie erscheint dort nur hinter „+ n weitere Releases“. Findet ein Filter nichts, nennt die Seite die aktiven Filter und
   bietet an, den Umfang auf „Alle Releases“ zu stellen oder die Filter zurückzusetzen.

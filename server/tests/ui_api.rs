@@ -743,3 +743,46 @@ async fn stale_threshold_from_settings_applies_without_restart(pool: PgPool) {
     worker::schedule_once(&st).await.unwrap();
     assert_eq!(status(pool.clone()).await, "stale", "2 h gilt sofort");
 }
+
+/// Die CVE-Liste nennt die betroffenen Hosts namentlich (höchstens 6, alphabetisch); die Gesamtzahl steht in den Zählern.
+#[sqlx::test(migrations = "./migrations")]
+async fn cve_list_names_affected_hosts_with_a_cap(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    sqlx::query("INSERT INTO cves (id, description) VALUES ('CVE-2026-4242', 'x')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for i in 0..8 {
+        let id = host(&pool, &format!("host-{i}"), "trixie").await;
+        // host-7 ist nicht betroffen (gefixt): taucht nicht auf.
+        let st = if i == 7 { "fixed" } else { "vulnerable" };
+        sqlx::query("INSERT INTO host_cve_status (host_id, cve_id, status, reason) VALUES ($1, 'CVE-2026-4242', $2, 'x')")
+            .bind(id)
+            .bind(st)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/cves?affects=all&releases=all&q=CVE-2026-4242",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let row = &r.json[0];
+    assert_eq!(row["hosts_vulnerable"], 7);
+    let names: Vec<&str> = row["affected_hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["host-0", "host-1", "host-2", "host-3", "host-4", "host-5"],
+        "höchstens 6 Namen, alphabetisch, ohne gefixte Hosts"
+    );
+}

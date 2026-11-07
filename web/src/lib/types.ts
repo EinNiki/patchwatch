@@ -144,6 +144,8 @@ export interface Cve {
   /** Fix installiert, läuft erst nach dem Neustart. */
   hosts_reboot: number;
   hosts_unknown: number;
+  /** Namen betroffener Hosts (höchstens 6, nur in der Liste); die Gesamtzahl steht in den `hosts_*`-Zählern. */
+  affected_hosts?: string[];
 }
 
 /** Ein Chip je (Quelle, Release): ungünstigster Status über alle Pakete. */

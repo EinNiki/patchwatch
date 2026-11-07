@@ -10,7 +10,7 @@ import type { CveDetail, CveListItem } from "@/lib/types";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
 import { NavIcon } from "@/components/Icons";
-import { affectedHosts, affectingLabel, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
+import { affectedHosts, affectingLabel, hostChips, listStats, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
 import { useFlash } from "@/lib/useFlash";
 import { toast } from "@/lib/toastStore";
@@ -280,9 +280,14 @@ function CveView() {
     }
   }
 
+  const stats = cves.data ? listStats(cves.data) : null;
+  const truncated = (cves.data?.length ?? 0) >= limit && (scopeCount.data?.affecting ?? 0) > (stats?.affecting ?? 0);
   const chips: { key: string; label: string; remove: () => void }[] = [];
   // Leerer Standard („Meine Hosts“ ohne weitere Filter): freundlicher Hinweis statt „Keine passenden CVEs“.
-  const onlyMineEmpty = cves.data?.length === 0 && !affectsAll && !onlyWatch && q.trim() === "" && !allReleases && !distro && !debianFix && !ubuntuFix;
+  const noOtherFilter = !onlyWatch && q.trim() === "" && !allReleases && !distro && !debianFix && !ubuntuFix;
+  const onlyMineEmpty = cves.data?.length === 0 && !affectsAll && noOtherFilter;
+  // „Alle“ ohne weitere Filter und trotzdem leer: es gibt noch gar keine CVE-Daten.
+  const noDataAtAll = cves.data?.length === 0 && affectsAll && noOtherFilter;
   if (q.trim()) chips.push({ key: "q", label: `Suche: ${q.trim()}`, remove: () => { setQInput(""); setParam("q", null); } });
   if (distro) chips.push({ key: "distro", label: `Distribution: ${distro === "debian" ? "Debian" : "Ubuntu"}`, remove: () => setParam("distro", null) });
   if (debianFix) chips.push({ key: "debian", label: `Debian: ${FIX_LABEL[debianFix]}`, remove: () => setParam("debian", null) });
@@ -327,10 +332,10 @@ function CveView() {
             Filter{activeFilters ? ` (${activeFilters})` : ""}
           </Button>
         </div>
-        <div id="cve-filters" className={`mb-3 mt-2 flex-wrap items-center gap-x-4 gap-y-2 max-md:flex-col max-md:items-stretch ${filtersOpen ? "flex" : "max-md:hidden md:flex"}`}>
+        <div id="cve-filters" className={`mb-3 mt-2 flex-wrap items-center gap-x-3 gap-y-2 max-md:flex-col max-md:items-stretch ${filtersOpen ? "flex" : "max-md:hidden md:flex"}`}>
           <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
             Suche
-            <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-64 max-w-full font-normal max-md:w-full" />
+            <TextInput type="search" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="CVE-ID oder Text" className="w-52 max-w-full font-normal max-md:w-full" />
           </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
             Betrifft
@@ -366,9 +371,9 @@ function CveView() {
             nur Watchlist
           </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
-            Umfang (Anzeige und Filter)
-            <select value={allReleases ? "all" : "mine"} onChange={(e) => setParam("releases", e.target.value === "all" ? "all" : null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
-              <option value="mine">Releases auf meinen Hosts</option>
+            Umfang
+            <select title="Gilt für Anzeige und Filter" value={allReleases ? "all" : "mine"} onChange={(e) => setParam("releases", e.target.value === "all" ? "all" : null)} className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11">
+              <option value="mine">Meine Releases</option>
               <option value="all">Alle Releases</option>
             </select>
           </label>
@@ -394,15 +399,29 @@ function CveView() {
           </ul>
         ) : null}
 
-        <p className="mb-2 text-sm font-semibold" aria-live="polite" data-testid="affects-count">
-          {scopeCount.data ? <span>{affectingLabel(scopeCount.data.affecting)}</span> : <span className="text-fg3">CVEs werden gezählt …</span>}
+        {/* Kennzahlen: nur Anzeige (kein Knopf), aus den geladenen Zeilen berechnet und deshalb deckungsgleich mit der Tabelle. */}
+        <p className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm" aria-live="polite" data-testid="cve-stats">
+          <span className="font-semibold" data-testid="affects-count">
+            {scopeCount.data ? affectingLabel(scopeCount.data.affecting) : <span className="text-fg3">CVEs werden gezählt …</span>}
+          </span>
+          {stats && stats.affecting > 0 ? (
+            <>
+              <span aria-hidden="true" className="text-fg3">·</span>
+              <span>davon hoch/kritisch <strong className="tabular-nums">{stats.high}</strong></span>
+              <span aria-hidden="true" className="text-fg3">·</span>
+              <span><strong className="tabular-nums">{stats.withFix}</strong> mit Fix im Archiv</span>
+              <span aria-hidden="true" className="text-fg3">·</span>
+              <span><strong className="tabular-nums">{stats.withoutFix}</strong> ohne Fix</span>
+              {truncated ? <span className="text-xs text-fg3">(in den ersten {cves.data?.length} der Liste)</span> : null}
+            </>
+          ) : null}
         </p>
 
         {cves.error && !cves.data ? <ErrorNote message={cves.error} /> : null}
         {!cves.data ? (
           <TableSkeleton what="CVEs" />
         ) : cves.data.length === 0 ? (
-          <Empty title={filtered ? (onlyMineEmpty ? "Keine CVE betrifft deine Hosts" : "Keine passenden CVEs") : "Noch keine CVE-Daten"}>
+          <Empty title={onlyMineEmpty ? "Keine CVE betrifft deine Hosts" : noDataAtAll ? "Noch keine CVE-Daten" : filtered ? "Keine passenden CVEs" : "Noch keine CVE-Daten"}>
             {onlyMineEmpty ? (
               <>
                 <span className="block">Gut so: Zu deinen Hosts gibt es zurzeit keine CVE mit verwundbarem Zustand, angekündigtem Fix oder nötigem Neustart.</span>
@@ -412,7 +431,7 @@ function CveView() {
                   </button>
                 </span>
               </>
-            ) : filtered ? (
+            ) : filtered && !noDataAtAll ? (
               <>
                 <span className="block">
                   Aktive Filter: {chips.length > 0 ? chips.map((c) => c.label).join(", ") : "keine"}. Umfang: {allReleases ? "alle Releases" : "nur Releases, die auf deinen Hosts laufen"}.
@@ -453,6 +472,8 @@ function CveView() {
                     <th scope="col"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col"><span className="th-pad">Distributionen</span></th>
                     <SortTh label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
+                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Pakete</span></th>
+                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Betroffene Hosts</span></th>
                     <SortTh label="Level" className="max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
                     <SortTh label="Aktualisiert" className="md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />
                   </tr>
@@ -546,6 +567,12 @@ const CveRow = memo(function CveRow({
         <td data-label="Hosts">
           <HostCounts c={c} />
         </td>
+        <td className="max-wide:hidden">
+          <PackagesCell c={c} />
+        </td>
+        <td className="max-wide:hidden">
+          <HostChips c={c} />
+        </td>
         <td className="mono max-wide:hidden" title={c.priority ?? undefined}>{c.level ? `${c.level}/10` : "–"}</td>
         <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
           {c.updated_at ? (
@@ -594,6 +621,29 @@ function OtherReleases({ id, allScope }: { id: string; allScope: boolean }) {
       ))}
       {detail.error ? <span className="text-crit">{detail.error}</span> : null}
     </>
+  );
+}
+
+/** Quell-Pakete der Chips ohne Wiederholung (z. B. „linux“). */
+function PackagesCell({ c }: { c: CveListItem }) {
+  const pk = [...new Set(c.distros.map((d) => d.package))];
+  if (pk.length === 0) return <span className="text-fg3">–</span>;
+  return <span className="mono text-xs" title={pk.join(", ")}>{pk.slice(0, 2).join(", ")}{pk.length > 2 ? ` +${pk.length - 2}` : ""}</span>;
+}
+
+/** Betroffene Hosts namentlich als kleine Chips (höchstens 4), der Rest als „+N“. */
+function HostChips({ c }: { c: CveListItem }) {
+  const { names, more } = hostChips(c, 4);
+  if (names.length === 0 && more === 0) return <span className="text-fg3">–</span>;
+  return (
+    <ul className="m-0 flex list-none flex-wrap gap-1 p-0" aria-label="Betroffene Hosts">
+      {names.map((n) => (
+        <li key={n} className="inline-flex h-(--chip-h) max-w-32 items-center truncate rounded-xs border border-line bg-sunk px-1.5 text-xs">
+          {n}
+        </li>
+      ))}
+      {more > 0 ? <li className="inline-flex h-(--chip-h) items-center px-1 text-xs text-fg2" title={`${more} weitere Hosts`}>+{more}</li> : null}
+    </ul>
   );
 }
 

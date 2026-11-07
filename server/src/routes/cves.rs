@@ -71,7 +71,14 @@ pub struct CveRow {
     /// Fix installiert, läuft erst nach dem Neustart.
     hosts_reboot: i64,
     hosts_unknown: i64,
+    /// Namen der betroffenen Hosts (verwundbar, Fix angekündigt, Neustart nötig), höchstens `AFFECTED_NAMES`; nur in der
+    /// Liste gefüllt. Die Gesamtzahl steht in den `hosts_*`-Zählern.
+    #[sqlx(default)]
+    affected_hosts: Vec<String>,
 }
+
+/// Höchstzahl der Hostnamen je CVE in der Liste (Chips; der Rest steht als „+N“).
+const AFFECTED_NAMES: i64 = 6;
 
 #[derive(Serialize)]
 pub struct CveOut {
@@ -424,7 +431,7 @@ pub async fn list(
     let query = format!(
         "SELECT p.id, left(d.description, {LIST_DESCRIPTION_CHARS}) AS description, p.priority, p.published_at, p.source_updated_at AS updated_at, p.last_synced_at, p.watched, p.note, \
          EXISTS (SELECT 1 FROM cve_source_status k WHERE k.cve_id = p.id AND k.source = 'cisa_kev') AS exploited, \
-         hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_reboot, hc.hosts_unknown \
+         hc.hosts_vulnerable, hc.hosts_fix_pending, hc.hosts_reboot, hc.hosts_unknown, hc.affected_hosts \
          FROM (SELECT c.id, c.priority, c.published_at, c.source_updated_at, c.last_synced_at, (w.cve_id IS NOT NULL) AS watched, w.note, COALESCE(a.aff, 0) AS aff \
                FROM cves c LEFT JOIN cve_watchlist w ON w.cve_id = c.id \
                LEFT JOIN (SELECT cve_id, count(*) AS aff FROM host_cve_status WHERE status IN ({AFFECTING_STATUSES}) GROUP BY cve_id) a ON a.cve_id = c.id {filter} \
@@ -433,7 +440,11 @@ pub async fn list(
          CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE h.status = 'vulnerable') AS hosts_vulnerable, \
                                     count(*) FILTER (WHERE h.status = 'fix_pending') AS hosts_fix_pending, \
                                     count(*) FILTER (WHERE h.status = 'fixed_installed_reboot_required') AS hosts_reboot, \
-                                    count(*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown \
+                                    count(*) FILTER (WHERE h.status = 'unknown') AS hosts_unknown, \
+                                    COALESCE((SELECT array_agg(n.name ORDER BY n.name) FROM \
+                                              (SELECT hh.name FROM host_cve_status x JOIN hosts hh ON hh.id = x.host_id \
+                                               WHERE x.cve_id = p.id AND x.status IN ({AFFECTING_STATUSES}) \
+                                               ORDER BY hh.name LIMIT {AFFECTED_NAMES}) n), '{{}}') AS affected_hosts \
                              FROM host_cve_status h WHERE h.cve_id = p.id) hc \
          ORDER BY p.watched DESC, {outer_order}"
     );

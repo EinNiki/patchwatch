@@ -3,7 +3,7 @@ import { Skeleton } from "./Skeleton";
 /** Leerzustände: knapp und sachlich, sagen was fehlt und was als Nächstes zu tun ist. */
 export function Empty({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="border-y border-line px-4 py-8 text-center">
+    <div className="border-y border-line px-4 py-3 text-center">
       <p className="font-semibold">{title}</p>
       {children ? <div className="mx-auto mt-1 max-w-prose text-fg2">{children}</div> : null}
     </div>
