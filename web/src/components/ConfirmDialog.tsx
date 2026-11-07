@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useId, useRef } from "react";
+import { useModal } from "@/components/useModal";
 import { Button } from "./Controls";
 
 /** Bestätigung per natives <dialog> (Fokusfalle, Escape, Backdrop inklusive). */
@@ -23,14 +24,9 @@ export function ConfirmDialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  useEffect(() => {
-    const d = ref.current;
-    if (!d) return;
-    if (open && !d.open) d.showModal();
-    if (!open && d.open) d.close();
-  }, [open]);
+  useModal(ref, open, onCancel);
   return (
-    <dialog ref={ref} onCancel={onCancel} aria-labelledby={titleId}>
+    <dialog ref={ref} aria-labelledby={titleId} aria-modal="true">
       <h2 id={titleId} className="mb-2 text-lg font-semibold">
         {title}
       </h2>
