@@ -13,6 +13,7 @@ import { Icon, NavIcon } from "@/components/Icons";
 import { affectedHosts, affectingLabel, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
 import { useFlash } from "@/lib/useFlash";
+import { toast } from "@/lib/toastStore";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ChipLegend, DistroChip } from "@/components/DistroChip";
 import { PageHeader } from "@/components/PageHeader";
@@ -234,13 +235,13 @@ function CveView() {
       setAnnounce(`${c.id} bleibt auf der Watchlist`);
     }
     try {
-      if (want) await api.put(`/watchlist/${c.id}`);
-      else await api.del(`/watchlist/${c.id}`);
+      const what = `${c.id}: Die Watchlist konnte nicht geändert werden. Der Stand wurde zurückgesetzt`;
+      if (want) await api.put(`/watchlist/${c.id}`, undefined, { what });
+      else await api.del(`/watchlist/${c.id}`, { what });
       if (!(onlyWatch && !want)) await refreshRow(c.id).catch(() => undefined);
     } catch {
       if (onlyWatch && !want) cancelHide(c.id);
       cves.mutate((list) => list.map((x) => (x.id === c.id ? { ...x, watched: c.watched } : x)));
-      setNotice(`${c.id}: Die Watchlist konnte nicht geändert werden. Der Stand wurde zurückgesetzt.`);
     } finally {
       setPendingIds((s) => {
         const n = new Set(s);
@@ -267,12 +268,13 @@ function CveView() {
     setBusy(true);
     setNotice(null);
     try {
-      await api.put(`/watchlist/${id}`, newNote.trim() ? { note: newNote.trim() } : {});
+      await api.put(`/watchlist/${id}`, newNote.trim() ? { note: newNote.trim() } : {}, { what: "CVE konnte nicht zur Watchlist hinzugefügt werden" });
+      toast.success(`${id} zur Watchlist hinzugefügt.`);
       setNewId("");
       setNewNote("");
       await cves.reload();
     } catch {
-      setNotice("CVE konnte nicht zur Watchlist hinzugefügt werden.");
+      /* Der API-Client hat den Fehler als Toast gemeldet. */
     } finally {
       setBusy(false);
     }

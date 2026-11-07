@@ -25,7 +25,7 @@ export function ForcedPasswordChange({ username, onDone, onLogout }: { username:
     setBusy(true);
     setError(null);
     try {
-      await api.post("/auth/password", { current_password: current, new_password: next });
+      await api.post("/auth/password", { current_password: current, new_password: next }, { silent: true });
       onDone();
     } catch (err) {
       setError(err instanceof ApiError ? (err.status === 429 ? `Zu viele Versuche. Erneut möglich in ${err.retryAfter ?? 60} Sek.` : err.message) : "Passwort konnte nicht geändert werden.");

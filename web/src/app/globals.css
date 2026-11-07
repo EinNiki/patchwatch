@@ -529,12 +529,17 @@ summary {
   @starting-style {
     .toast {
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(-8px);
     }
   }
   .toast[data-leaving] {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(-4px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast {
+      transition: none;
+    }
   }
 }
 

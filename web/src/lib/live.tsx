@@ -1,8 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Icon } from "@/components/Icons";
-import type { IconName } from "./status";
+import { toast } from "./toastStore";
 
 /** Live-Ereignis vom Server (server/src/live.rs); die UI lädt Daten danach über die REST-API nach. */
 export interface LiveEvent {
@@ -16,27 +15,12 @@ export interface LiveEvent {
 
 export type LiveState = "connecting" | "live" | "offline";
 
-export interface Toast {
-  id: number;
-  title: string;
-  body: string;
-  level: "info" | "warn" | "crit";
-  /** Ausblenden läuft (CSS), danach wird die Meldung entfernt. */
-  leaving?: boolean;
-}
-
 interface LiveValue {
   state: LiveState;
   subscribe: (fn: (e: LiveEvent) => void) => () => void;
-  toasts: Toast[];
-  dismiss: (id: number) => void;
 }
 
 const Ctx = createContext<LiveValue | null>(null);
-
-const MAX_TOASTS = 3;
-const TOAST_MS = 8000;
-const TOAST_LEAVE_MS = 160;
 
 /** Produktion: gleiche Origin (Reverse-Proxy leitet /api inkl. Upgrade). Dev: `NEXT_PUBLIC_PATCHWATCH_LIVE_PORT` = Port der API. */
 function liveUrl(): string {
@@ -48,14 +32,8 @@ function liveUrl(): string {
 
 export function LiveProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<LiveState>("connecting");
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const listeners = useRef(new Set<(e: LiveEvent) => void>());
-  const nextId = useRef(1);
 
-  const dismiss = useCallback((id: number) => {
-    setToasts((t) => t.map((x) => (x.id === id ? { ...x, leaving: true } : x)));
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), TOAST_LEAVE_MS);
-  }, []);
   const subscribe = useCallback((fn: (e: LiveEvent) => void) => {
     listeners.current.add(fn);
     return () => void listeners.current.delete(fn);
@@ -87,9 +65,11 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         }
         if (typeof e.type !== "string") return;
         if (e.type === "notification" && e.title) {
-          const id = nextId.current++;
-          setToasts((t) => [...t, { id, title: e.title ?? "", body: e.body ?? "", level: e.level ?? "info" }].slice(-MAX_TOASTS));
-          setTimeout(() => dismiss(id), TOAST_MS);
+          // Server-Benachrichtigungen verschwinden wie bisher nach 8 s, auch kritische (sie stehen zusätzlich im Verlauf).
+          const lvl = e.level ?? "info";
+          const make = lvl === "crit" ? toast.error : lvl === "warn" ? toast.warning : toast.info;
+          if (e.body) make(e.body, { title: e.title, duration: 8000 });
+          else make(e.title, { duration: 8000 });
         }
         emit(e);
       };
@@ -111,13 +91,12 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(retry);
       ws?.close();
     };
-  }, [dismiss]);
+  }, []);
 
-  const value = useMemo(() => ({ state, subscribe, toasts, dismiss }), [state, subscribe, toasts, dismiss]);
+  const value = useMemo(() => ({ state, subscribe }), [state, subscribe]);
   return (
     <Ctx.Provider value={value}>
       {children}
-      <ToastRegion toasts={toasts} dismiss={dismiss} />
     </Ctx.Provider>
   );
 }
@@ -141,43 +120,4 @@ export function useLiveEvents(types: readonly string[], fn: (e: LiveEvent) => vo
       if (e.type === "resync" || wanted.has(e.type)) latest.current(e);
     });
   }, [ctx, key]);
-}
-
-const TOAST_ICON: Record<Toast["level"], IconName> = { info: "ok", warn: "warn", crit: "crit" };
-const TOAST_TONE: Record<Toast["level"], string> = {
-  info: "border-line",
-  warn: "border-warn",
-  crit: "border-crit",
-};
-
-
-function ToastRegion({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: number) => void }) {
-  return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2" role="region" aria-label="Benachrichtigungen">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          role={t.level === "crit" ? "alert" : "status"}
-          data-leaving={t.leaving || undefined}
-          className={`toast pointer-events-auto flex items-start gap-2 border-l-4 border-y border-r bg-surface px-3 py-2 shadow-lg ${TOAST_TONE[t.level]}`}
-        >
-          <span className={`mt-0.5 ${t.level === "crit" ? "text-crit" : t.level === "warn" ? "text-warn" : "text-ok"}`}>
-            <Icon name={TOAST_ICON[t.level]} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold">{t.title}</p>
-            {t.body ? <p className="line-clamp-3 text-sm text-fg2">{t.body}</p> : null}
-          </div>
-          <button
-            type="button"
-            onClick={() => dismiss(t.id)}
-            className="-my-1 -mr-1 inline-flex min-h-8 min-w-8 items-center justify-center rounded-[3px] text-fg2 hover:bg-sunk hover:text-fg max-md:min-h-11 max-md:min-w-11"
-          >
-            <span aria-hidden="true">×</span>
-            <span className="sr-only">Meldung schließen</span>
-          </button>
-        </div>
-      ))}
-    </div>
-  );
 }

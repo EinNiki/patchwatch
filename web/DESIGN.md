@@ -146,8 +146,14 @@ per `grid-template-rows`, begrenzt per `contain`). Keine Bibliothek, CSS genügt
 - **Tabelle:** Kopf `sunk` und sticky, leise Linien, Zeilen-Hover `sunk` 50 %, sortierbare Köpfe als `<button>` in `<th aria-sort>`, Zahlen/Versionen
   rechtsbündig bzw. mono, Aktionsspalte rechts. Mobil (< 768 px): gestapelte Einträge mit den Zellklassen `cell-primary`, `cell-status`, `cell-meta`.
 - **Dialog** (`<dialog>`, modal): Titel, kurzer Text, Objektname fett, Buttons rechts; Esc schließt; nicht für reine Information.
-- **Toast** (Live-Benachrichtigung): rechts unten, `role="status"` (kritisch: `role="alert"`), Icon + Text, sichtbar 8 s, per Tastatur
-  schließbar, nie die einzige Quelle (Eintrag steht auch in der Liste). Nicht gestapelt über 3.
+- **Toast** (ein System für alles, `lib/toastStore.ts` + `components/Toaster.tsx`): oben rechts unterhalb der Kopfzeile (verdeckt die
+  Seitenaktionen nicht), Varianten `success`/`info`/`warning`/`error`. Dauer 4 s / 4 s / 8 s, Fehler bleiben bis zum Schließen. Hover und
+  Fokus halten die Zeit an. Gleiche Meldung innerhalb von 5 s wird zu „×3“ zusammengefasst, höchstens 4 sichtbar (Rest wartet,
+  „+n weitere“). Optional eine Aktion; Schließen per Knopf oder Esc (Fokus im Bereich). Region „Benachrichtigungen“, Fehler
+  `role="alert"`, sonst `role="status"`; reduzierte Bewegung ohne Übergang. Aufruf auch ohne React: `toast.success(…)`.
+  Der API-Client meldet Fehler von Schreibzugriffen selbst (deutsche Texte, 5xx ohne Server-Detail; `silent` / `what` pro Aufruf).
+  **Bleibt inline:** Feldfehler (Formulare, Passwortwechsel, Anmeldung), Zustände, die bestehen bleiben (Leer-/Fehlerzustände mit
+  „Erneut versuchen“, Ladefehler einer Seite). Toast nie als einzige Quelle für etwas, das man später noch braucht.
 - **Leerzustände:** sagen, was fehlt und was als Nächstes zu tun ist, mit einer Aktion („Agent hinzufügen“). **Fehlerzustände:**
   Ursache in einem Satz, „Erneut versuchen“, Stand der Daten (z. B. „Daten von vor 5 Min.“) bleibt sichtbar.
 - **Details-Block:** Begründungen einer CVE-Bewertung per `<details>`. **Kleine Details:** relative Zeit mit absolutem `title` und

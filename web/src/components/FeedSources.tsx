@@ -12,6 +12,8 @@ import { Dialog } from "@/components/Dialog";
 import { NavIcon } from "@/components/Icons";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
+import { writeFailure } from "@/lib/apiErrors";
+import { toast } from "@/lib/toastStore";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Mono } from "@/components/Version";
 
@@ -93,32 +95,30 @@ function message(e: unknown, fallback: string): string {
 
 export function FeedSources() {
   const feeds = useApi<Feed[]>("/feeds", 30_000);
-  const [note, setNote] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Feed | null>(null);
   const [removing, setRemoving] = useState<Feed | null>(null);
   const deleting = useRef(false);
 
   async function refresh() {
-    setProblem(null);
     try {
-      await api.post("/feeds/refresh");
-      setNote("Abruf gestartet. Die Anzeige aktualisiert sich in einigen Sekunden.");
+      await api.post("/feeds/refresh", undefined, { silent: true });
+      toast.info("Abruf gestartet. Die Anzeige aktualisiert sich in einigen Sekunden.");
       setTimeout(() => void feeds.reload(), 5000);
       setTimeout(() => void feeds.reload(), 20_000);
     } catch (e) {
-      setProblem(e instanceof ApiError && e.status === 409 ? "Ein Abruf läuft bereits." : "Abruf konnte nicht gestartet werden.");
+      if (e instanceof ApiError && e.status === 409) toast.info("Ein Abruf läuft bereits.");
+      else if (e instanceof ApiError) toast.error(writeFailure("Abruf konnte nicht gestartet werden", e.status, e.message, e.retryAfter));
     }
   }
 
   async function toggle(f: Feed) {
-    setProblem(null);
     try {
-      await api.put(`/feeds/${f.source}`, { enabled: !f.enabled });
+      await api.put(`/feeds/${f.source}`, { enabled: !f.enabled }, { what: `${f.label} konnte nicht geändert werden` });
+      toast.success(`${f.label} ${f.enabled ? "deaktiviert" : "aktiviert"}.`);
       await feeds.reload();
-    } catch (e) {
-      setProblem(message(e, "Quelle konnte nicht geändert werden."));
+    } catch {
+      /* Der API-Client hat den Fehler als Toast gemeldet. */
     }
   }
 
@@ -126,12 +126,12 @@ export function FeedSources() {
     if (!removing || deleting.current) return;
     deleting.current = true;
     try {
-      await api.del(`/feeds/${removing.source}`);
+      await api.del(`/feeds/${removing.source}`, { what: `${removing.label} konnte nicht gelöscht werden` });
+      toast.success(`${removing.label} gelöscht.`);
       setRemoving(null);
       await feeds.reload();
-    } catch (e) {
+    } catch {
       setRemoving(null);
-      setProblem(message(e, "Quelle konnte nicht gelöscht werden."));
     } finally {
       deleting.current = false;
     }
@@ -151,11 +151,7 @@ export function FeedSources() {
           <NavIcon name="plus" />
           Quelle hinzufügen
         </Button>
-        <span role="status" className="text-fg2">
-          {note}
-        </span>
       </div>
-      {problem ? <ErrorNote message={problem} /> : null}
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
       {!feeds.data ? null : feeds.data.length === 0 ? (
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>
@@ -267,7 +263,8 @@ function AddDialog({ open, onClose, onDone }: { open: boolean; onClose: () => vo
         ...(url.trim() ? { base_url: url.trim() } : {}),
         ...(type === "osv" && ecosystem.trim() ? { ecosystem: ecosystem.trim() } : {}),
         ...(type === "nvd" && secret ? { secret } : {}),
-      });
+      }, { silent: true });
+      toast.success(`${label.trim() || TYPE_TITLE[type]} hinzugefügt.`);
       // Erst nach der Serverantwort: Erfolg zeigt die neue Quelle, Fehler legt nichts an.
       setLabel("");
       setEcosystem("");
@@ -347,7 +344,8 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
     setBusy(true);
     setError(null);
     try {
-      await api.put(`/feeds/${feed.source}`, body);
+      await api.put(`/feeds/${feed.source}`, body, { silent: true });
+      toast.success("Änderung gespeichert.");
       setUrl(null);
       setLabel(null);
       setEco(null);

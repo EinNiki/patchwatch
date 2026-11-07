@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { toast } from "@/lib/toastStore";
 import { useApi } from "@/lib/useApi";
 import type { Settings } from "@/lib/types";
 import { useAuth } from "@/components/AuthProvider";
@@ -21,21 +22,19 @@ function PasswordForm() {
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setDone(false);
     if (next.length < MIN_LEN) return setError(`Das neue Passwort braucht mindestens ${MIN_LEN} Zeichen.`);
     if (next !== again) return setError("Die beiden neuen Passwörter stimmen nicht überein.");
     setBusy(true);
     setError(null);
     try {
-      await api.post("/auth/password", { current_password: current, new_password: next });
+      await api.post("/auth/password", { current_password: current, new_password: next }, { silent: true });
       setCurrent("");
       setNext("");
       setAgain("");
-      setDone(true);
+      toast.success("Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.");
     } catch (err) {
       setError(err instanceof ApiError ? (err.status === 429 ? `Zu viele Versuche. Erneut möglich in ${err.retryAfter ?? 60} Sek.` : err.message) : "Passwort konnte nicht geändert werden.");
     } finally {
@@ -55,11 +54,6 @@ function PasswordForm() {
         <TextInput type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" required maxLength={256} />
       </Field>
       {error ? <ErrorNote message={error} /> : null}
-      {done ? (
-        <p role="status" className="text-ok">
-          Passwort geändert. Alle anderen Sitzungen wurden abgemeldet.
-        </p>
-      ) : null}
       <Button type="submit" variant="primary" busy={busy} disabled={!current || !next || !again} className="self-start">
         Passwort ändern
       </Button>
@@ -73,7 +67,6 @@ function Schedules() {
   const [edit, setEdit] = useState<Partial<Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   if (s.error && !s.data) return <ErrorNote message={s.error} />;
   if (!s.data) return <Loading what="Einstellungen" />;
@@ -82,7 +75,6 @@ function Schedules() {
   const val = (k: string, base: string | number) => edit[k] ?? String(base);
   const set = (k: string) => (e: { target: { value: string } }) => {
     setEdit((x) => ({ ...x, [k]: e.target.value }));
-    setDone(false);
   };
   const mode = val("mode", rs.mode);
   const dirty = Object.keys(edit).length > 0;
@@ -95,7 +87,6 @@ function Schedules() {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    setDone(false);
     try {
       const body: Record<string, unknown> = {};
       const feed_intervals: Record<string, number> = {};
@@ -119,10 +110,11 @@ function Schedules() {
       setError(null);
       await api.put("/settings", body);
       setEdit({});
-      setDone(true);
+      toast.success("Einstellungen gespeichert.");
       await s.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Einstellungen konnten nicht gespeichert werden.");
+      // Serverfehler zeigt der API-Client als Toast; hier bleiben nur Feldfehler der Eingabeprüfung.
+      if (!(err instanceof ApiError)) setError(err instanceof Error ? err.message : "Einstellungen konnten nicht gespeichert werden.");
     } finally {
       setBusy(false);
     }
@@ -199,11 +191,6 @@ function Schedules() {
       </fieldset>
 
       {error ? <ErrorNote message={error} /> : null}
-      {done ? (
-        <p role="status" className="text-ok">
-          Gespeichert.
-        </p>
-      ) : null}
       <Button type="submit" variant="primary" busy={busy} disabled={!dirty} className="self-start">
         Speichern
       </Button>
@@ -231,7 +218,6 @@ function OidcForm() {
   const [edit, setEdit] = useState<Partial<Record<string, string | boolean>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   if (o.error && !o.data) return <ErrorNote message={o.error} />;
   if (!o.data) return <Loading what="Single Sign-On" />;
   const d = o.data;
@@ -239,7 +225,6 @@ function OidcForm() {
   const list = (k: "allowed_emails" | "allowed_domains") => (typeof edit[k] === "string" ? (edit[k] as string) : d[k].join(", "));
   const enabled = typeof edit.enabled === "boolean" ? edit.enabled : d.enabled;
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDone(false);
     setEdit({ ...edit, [k]: e.target.value });
   };
   const split = (v: string) => v.split(/[,\s]+/).filter(Boolean);
@@ -263,10 +248,11 @@ function OidcForm() {
         client_secret: typeof edit.client_secret === "string" && edit.client_secret ? edit.client_secret : undefined,
       });
       setEdit({});
-      setDone(true);
+      toast.success("SSO-Einstellungen gespeichert.");
       await o.reload();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Einstellungen konnten nicht gespeichert werden.");
+      // Der API-Client meldet Serverfehler als Toast.
+      if (!(err instanceof ApiError)) setError("Einstellungen konnten nicht gespeichert werden.");
     } finally {
       setBusy(false);
     }
@@ -283,7 +269,7 @@ function OidcForm() {
         </p>
       ) : null}
       <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
-        <input type="checkbox" checked={enabled} onChange={(e) => { setDone(false); setEdit({ ...edit, enabled: e.target.checked }); }} className="size-4 accent-(--accent) max-md:size-5" />
+        <input type="checkbox" checked={enabled} onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })} className="size-4 accent-(--accent) max-md:size-5" />
         Anmeldung per OpenID Connect aktivieren
       </label>
       <div className="grid gap-3 md:grid-cols-2">
@@ -316,7 +302,6 @@ function OidcForm() {
         Anmelden dürfen sich nur die hier genannten Adressen oder Domains, und nur mit beim Provider verifizierter E-Mail. Ohne Eintrag wird die Anmeldung nicht aktiviert. SSO-Benutzer erscheinen als <Mono>oidc:&lt;E-Mail&gt;</Mono>; die Passwort-Anmeldung bleibt bestehen.
       </p>
       {error ? <ErrorNote message={error} /> : null}
-      {done ? <p role="status" className="text-ok">Gespeichert.</p> : null}
       <Button type="submit" variant="primary" busy={busy} disabled={!dirty} className="self-start">
         Speichern
       </Button>

@@ -96,7 +96,6 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
   const [limit, setLimit] = useState(PAGE);
   const [showAllFixed, setShowAllFixed] = useState(false);
   const [detail, setDetail] = useState<HostCve | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [compact, setCompact] = useState(false);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -135,15 +134,15 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
 
   async function toggleReview(c: HostCve, checked: boolean) {
     setBusy(c.cve_id);
-    setProblem(null);
     try {
       const path = `/hosts/${host.id}/cves/${c.cve_id}/review`;
-      if (checked) await api.put(path);
-      else await api.del(path);
+      const what = "Prüfmarkierung konnte nicht gespeichert werden";
+      if (checked) await api.put(path, undefined, { what });
+      else await api.del(path, { what });
       await reloadAll();
       setDetail((d) => (d && d.cve_id === c.cve_id ? { ...d, reviewed_at: checked ? new Date().toISOString() : null, reviewed_by: checked ? d.reviewed_by : null } : d));
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : "Speichern fehlgeschlagen");
+    } catch {
+      /* Der API-Client hat den Fehler als Toast gemeldet. */
     } finally {
       setBusy(null);
     }
@@ -188,7 +187,6 @@ export function HostCves({ host, initialFilter, notice }: { host: Host; initialF
           <strong className="font-semibold">Bewertung eingeschränkt:</strong> {issue}. <Link href="/cves#feeds">Zur Quellen-Tabelle</Link>
         </p>
       ) : null}
-      {problem ? <ErrorNote message={problem} /> : null}
       {head.error && !head.data ? <ErrorNote message={head.error} /> : null}
 
       {/* Entscheidungshilfe: ein Satz, gestapelter Balken, vier große Kacheln (je eine Liste), Unbekannt klein. */}

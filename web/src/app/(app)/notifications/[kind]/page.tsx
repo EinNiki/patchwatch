@@ -3,6 +3,7 @@
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
+import { toast } from "@/lib/toastStore";
 import { useApi } from "@/lib/useApi";
 import { channelLabel, EVENTS, isChannelKind, type ChannelKind } from "@/lib/channels";
 import type { ChannelView, NotificationsResponse } from "@/lib/types";
@@ -150,9 +151,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
   const [clearSecret, setClearSecret] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [test, setTest] = useState<{ ok: boolean; result: string } | null>(null);
   const zoneList = useMemo(() => zones(), []);
 
   const label = channelLabel(kind);
@@ -169,8 +168,6 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setSaved(false);
-    setTest(null);
     if (enabled && needsSecret) {
       setError(`${spec.secret?.label ?? "Zugangsdaten"} fehlt. Trage ihn ein oder schalte den Kanal aus.`);
       return;
@@ -189,10 +186,11 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
       setReplacing(clearSecret ? true : !(secret !== "" || ch.secret_set));
       setSecret("");
       setClearSecret(false);
-      setSaved(true);
+      toast.success(`${label}: Einstellungen gespeichert.`);
       await reload();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Speichern fehlgeschlagen.");
+      // Serverfehler zeigt der API-Client als Toast.
+      if (!(err instanceof ApiError)) setError("Speichern fehlgeschlagen.");
     } finally {
       setSaving(false);
     }
@@ -200,13 +198,14 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
 
   async function sendTest() {
     setTesting(true);
-    setTest(null);
     setError(null);
     try {
-      setTest(await api.post<{ ok: boolean; result: string }>(`/notifications/${kind}/test`));
+      const r = await api.post<{ ok: boolean; result: string }>(`/notifications/${kind}/test`, undefined, { what: "Testnachricht konnte nicht gestartet werden" });
+      if (r.ok) toast.success("Testnachricht gesendet.");
+      else toast.warning(`Testnachricht nicht zugestellt: ${r.result}.`);
       await reload();
-    } catch (err) {
-      setError(err instanceof ApiError && err.status === 429 ? `Zu viele Testnachrichten. Erneut möglich in ${err.retryAfter ?? 60} Sek.` : "Testnachricht konnte nicht gestartet werden.");
+    } catch {
+      // Der API-Client hat den Fehler bereits als Toast gemeldet.
     } finally {
       setTesting(false);
     }
@@ -239,13 +238,6 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
         </p>
       ) : null}
       {error ? <div className="mb-4 max-w-prose"><ErrorNote message={error} /></div> : null}
-      {test ? (
-        <p role="status" className={`mb-4 flex max-w-prose items-start gap-2 border-l-4 px-3 py-2 ${test.ok ? "border-ok bg-ok-soft text-ok" : "border-warn bg-warn-soft text-warn"}`}>
-          <Icon name={test.ok ? "ok" : "warn"} />
-          {test.ok ? "Testnachricht gesendet." : `Testnachricht nicht zugestellt: ${test.result}.`}
-        </p>
-      ) : null}
-      {saved ? <p role="status" className="mb-4 text-ok">Gespeichert.</p> : null}
 
       <form onSubmit={(e) => void save(e)} className="max-w-xl xl:max-w-[64rem]">
         <Checkbox className="mb-4" label="Kanal aktiv" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />

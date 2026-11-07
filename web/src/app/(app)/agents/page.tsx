@@ -13,6 +13,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
 import { SET_TOKEN_COMMAND, installCommand } from "@/lib/agentCommands";
+import { writeFailure } from "@/lib/apiErrors";
+import { toast } from "@/lib/toastStore";
 import { Icon, NavIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -92,7 +94,7 @@ function AddDialog({ open, onClose, onCreated }: { open: boolean; onClose: () =>
     setBusy(true);
     setError(null);
     try {
-      setCreated(await api.post<NewHost>("/hosts", { name: n }));
+      setCreated(await api.post<NewHost>("/hosts", { name: n }, { silent: true }));
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError && err.status === 409 ? "Ein Agent mit diesem Namen existiert bereits." : "Agent konnte nicht angelegt werden.");
@@ -184,42 +186,34 @@ export default function AgentsPage() {
   const [adding, setAdding] = useState(false);
   const [shown, setShown] = useState<{ name: string; token: string } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "rotate" | "delete"; host: Host } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
   const [limited, setLimited] = useState<Record<number, number>>({});
   const [busyAll, setBusyAll] = useState(false);
 
   async function request(h: Host) {
-    setError(null);
-    setNote(null);
     try {
-      await api.post(`/hosts/${h.id}/request-report`);
+      await api.post(`/hosts/${h.id}/request-report`, undefined, { silent: true });
       setLimited((l) => ({ ...l, [h.id]: 0 }));
+      toast.success(`${h.name}: Aktualisierung angefordert. Der Report trifft beim nächsten Check-in ein.`);
       await hosts.reload();
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
         setLimited((l) => ({ ...l, [h.id]: Date.now() + (e.retryAfter ?? 60) * 1000 }));
-        setNote(`Für ${h.name} wurde gerade erst aktualisiert. Erneut möglich in ${e.retryAfter ?? 60} Sek.`);
-      } else {
-        setError(`Aktualisierung von ${h.name} konnte nicht angefordert werden.`);
+        toast.warning(`Für ${h.name} wurde gerade erst aktualisiert. Erneut möglich in ${e.retryAfter ?? 60} Sek.`);
+      } else if (e instanceof ApiError) {
+        toast.error(writeFailure(`Aktualisierung von ${h.name} konnte nicht angefordert werden`, e.status, e.message, e.retryAfter));
       }
     }
   }
 
   async function requestAll() {
-    setError(null);
-    setNote(null);
     setBusyAll(true);
     try {
-      const r = await api.post<{ requested: number; skipped: number }>("/hosts/request-report");
-      setNote(
-        r.requested === 0
-          ? "Kein Agent angefragt: alle wurden in der letzten Minute schon angefragt."
-          : `${r.requested} ${r.requested === 1 ? "Agent" : "Agents"} angefragt${r.skipped > 0 ? `, ${r.skipped} übersprungen (Wartezeit 1 Min.)` : ""}. Die Reports treffen beim nächsten Check-in ein.`,
-      );
+      const r = await api.post<{ requested: number; skipped: number }>("/hosts/request-report", undefined, { what: "Aktualisierung konnte nicht angefordert werden" });
+      if (r.requested === 0) toast.info("Kein Agent angefragt: alle wurden in der letzten Minute schon angefragt.");
+      else toast.success(`${r.requested} ${r.requested === 1 ? "Agent" : "Agents"} angefragt${r.skipped > 0 ? `, ${r.skipped} übersprungen (Wartezeit 1 Min.)` : ""}. Die Reports treffen beim nächsten Check-in ein.`);
       await hosts.reload();
     } catch {
-      setError("Aktualisierung konnte nicht angefordert werden.");
+      /* Der API-Client hat den Fehler als Toast gemeldet. */
     } finally {
       setBusyAll(false);
     }
@@ -229,17 +223,17 @@ export default function AgentsPage() {
     if (!confirm) return;
     const { kind, host } = confirm;
     setConfirm(null);
-    setError(null);
     try {
       if (kind === "rotate") {
-        const r = await api.post<{ id: number; token: string }>(`/hosts/${host.id}/rotate-token`);
+        const r = await api.post<{ id: number; token: string }>(`/hosts/${host.id}/rotate-token`, undefined, { what: `Token von ${host.name} konnte nicht erneuert werden` });
         setShown({ name: host.name, token: r.token });
       } else {
-        await api.del(`/hosts/${host.id}`);
+        await api.del(`/hosts/${host.id}`, { what: `${host.name} konnte nicht gelöscht werden` });
+        toast.success(`${host.name} gelöscht.`);
       }
       await hosts.reload();
     } catch {
-      setError(kind === "rotate" ? `Token von ${host.name} konnte nicht erneuert werden.` : `${host.name} konnte nicht gelöscht werden.`);
+      /* Der API-Client hat den Fehler als Toast gemeldet. */
     }
   }
 
@@ -271,10 +265,6 @@ export default function AgentsPage() {
         </p>
       </section>
 
-      <p role="status" className="mb-3 min-h-5 text-fg2">
-        {note}
-      </p>
-      {error ? <div className="mb-3"><ErrorNote message={error} /></div> : null}
       {hosts.error && !list ? (
         <div className="mb-3">
           <ErrorNote message={hosts.error} />

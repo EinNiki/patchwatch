@@ -337,7 +337,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
 - **Benachrichtigungen**: ntfy, Matrix, Gotify, Discord und „Live im Browser“, je mit Zugangsdaten (write-only),
   Ereignisauswahl und Testnachricht.
 - **Einstellungen**: Passwort ändern, Farbschema, Aufbewahrung der Report-Historie (7–3650 Tage).
-- Änderungen erscheinen live (WebSocket, siehe oben) ohne Neuladen; Meldungen des Browser-Kanals als Toast.
+- Änderungen erscheinen live (WebSocket, siehe oben) ohne Neuladen; Meldungen des Browser-Kanals und Ergebnisse von Aktionen als Toast (oben rechts).
 
 Die Matrix über Hosts und CVEs kommt später als Umschalter „Liste | Matrix“ auf der CVE-Seite.
 
