@@ -347,7 +347,7 @@ export function FeedSources() {
                 {expanded(latest.get(f.source)) ? (
                   <tr className="run-row">
                     <td colSpan={7}>
-                      <RunStepper run={latest.get(f.source)!} label={f.label} onRetry={() => void runOne(f)} onClose={() => toggleRun(latest.get(f.source)!)} />
+                      <RunStepper run={latest.get(f.source)!} label={f.label} phaseMedians={f.run_stats?.phase_median_ms} onRetry={() => void runOne(f)} onClose={() => toggleRun(latest.get(f.source)!)} />
                     </td>
                   </tr>
                 ) : null}

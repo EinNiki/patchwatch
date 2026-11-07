@@ -55,8 +55,18 @@ struct Inner {
     bytes: u64,
     items: Option<i64>,
     hosts: Option<i64>,
+    requests: u32,
+    retries: u32,
+    wait_ms: u64,
+    page_size: Option<u32>,
+    statuses: std::collections::BTreeMap<u16, u32>,
+    /// Je Anfrage [Status, Bytes, Millisekunden]; begrenzt auf `MAX_PAGE_STATS`.
+    page_stats: Vec<[u64; 3]>,
     dirty: bool,
 }
+
+/// So viele Einzelanfragen werden je Lauf festgehalten (nur Zahlen).
+const MAX_PAGE_STATS: usize = 200;
 
 /// Sammler eines laufenden Abrufs. Phasen gehen nie zurück (ein Adapter mit mehreren Anfragen springt nicht hin und her).
 #[derive(Debug)]
@@ -71,6 +81,12 @@ impl Default for Sink {
             bytes: 0,
             items: None,
             hosts: None,
+            requests: 0,
+            retries: 0,
+            wait_ms: 0,
+            page_size: None,
+            statuses: std::collections::BTreeMap::new(),
+            page_stats: Vec::new(),
             dirty: true,
         }))
     }
@@ -84,6 +100,20 @@ pub struct Snapshot {
     pub items: Option<i64>,
     pub hosts: Option<i64>,
     pub phases: Value,
+    pub metrics: Metrics,
+}
+
+/// Messwerte eines Laufs (nur Zahlen).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Metrics {
+    pub requests: u32,
+    pub retries: u32,
+    pub wait_ms: u64,
+    pub page_size: Option<u32>,
+    /// {"200": 10, "503": 1}
+    pub statuses: Value,
+    /// [[Status, Bytes, ms], ...]
+    pub page_stats: Value,
 }
 
 impl Sink {
@@ -111,6 +141,35 @@ impl Sink {
         if let Ok(mut i) = self.0.lock() {
             i.bytes = i.bytes.saturating_add(n);
             i.dirty = true;
+        }
+    }
+
+    /// Eine abgeschlossene Anfrage: Status (0 = Netzwerkfehler), empfangene Bytes, Dauer.
+    pub fn add_request(&self, status: u16, bytes: u64, ms: u64) {
+        if let Ok(mut i) = self.0.lock() {
+            i.requests = i.requests.saturating_add(1);
+            *i.statuses.entry(status).or_insert(0) += 1;
+            if i.page_stats.len() < MAX_PAGE_STATS {
+                i.page_stats.push([u64::from(status), bytes, ms]);
+            }
+        }
+    }
+
+    pub fn add_retry(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            i.retries = i.retries.saturating_add(1);
+        }
+    }
+
+    pub fn add_wait(&self, ms: u64) {
+        if let Ok(mut i) = self.0.lock() {
+            i.wait_ms = i.wait_ms.saturating_add(ms);
+        }
+    }
+
+    pub fn set_page_size(&self, n: u32) {
+        if let Ok(mut i) = self.0.lock() {
+            i.page_size = Some(n);
         }
     }
 
@@ -150,6 +209,19 @@ impl Sink {
             items: i.items,
             hosts: i.hosts,
             phases: Value::Object(phases),
+            metrics: Metrics {
+                requests: i.requests,
+                retries: i.retries,
+                wait_ms: i.wait_ms,
+                page_size: i.page_size,
+                statuses: Value::Object(
+                    i.statuses
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), json!(v)))
+                        .collect(),
+                ),
+                page_stats: json!(i.page_stats),
+            },
         })
     }
 }
@@ -193,6 +265,24 @@ pub async fn recover_on_start(pool: &PgPool) {
     for r in &rows {
         publish(pool, r).await;
     }
+}
+
+/// Eine Anfrage ist beendet (Status 0 = ohne Antwort).
+pub fn report_request(status: u16, bytes: u64, started: Instant) {
+    let ms = started.elapsed().as_millis() as u64;
+    let _ = SINK.try_with(|s| s.add_request(status, bytes, ms));
+}
+pub fn report_retry() {
+    let _ = SINK.try_with(|s| s.add_retry());
+}
+pub fn report_page_size(n: u32) {
+    let _ = SINK.try_with(|s| s.set_page_size(n));
+}
+
+/// Pause, die als Wartezeit des Laufs gezählt wird (Backoff, Retry-After, Seitenpause).
+pub async fn wait(d: Duration) {
+    let _ = SINK.try_with(|s| s.add_wait(d.as_millis() as u64));
+    tokio::time::sleep(d).await;
 }
 
 pub fn report_bytes(n: u64) {
@@ -277,9 +367,14 @@ pub struct RunRow {
     pub hosts: Option<i32>,
     pub error: Option<String>,
     pub phases: Value,
+    pub requests: Option<i32>,
+    pub retries: Option<i32>,
+    pub wait_ms: Option<i64>,
+    pub page_size: Option<i32>,
+    pub statuses: Value,
 }
 
-pub const RUN_COLS: &str = "id, source, trigger, started_by, status, phase, created_at, started_at, finished_at, bytes, items, hosts, error, phases";
+pub const RUN_COLS: &str = "id, source, trigger, started_by, status, phase, created_at, started_at, finished_at, bytes, items, hosts, error, phases, requests, retries, wait_ms, page_size, statuses";
 
 pub async fn get(pool: &PgPool, id: i64) -> sqlx::Result<Option<RunRow>> {
     sqlx::query_as(&format!("SELECT {RUN_COLS} FROM feed_runs WHERE id = $1"))
@@ -354,28 +449,56 @@ impl Drop for AbortOnDrop {
     }
 }
 
-/// Mehrere angelegte Läufe nacheinander ausführen ("Alle abrufen"). Wartende Läufe bekommen währenddessen Lebenszeichen.
+/// Sperren eines Laufs (siehe `AppState::run_gate`); fällt beim Beenden des Laufs weg (nur zum Halten, nie gelesen).
+#[allow(dead_code)]
+enum RunGuard {
+    Shared(
+        tokio::sync::OwnedRwLockReadGuard<()>,
+        tokio::sync::OwnedMutexGuard<()>,
+    ),
+    Exclusive(tokio::sync::OwnedRwLockWriteGuard<()>),
+}
+
+impl RunGuard {
+    /// Debian und Ubuntu teilen sich die Lesesperre (parallel, je Typ nur ein Lauf); alle anderen Quellen laufen allein.
+    async fn acquire(state: &AppState, source: &str) -> Self {
+        let kind = crate::cve::sources::list(state)
+            .await
+            .ok()
+            .and_then(|l| l.into_iter().find(|s| s.id == source).map(|s| s.kind));
+        match kind.as_deref() {
+            Some(k @ ("debian" | "ubuntu")) => {
+                let kl = {
+                    let mut m = state.kind_locks.lock().unwrap_or_else(|e| e.into_inner());
+                    m.entry(k.to_owned()).or_default().clone()
+                };
+                // Erst die Typsperre, dann die Lesesperre: wer auf seinen Typ wartet, hält keine Lesesperre und
+                // blockiert so keinen wartenden Schreiber unnötig.
+                let kg = kl.lock_owned().await;
+                let rg = state.run_gate.clone().read_owned().await;
+                Self::Shared(rg, kg)
+            }
+            _ => Self::Exclusive(state.run_gate.clone().write_owned().await),
+        }
+    }
+}
+
+/// Mehrere angelegte Läufe ausführen ("Alle abrufen"). Debian und Ubuntu laufen unabhängig und parallel, jede Quelle
+/// mit höchstens einer Anfrage gleichzeitig; Anreicherungsquellen warten, bis diese fertig sind. Der Abbruch oder
+/// Fehlschlag eines Laufs berührt die anderen nicht. Wartende Läufe melden Lebenszeichen (siehe `execute`).
 pub async fn execute_all(state: &AppState, items: Vec<(i64, String)>) {
-    let pending = Arc::new(Mutex::new(
-        items.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-    ));
-    let pool = state.pool.clone();
-    let ids = pending.clone();
-    let _keep = AbortOnDrop(tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            let waiting: Vec<i64> = ids.lock().map(|g| g.clone()).unwrap_or_default();
-            let _ = sqlx::query("UPDATE feed_runs SET heartbeat_at = now() WHERE id = ANY($1) AND status = 'queued'")
-                .bind(&waiting)
-                .execute(&pool)
-                .await;
-        }
-    }));
+    let mut set = tokio::task::JoinSet::new();
     for (id, source) in items {
-        if let Ok(mut g) = pending.lock() {
-            g.retain(|x| *x != id);
+        let st = state.clone();
+        set.spawn(async move {
+            execute(&st, id, &source).await;
+        });
+    }
+    // Ein abgestürzter Lauf (Panic) beendet die anderen nicht; sein Eintrag wird vom Wächter als unterbrochen markiert.
+    while let Some(r) = set.join_next().await {
+        if let Err(e) = r {
+            tracing::error!(error = %e, "Feed-Lauf abgestürzt");
         }
-        execute(state, id, &source).await;
     }
 }
 
@@ -388,7 +511,7 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
         run_id,
         sink.clone(),
     )));
-    let guard = state.refresh_lock.lock().await;
+    let guard = RunGuard::acquire(state, source).await;
     let _ = sqlx::query("UPDATE feed_runs SET status = 'running', started_at = now(), heartbeat_at = now() WHERE id = $1 AND status = 'queued'")
         .bind(run_id)
         .execute(&state.pool)
@@ -424,6 +547,7 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
         Outcome::Failed(e) => (status_of(&outcome), Some(short(e))),
         o => (status_of(o), None),
     };
+    let metrics = snap.as_ref().map(|s| s.metrics.clone()).unwrap_or_default();
     let (bytes, items, hosts, phases) = snap
         .map(|s| {
             (
@@ -436,7 +560,8 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
         .unwrap_or((0, None, None, json!({})));
     let _ = sqlx::query(
         "UPDATE feed_runs SET status = $2, phase = $8, finished_at = now(), heartbeat_at = now(), error = $3, \
-         bytes = $4, items = $5, hosts = $6, phases = $7 WHERE id = $1",
+         bytes = $4, items = $5, hosts = $6, phases = $7, requests = $9, retries = $10, wait_ms = $11, page_size = $12, \
+         statuses = $13, page_stats = $14 WHERE id = $1",
     )
     .bind(run_id)
     .bind(status)
@@ -446,6 +571,12 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
     .bind(hosts)
     .bind(&phases)
     .bind(final_phase.as_str())
+    .bind(metrics.requests as i32)
+    .bind(metrics.retries as i32)
+    .bind(metrics.wait_ms as i64)
+    .bind(metrics.page_size.map(|n| n as i32))
+    .bind(&metrics.statuses)
+    .bind(&metrics.page_stats)
     .execute(&state.pool)
     .await;
     prune(&state.pool, source).await;

@@ -167,3 +167,13 @@ erreichbar ist. Das stündliche Blättern der ersten Seiten läuft unabhängig d
   „unterbrochen“ beendet, im Betrieb nach 120 s ohne Lebenszeichen.
 * **Speicher:** je Release werden die behobenen Kernel-Einträge (einige Zehntausend CVEs) vor dem Speichern im Speicher
   gehalten, die Datei selbst nie.
+
+## Messwerte und parallele Abrufe
+
+* Je Lauf speichert der Server nur Zahlen (Migration 0019): Dauer je Phase, Anzahl der Anfragen, Statuscodes, Wiederholungen,
+  Wartezeit durch Backoff und Pausen, Seitengröße sowie je Anfrage Status, Bytes und Millisekunden (höchstens 200). Keine
+  Antwortinhalte, keine Adressen. Die Tabelle „CVE-Quellen“ zeigt unter „Details“ den letzten Lauf und den Median der letzten
+  zehn abgeschlossenen Läufe; der Stepper warnt, wenn eine Phase länger als das Dreifache ihres Medians (mindestens 10 s) dauert.
+* „Alle abrufen“ startet Debian und Ubuntu gleichzeitig (je Quelle weiter höchstens eine Anfrage). Anreicherungsquellen
+  (OSV, NVD, KEV) laufen allein, nachdem diese beiden fertig sind. Der Ausfall einer Quelle stoppt die andere nicht.
+  OVAL-Importe der Releases laufen nacheinander (höchstens einer, damit unter der Grenze von zwei bleibt).

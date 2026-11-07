@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PHASES, PHASE_LABEL, detail, formatDuration, isActive, isFailure, runText, stepStates, type FeedRun, type StepState } from "@/lib/feedRuns";
+import { Icon } from "@/components/Icons";
+import { PHASES, PHASE_LABEL, detail, formatDuration, isActive, isFailure, isSlow, runText, stepStates, type FeedRun, type StepState } from "@/lib/feedRuns";
 
 /** Eigene Symbole (SVG, currentColor): Haken, Kreuz, Strich (übersprungen), drehender Ring (aktiv), leerer Kreis (offen). */
 function StepIcon({ state }: { state: StepState }) {
@@ -63,7 +64,7 @@ function useNow(active: boolean): number {
 }
 
 /** Vollständiger Stepper: sechs Schritte mit Dauer, darunter Zähler und bei Fehlern die Meldung samt Aktionen. */
-export function RunStepper({ run, label, onRetry, onClose }: { run: FeedRun; label: string; onRetry?: () => void; onClose?: () => void }) {
+export function RunStepper({ run, label, phaseMedians, onRetry, onClose }: { run: FeedRun; label: string; phaseMedians?: Record<string, number>; onRetry?: () => void; onClose?: () => void }) {
   const states = stepStates(run);
   const failed = isFailure(run);
   const d = detail(run);
@@ -88,6 +89,12 @@ export function RunStepper({ run, label, onRetry, onClose }: { run: FeedRun; lab
         {runText(run, now)}
         {d ? ` · ${d}` : ""}
       </p>
+      {isSlow(run, now, phaseMedians) ? (
+        <p className="mt-1 flex items-center gap-1.5 text-sm text-warn" role="status">
+          <Icon name="clock" />
+          Langsamer als sonst, {label} antwortet träge.
+        </p>
+      ) : null}
       {failed && run.error ? <p className="mt-1 text-sm text-crit">{run.error}</p> : null}
       {!isActive(run) && (onRetry || onClose) ? (
         <div className="mt-2 flex flex-wrap gap-2">

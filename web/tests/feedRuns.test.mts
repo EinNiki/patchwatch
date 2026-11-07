@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyLive, isHung, latestBySource, progress, runText, runningSince, stepStates, summary, type FeedRun } from "../src/lib/feedRuns.ts";
+import { applyLive, isHung, isSlow, phaseElapsedMs, latestBySource, progress, runText, runningSince, stepStates, summary, type FeedRun } from "../src/lib/feedRuns.ts";
 
 const run = (o: Partial<FeedRun> = {}): FeedRun => ({
   id: 1, source: "debian", trigger: "manual", started_by: "admin", status: "running", phase: "download",
@@ -47,7 +47,7 @@ test("a running run shows how long it runs; a hung, aborted one says so (differe
   assert.equal(runningSince(running, start + 30_000), "seit 30 Sekunden");
   assert.equal(runningSince(running, start + 1000), "seit 1 Sekunde");
   assert.equal(runningSince(running, start + 150_000), "seit 2 Minuten");
-  assert.equal(runText(running, start + 30_000), "Verbinden: läuft seit 30 Sekunden");
+  assert.equal(runText(running, start + 30_000), "Verbinden, 30 s · läuft seit 30 Sekunden");
   const hung = run({ status: "failed", phase: "connect", error: "Zeitüberschreitung beim Verbinden", finished_at: "2026-11-07T10:02:30Z" });
   assert.ok(isHung(hung));
   assert.equal(runText(hung, start), "Lauf hängt, abgebrochen (bei „Verbinden“)");
@@ -75,4 +75,18 @@ test("phase change is reflected in the step states and the text", () => {
   assert.equal(out[0]!.phase, "download");
   assert.deepEqual(stepStates(out[0]!).slice(0, 2), ["done", "active"]);
   assert.match(runText(out[0]!), /Herunterladen/);
+});
+
+test("phase time counts from the finished phases; slow means more than 3x the median", () => {
+  const start = Date.parse("2026-11-07T10:00:00Z");
+  const r = run({ status: "running", phase: "download", started_at: "2026-11-07T10:00:00Z", phases: { connect: 1000 } });
+  assert.equal(phaseElapsedMs(r, start + 22_000), 21_000);
+  assert.equal(runText(r, start + 22_000), "Herunterladen, 21 s · läuft seit 22 Sekunden");
+  const med = { download: 5000 };
+  assert.equal(isSlow(r, start + 22_000, med), true, "21 s > 3 × 5 s");
+  assert.equal(isSlow(r, start + 12_000, med), false, "11 s ist weniger als 15 s");
+  assert.equal(isSlow(r, start + 22_000, { download: 8000 }), false, "21 s < 24 s");
+  assert.equal(isSlow(r, start + 22_000, undefined), false, "ohne Vergleichswert keine Warnung");
+  assert.equal(isSlow({ ...r, status: "failed" }, start + 22_000, med), false);
+  assert.equal(isSlow({ ...r, phase: "parse" }, start + 22_000, { download: 5000 }), false, "nur die Phase mit Median zählt");
 });

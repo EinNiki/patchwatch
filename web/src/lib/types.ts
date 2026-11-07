@@ -263,6 +263,25 @@ export interface Feed {
   backfill: { pages_done: number; runs: number; next_offset: number; pages_per_run: number | null; since: string; progress: string; initial?: boolean; position_pages?: number; est_pages?: number | null; target?: string } | null;
   /** Nur Ubuntu im Hybridmodus: Massendaten je Release und stündlicher Abruf. */
   bulk?: FeedBulk | null;
+  /** Letzter Lauf und Mediane der letzten zehn (nur Zahlen). */
+  run_stats?: FeedRunStats;
+}
+
+export interface FeedRunStats {
+  last: {
+    status: string;
+    total_ms: number;
+    phases: Partial<Record<"connect" | "download" | "parse" | "store" | "evaluate", number>>;
+    requests: number | null;
+    retries: number | null;
+    wait_ms: number | null;
+    page_size: number | null;
+    bytes: number;
+    statuses: Record<string, number>;
+  } | null;
+  median_ms: number | null;
+  phase_median_ms: Record<string, number>;
+  runs: number;
 }
 
 export interface FeedBulkRelease {

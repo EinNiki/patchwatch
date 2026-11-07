@@ -50,6 +50,23 @@ export function isHung(r: Pick<FeedRun, "status" | "error">): boolean {
   return r.status === "failed" && r.error !== null && HUNG_ERRORS.some((m) => r.error!.startsWith(m));
 }
 
+/** Wie lange der Lauf in seiner aktuellen Phase steht: Laufzeit minus die Dauer der abgeschlossenen Phasen (Näherung). */
+export function phaseElapsedMs(r: Pick<FeedRun, "started_at" | "created_at" | "phase" | "phases">, nowMs: number): number {
+  const from = Date.parse(r.started_at ?? r.created_at);
+  if (Number.isNaN(from)) return 0;
+  const done = Object.entries(r.phases).reduce((a, [k, v]) => (k === r.phase ? a : a + (v ?? 0)), 0);
+  return Math.max(0, nowMs - from - done);
+}
+
+/** Eine Phase ist ungewöhnlich langsam: mehr als das Dreifache ihres Medians (und mindestens 10 s, damit kurze Phasen nicht warnen). */
+export function isSlow(r: Pick<FeedRun, "status" | "started_at" | "created_at" | "phase" | "phases">, nowMs: number, medians: Record<string, number> | undefined): boolean {
+  if (r.status !== "running") return false;
+  const med = medians?.[r.phase];
+  if (!med) return false;
+  const el = phaseElapsedMs(r, nowMs);
+  return el >= 10_000 && el > 3 * med;
+}
+
 /** „seit 30 Sekunden“ / „seit 2 Minuten“ für einen laufenden Lauf; ohne Startzeit leer. */
 export function runningSince(r: Pick<FeedRun, "started_at" | "created_at">, nowMs: number): string {
   const from = Date.parse(r.started_at ?? r.created_at);
@@ -64,8 +81,10 @@ export function runningSince(r: Pick<FeedRun, "started_at" | "created_at">, nowM
 export function runText(r: FeedRun, nowMs?: number): string {
   if (r.status === "queued") return "Wartet auf freien Platz";
   if (r.status === "running") {
-    const since = nowMs === undefined ? "" : runningSince(r, nowMs);
-    return since ? `${PHASE_LABEL[r.phase]}: läuft ${since}` : PHASE_LABEL[r.phase];
+    if (nowMs === undefined) return PHASE_LABEL[r.phase];
+    const since = runningSince(r, nowMs);
+    const phase = `${PHASE_LABEL[r.phase]}, ${Math.round(phaseElapsedMs(r, nowMs) / 1000)} s`;
+    return since ? `${phase} · läuft ${since}` : phase;
   }
   if (r.status === "not_modified") return "Unverändert";
   if (r.status === "incomplete") return "Unvollständig abgeschlossen";

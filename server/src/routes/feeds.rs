@@ -252,6 +252,8 @@ pub struct FeedRow {
     backfill: Option<BackfillView>,
     /// Nur Ubuntu im Hybridmodus: Massendaten je Release und stündlicher Abruf.
     bulk: Option<BulkView>,
+    /// Letzter Lauf und Mediane der letzten zehn (nur Zahlen).
+    run_stats: crate::cve::runstats::RunStats,
 }
 
 /// Fehlertext für Menschen: was die Quelle gemeldet hat und wann es weitergeht.
@@ -330,6 +332,9 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
     .await?;
     let now = Utc::now();
     let default = st.cfg.cve.interval_minutes as i64;
+    let mut stats = crate::cve::runstats::load(&st.pool)
+        .await
+        .unwrap_or_default();
     let mut out = Vec::new();
     for src in sources {
         let f = rows.iter().find(|r| r.source == src.id);
@@ -408,6 +413,7 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Fe
                 .bulk
                 .as_ref()
                 .and_then(|b| bulk_view(b, &src.label, now, by_interval, bulk_every)),
+            run_stats: stats.remove(&src.id).unwrap_or_default(),
             source: src.id,
         });
     }
@@ -964,9 +970,9 @@ pub async fn refresh(
 
 async fn refresh_wait(st: AppState) -> ApiResult<Response> {
     let guard = st
-        .refresh_lock
+        .run_gate
         .clone()
-        .try_lock_owned()
+        .try_write_owned()
         .map_err(|_| ApiError::Conflict("Ein Feed-Abruf läuft bereits".into()))?;
     let results = refresh::refresh_all(&st).await;
     drop(guard);

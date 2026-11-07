@@ -63,15 +63,19 @@ fn retryable(e: &FeedError) -> bool {
 }
 
 async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
-    use crate::cve::runs::{report_bytes, report_phase, Phase};
+    use crate::cve::runs::{report_bytes, report_phase, report_request, Phase};
     report_phase(Phase::Connect);
-    let mut resp = req
-        .timeout(lim.timeout)
-        .send()
-        .await
-        .map_err(|e| FeedError::Network(e.without_url().to_string()))?;
+    let started = std::time::Instant::now();
+    let mut resp = match req.timeout(lim.timeout).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            report_request(0, 0, started);
+            return Err(FeedError::Network(e.without_url().to_string()));
+        }
+    };
     let status = resp.status();
     if status == StatusCode::NOT_MODIFIED {
+        report_request(304, 0, started);
         return Ok(Fetched {
             status: 304,
             headers: resp.headers().clone(),
@@ -80,6 +84,7 @@ async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
     }
     if !status.is_success() {
         let code = status.as_u16();
+        report_request(code, 0, started);
         if code == 429 || code >= 500 {
             let retry_after = resp
                 .headers()
@@ -99,18 +104,26 @@ async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
     let headers = resp.headers().clone();
     report_phase(Phase::Download);
     let mut body = Vec::new();
+    let mut got: u64 = 0;
     // Chunkweise lesen und hart begrenzen (auch nach dem Entpacken von gzip).
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| FeedError::Network(e.without_url().to_string()))?
-    {
+    loop {
+        let chunk = match resp.chunk().await {
+            Ok(Some(c)) => c,
+            Ok(None) => break,
+            Err(e) => {
+                report_request(0, got, started);
+                return Err(FeedError::Network(e.without_url().to_string()));
+            }
+        };
         if body.len() as u64 + chunk.len() as u64 > lim.max_bytes {
+            report_request(status.as_u16(), got, started);
             return Err(FeedError::TooLarge(lim.max_bytes));
         }
+        got += chunk.len() as u64;
         report_bytes(chunk.len() as u64);
         body.extend_from_slice(&chunk);
     }
+    report_request(status.as_u16(), got, started);
     // Ab hier wird ausgewertet, bis der Adapter seine Records liefert.
     report_phase(Phase::Parse);
     Ok(Fetched {
@@ -133,7 +146,8 @@ pub async fn execute(make: impl Fn() -> RequestBuilder, lim: Limits) -> Result<F
                 } => *d,
                 _ => backoff(lim.base_delay, attempt - 1),
             };
-            tokio::time::sleep(wait.min(lim.retry_after_cap)).await;
+            crate::cve::runs::report_retry();
+            crate::cve::runs::wait(wait.min(lim.retry_after_cap)).await;
         }
         match once(make(), lim).await {
             Ok(f) => return Ok(f),

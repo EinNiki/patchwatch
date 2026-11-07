@@ -18,7 +18,8 @@ const bulk = (hourly = {}, extra = []) => ({
   releases: [{ release: "resolute", state: "ok", result_text: "importiert", imported_at: iso(-300), verified_at: iso(-300), bytes: 4_700_000, records: 10, status: null, retry_after_secs: null, next_attempt_at: null, fresh_until: iso(1000) }, ...extra],
   hourly: { last_run_at: iso(-3), last_ok_at: iso(-3), page_size: 10, max_page: null, pages_last: 1, failures: 0, status: null, retry_after_secs: null, error_text: null, next_attempt_at: iso(57), hint: null, ...hourly },
 });
-const GOOD = [feed(), feed({ source: "ubuntu", type: "ubuntu", label: "Ubuntu", bulk: bulk() })];
+const stats = { last: { status: "ok", total_ms: 48_000, phases: { connect: 300, download: 41_000, parse: 5000, store: 2000 }, requests: 10, retries: 0, wait_ms: 0, page_size: 10, bytes: 14_900_000, statuses: { "200": 10 } }, median_ms: 52_000, phase_median_ms: { download: 5000 }, runs: 10 };
+const GOOD = [feed(), feed({ source: "ubuntu", type: "ubuntu", label: "Ubuntu", bulk: bulk(), run_stats: stats })];
 const BAD = [feed(), feed({ source: "ubuntu", type: "ubuntu", label: "Ubuntu", state: "incomplete", stale_since: iso(-90), last_error: "HTTP 503", last_error_at: iso(-1), consecutive_failures: 4, failed_runs: 4, error_text: "Ubuntu meldet 503, nächster Versuch in 12 Minuten", next_attempt_at: iso(12),
   bulk: bulk({ failures: 4, status: 503, error_text: "Ubuntu meldet 503, nächster Versuch in 12 Minuten", hint: "Die Ubuntu-API antwortet seit 4 Läufen mit 503/504 (überlastet)." }, [{ release: "noble", state: "error", result_text: "Ubuntu meldet 503, nächster Versuch in 12 Minuten", imported_at: null, verified_at: null, bytes: null, records: null, status: 503, retry_after_secs: null, next_attempt_at: iso(12), fresh_until: null }]) })];
 
@@ -81,6 +82,27 @@ try {
     ok(res.violations.length === 0, `${label}: axe ${res.violations.map((v) => v.id).join(",")}`);
     if (shots) await page.locator("#feeds").screenshot({ path: `${shots}/feeds-${size.width}-${scheme}-${withError ? "err" : "ok"}.png` });
   }
+  // Messwerte im Bereich Details und Hinweis bei ungewöhnlich langer Phase.
+  data = GOOD;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${base}/cves`);
+  const ubuRow = page.getByRole("row").filter({ hasText: /Ubuntu/ }).first();
+  await ubuRow.waitFor();
+  ok(await ubuRow.getByText("Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · Seitengröße 10 · 14,2 MB)").isVisible(), "Letzter Lauf mit Phasen, Seiten und Größe");
+  ok(await ubuRow.getByText("Median der letzten 10 Läufe: 52 s").isVisible(), "Median der letzten 10 Läufe");
+  const started = new Date(Date.now() - 60_000).toISOString();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route(/\/api\/v1\/feeds$/, (r) => r.fulfill(json(200, GOOD)));
+  await page.route("**/api/v1/feeds/runs**", (r) => r.fulfill(json(200, { runs: [{ id: 5, source: "ubuntu", trigger: "manual", started_by: "admin", status: "running", phase: "download", created_at: started, started_at: started, finished_at: null, bytes: 1000, items: null, hosts: null, error: null, phases: { connect: 1000 } }] })));
+  await page.goto(`${base}/cves`);
+  const group = page.getByRole("group", { name: "Abruf Ubuntu" });
+  await group.waitFor();
+  ok(/Herunterladen, \d+ s · läuft seit/.test(await group.innerText()), "Stepper zeigt Phase und Laufzeit");
+  ok(await group.getByText("Langsamer als sonst, Ubuntu antwortet träge.").isVisible(), "Hinweis bei mehr als dem Dreifachen des Medians");
+  if (shots) await page.locator("#feeds").screenshot({ path: `${shots}/feeds-slow.png` });
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route(/\/api\/v1\/feeds$/, (r) => (r.request().method() === "GET" ? r.fulfill(json(200, data)) : r.continue()));
+  await page.route("**/api/v1/feeds/runs**", (r) => r.fulfill(json(200, { runs: [] })));
   for (const w of [390, 768, 1440, 1920]) for (const scheme of ["light", "dark"]) for (const err of [false, true]) await check(`${w}/${scheme}/${err ? "Fehler" : "ok"}`, { width: w, height: 900 }, scheme, err);
 } finally {
   await browser.close();

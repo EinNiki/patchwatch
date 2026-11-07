@@ -312,16 +312,22 @@ async fn import_inner(
         req = req.header(reqwest::header::IF_MODIFIED_SINCE, m);
     }
     super::runs::report_phase(super::runs::Phase::Connect);
-    let mut resp = req
-        .send()
-        .await
-        .map_err(|e| FeedError::Network(e.without_url().to_string()))?;
+    let started = std::time::Instant::now();
+    let mut resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            super::runs::report_request(0, 0, started);
+            return Err(FeedError::Network(e.without_url().to_string()));
+        }
+    };
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_MODIFIED {
+        super::runs::report_request(304, 0, started);
         return Ok(Imported::NotModified);
     }
     if !status.is_success() {
         let code = status.as_u16();
+        super::runs::report_request(code, 0, started);
         if code == 429 || code >= 500 {
             let retry_after = resp
                 .headers()
@@ -390,6 +396,15 @@ async fn import_inner(
         }
     }
     drop(tx);
+    super::runs::report_request(
+        if net_err.is_some() {
+            0
+        } else {
+            status.as_u16()
+        },
+        bytes,
+        started,
+    );
     // Der Download ist durch; der Parser liest noch den Rest der Warteschlange.
     super::runs::report_phase(super::runs::Phase::Parse);
     let parsed = parser

@@ -1,7 +1,7 @@
 // Darstellung der Tabelle "CVE-Quellen": Fehlerzeile, Fehler-Chip und die neutralen Details (reine Logik, ohne React).
 
 import { absTime } from "./format.ts";
-import type { Feed, FeedBulk } from "./types.ts";
+import type { Feed, FeedBulk, FeedRunStats } from "./types.ts";
 import type { StatusInfo } from "./status.ts";
 
 /** Der Server hängt ", nächster Versuch in 12 Minuten" an Fehlertexte; der Zeitpunkt steht in der eigenen Spalte. */
@@ -73,9 +73,50 @@ export function bulkLines(bulk: FeedBulk): DetailLine[] {
   return out;
 }
 
+/** Dauer für Menschen: "0,4 s", "48 s", "2 Min. 5 s". */
+export function duration(ms: number): string {
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1).replace(/\.0$/, "").replace(".", ",")} s`;
+  if (s < 120) return `${Math.round(s)} s`;
+  const m = Math.floor(s / 60);
+  return `${m} Min. ${Math.round(s - m * 60)} s`;
+}
+
+function mb(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+const PHASE_SHORT: [keyof NonNullable<FeedRunStats["last"]>["phases"], string][] = [
+  ["connect", "Verbinden"],
+  ["download", "Herunterladen"],
+  ["parse", "Auswerten"],
+  ["store", "Speichern"],
+  ["evaluate", "Hosts bewerten"],
+];
+
+/** "Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · 14,2 MB)"; Median in der Zeile darunter. */
+export function runStatLines(stats: FeedRunStats | undefined, pages: boolean): DetailLine[] {
+  const last = stats?.last;
+  if (!stats || !last) return [];
+  const parts: string[] = [];
+  for (const [k, label] of PHASE_SHORT) {
+    const ms = last.phases[k];
+    if (ms !== undefined && ms >= 1000) parts.push(`${label} ${duration(ms)}`);
+  }
+  if (last.requests) parts.push(pages ? `${last.requests} ${last.requests === 1 ? "Seite" : "Seiten"}` : `${last.requests} ${last.requests === 1 ? "Anfrage" : "Anfragen"}`);
+  if (last.page_size) parts.push(`Seitengröße ${last.page_size}`);
+  if (last.retries) parts.push(`${last.retries} ${last.retries === 1 ? "Wiederholung" : "Wiederholungen"}`);
+  if (last.wait_ms && last.wait_ms >= 1000) parts.push(`${duration(last.wait_ms)} Wartezeit`);
+  if (last.bytes > 0) parts.push(mb(last.bytes));
+  const bad = last.status === "failed";
+  const out: DetailLine[] = [{ key: "last-run", tone: bad ? "warn" : "muted", text: `Letzter Lauf${bad ? " (fehlgeschlagen)" : ""}: ${duration(last.total_ms)}${parts.length ? ` (${parts.join(" · ")})` : ""}` }];
+  if (stats.median_ms !== null && stats.runs > 0) out.push({ key: "median", tone: "muted", text: `Median der letzten ${stats.runs} ${stats.runs === 1 ? "Laufs" : "Läufe"}: ${duration(stats.median_ms)}` });
+  return out;
+}
+
 /** Alle Detailzeilen einer Quelle; leer, wenn es nichts Neutrales zu zeigen gibt (dann bleibt die Zelle leer). */
-export function detailLines(f: Pick<Feed, "backfill" | "bulk">): DetailLine[] {
-  const out: DetailLine[] = [];
+export function detailLines(f: Pick<Feed, "backfill" | "bulk"> & { run_stats?: FeedRunStats; type?: Feed["type"] }): DetailLine[] {
+  const out: DetailLine[] = runStatLines(f.run_stats, f.type === "ubuntu");
   if (f.backfill) out.push({ key: "backfill", tone: "warn", text: f.backfill.progress });
   if (f.bulk) out.push(...bulkLines(f.bulk));
   return out;

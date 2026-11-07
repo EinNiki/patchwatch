@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { detailLines, errorChip, errorLine, stripNextAttempt, VISIBLE_DETAIL_LINES } from "../src/lib/feedView.ts";
+import { duration, runStatLines, detailLines, errorChip, errorLine, stripNextAttempt, VISIBLE_DETAIL_LINES } from "../src/lib/feedView.ts";
 import type { Feed, FeedBulk } from "../src/lib/types.ts";
 
 const bulk = (o: Partial<FeedBulk> = {}): FeedBulk => ({
@@ -46,4 +46,29 @@ test("problems in details are marked as warnings", () => {
   assert.ok(lines.length > VISIBLE_DETAIL_LINES);
   assert.ok(lines.some((l) => l.key === "hourly-err" && l.tone === "warn" && !/Versuch/.test(l.text)));
   assert.ok(lines.some((l) => l.key === "incomplete"));
+});
+
+const stats = (o = {}) => ({
+  last: { status: "ok", total_ms: 48_000, phases: { connect: 300, download: 41_000, parse: 5000, store: 2000 }, requests: 10, retries: 0, wait_ms: 0, page_size: 10, bytes: 14_900_000, statuses: { "200": 10 }, ...o },
+  median_ms: 52_000, phase_median_ms: { download: 40_000 }, runs: 10,
+});
+
+test("durations read naturally", () => {
+  assert.equal(duration(400), "0,4 s");
+  assert.equal(duration(48_000), "48 s");
+  assert.equal(duration(125_000), "2 Min. 5 s");
+});
+
+test("last run line lists phases, pages and size; median follows", () => {
+  const l = runStatLines(stats() as never, true);
+  assert.equal(l[0]!.text, "Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · Seitengröße 10 · 14,2 MB)");
+  assert.equal(l[1]!.text, "Median der letzten 10 Läufe: 52 s");
+  assert.deepEqual(runStatLines(undefined, true), []);
+  assert.deepEqual(runStatLines({ last: null, median_ms: null, phase_median_ms: {}, runs: 0 }, true), []);
+});
+
+test("a failed last run is marked and waits and retries are shown", () => {
+  const l = runStatLines(stats({ status: "failed", retries: 2, wait_ms: 15_000 }) as never, false);
+  assert.equal(l[0]!.tone, "warn");
+  assert.match(l[0]!.text, /fehlgeschlagen.*10 Anfragen.*2 Wiederholungen.*15 s Wartezeit/);
 });

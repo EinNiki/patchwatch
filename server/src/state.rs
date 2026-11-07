@@ -9,8 +9,12 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub limiter: Arc<RateLimiter>,
     pub http: reqwest::Client,
-    /// Verhindert parallele Feed-Läufe (Scheduler und manueller Abruf).
-    pub refresh_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Regelt parallele Feed-Läufe: Distributionsquellen (Debian, Ubuntu) laufen gemeinsam (Lesesperre, je Typ nur eine),
+    /// Anreicherungsquellen (OSV, NVD, KEV) und der synchrone Sammelabruf laufen allein (Schreibsperre).
+    pub run_gate: Arc<tokio::sync::RwLock<()>>,
+    /// Eine Sperre je Quellentyp: zwei Quellen desselben Typs bewerten dieselben Hosts und laufen nie gleichzeitig.
+    pub kind_locks:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     /// Live-Ereignisse (JSON-Text) aus Postgres NOTIFY an alle WebSocket-Verbindungen.
     pub live: tokio::sync::broadcast::Sender<Arc<str>>,
     /// Begrenzt gleichzeitige WebSocket-Verbindungen.
@@ -39,7 +43,8 @@ impl AppState {
             cfg: Arc::new(cfg),
             limiter: Arc::new(RateLimiter::default()),
             http,
-            refresh_lock: Arc::default(),
+            run_gate: Arc::default(),
+            kind_locks: Arc::default(),
             live: tokio::sync::broadcast::channel(256).0,
             live_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             checkin_waiters: Arc::default(),

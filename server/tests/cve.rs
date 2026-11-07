@@ -6414,9 +6414,10 @@ async fn run_history_is_pruned_and_orphaned_runs_are_marked_interrupted(pool: Pg
     );
 }
 
-/// "Alle abrufen": ein Lauf je eingeschalteter Quelle, nacheinander ausgeführt; Fortschritt steht in der Laufliste.
+/// "Alle abrufen": ein Lauf je eingeschalteter Quelle; Debian und Ubuntu laufen unabhängig (parallel), Fortschritt
+/// steht in der Laufliste. Die Überlappung selbst prüft `sources_run_in_parallel_and_fail_independently`.
 #[sqlx::test(migrations = "./migrations")]
-async fn run_all_creates_one_run_per_source_and_runs_them_in_sequence(pool: PgPool) {
+async fn run_all_creates_one_run_per_source_and_finishes_them_all(pool: PgPool) {
     let mock: Shared = Arc::default();
     let base = start_mock(mock.clone()).await;
     mock.lock().unwrap().ubuntu = ubuntu_batch(1, 3, Utc::now());
@@ -6430,18 +6431,173 @@ async fn run_all_creates_one_run_per_source_and_runs_them_in_sequence(pool: PgPo
     for run in runs {
         wait_run(&pool, run["run_id"].as_i64().unwrap(), 60).await;
     }
-    let order: Vec<(i64, chrono::DateTime<Utc>)> =
-        sqlx::query_as("SELECT id, started_at FROM feed_runs ORDER BY id")
+    let per_source: Vec<(String, i64)> =
+        sqlx::query_as("SELECT source, count(*) FROM feed_runs GROUP BY source ORDER BY source")
             .fetch_all(&pool)
             .await
             .unwrap();
-    for w in order.windows(2) {
-        let finished: chrono::DateTime<Utc> =
-            sqlx::query_scalar("SELECT finished_at FROM feed_runs WHERE id = $1")
-                .bind(w[0].0)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(w[1].1 >= finished, "Läufe überlappen nicht: {w:?}");
+    assert!(per_source.iter().all(|(_, n)| *n == 1), "{per_source:?}");
+    let open: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM feed_runs WHERE status IN ('queued', 'running')")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(open, 0);
+}
+
+// ---------- Messwerte je Lauf und parallele Quellen ----------
+
+async fn run_and_get(st: &AppState, source: &str) -> patchwatch_server::cve::runs::RunRow {
+    use patchwatch_server::cve::runs;
+    let runs::Start::Created(id) = runs::start(&st.pool, source, runs::Trigger::Manual, None)
+        .await
+        .unwrap()
+    else {
+        panic!("Lauf nicht angelegt");
+    };
+    runs::execute(st, id, source).await;
+    runs::get(&st.pool, id).await.unwrap().unwrap()
+}
+
+/// Je Lauf werden Dauer je Phase, Anfragen, Statuscodes, Seitengröße und Wartezeit als Zahlen gespeichert; ein
+/// bedingter Abruf (304) erscheint als Status 304. Antwortinhalte landen nie in der Datenbank.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_metrics_are_stored_as_numbers_only(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    mock.lock().unwrap().debian_body =
+        include_str!("fixtures/debian/tracker_subset_real.json").to_owned();
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 25, Utc::now());
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["debian", "ubuntu"], "", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+
+    let u = run_and_get(&st, "ubuntu").await;
+    assert_eq!(u.status, "ok", "{:?}", u.error);
+    assert!(u.requests.unwrap() >= 1);
+    assert_eq!(u.retries, Some(0));
+    assert!(u.wait_ms.is_some());
+    assert!(u.page_size.is_some_and(|n| n > 0));
+    assert!(u.statuses["200"].as_i64().unwrap() >= 1);
+    let stats: Value = sqlx::query_scalar("SELECT page_stats FROM feed_runs WHERE id = $1")
+        .bind(u.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let arr = stats.as_array().unwrap();
+    assert_eq!(arr.len() as i32, u.requests.unwrap());
+    for e in arr {
+        // [Status, Bytes, Millisekunden]: ausschließlich Zahlen.
+        let e = e.as_array().unwrap();
+        assert_eq!(e.len(), 3);
+        assert!(e.iter().all(Value::is_u64), "{e:?}");
     }
+    assert!(u.phases["download"].is_u64());
+
+    // Debian: zweiter Lauf ist ein bedingter Abruf und endet mit 304.
+    let d1 = run_and_get(&st, "debian").await;
+    assert_eq!(d1.statuses["200"], 1, "{:?}", d1.error);
+    let d2 = run_and_get(&st, "debian").await;
+    assert_eq!(d2.status, "not_modified");
+    assert_eq!(d2.statuses["304"], 1);
+
+    // Nichts davon enthält Antworttext: Wertebereich der Messspalten sind Zahlen und Statuscodes.
+    let text: String = sqlx::query_scalar(
+        "SELECT string_agg(statuses::text || page_stats::text || phases::text || coalesce(error, ''), ' ') FROM feed_runs",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !text.contains("Testbeschreibung") && !text.contains("CVE-"),
+        "keine Antwortinhalte: {text}"
+    );
+
+    // Die Feed-Liste zeigt den letzten Lauf und den Median (hier: ein abgeschlossener Ubuntu-Lauf).
+    let f = ubuntu_feed_row(&app, &h).await;
+    let rs = &f["run_stats"];
+    assert_eq!(rs["last"]["status"], "ok");
+    assert!(rs["last"]["total_ms"].is_i64());
+    assert_eq!(rs["runs"], 1);
+    assert_eq!(rs["median_ms"], rs["last"]["total_ms"]);
+    assert!(rs["phase_median_ms"]["download"].is_i64());
+}
+
+/// "Alle abrufen": Debian und Ubuntu laufen unabhängig und gleichzeitig; ein hängender Ubuntu-Lauf hält Debian nicht
+/// auf, und sein Abbruch durch den Wächter lässt Debians Ergebnis unberührt.
+#[sqlx::test(migrations = "./migrations")]
+async fn sources_run_in_parallel_and_fail_independently(pool: PgPool) {
+    use patchwatch_server::cve::runs;
+    let mock: Shared = Arc::default();
+    {
+        let mut m = mock.lock().unwrap();
+        m.debian_body = include_str!("fixtures/debian/tracker_subset_real.json").to_owned();
+        m.ubuntu = ubuntu_batch(1, 5, Utc::now());
+        m.ubuntu_hang = true;
+    }
+    let base = start_mock(mock.clone()).await;
+    let toml = format!(
+        "[cve]\nsources = [\"debian\", \"ubuntu\"]\nubuntu_url = \"{base}\"\ndebian_url = \"{base}/tracker/data/json\"\n\
+         retries = 1\nretry_base_delay_ms = 10\nrequest_timeout_secs = 120\nstall_timeout_secs = 4\nubuntu_page_pause_ms = 0\nubuntu_mode = \"api\"\n\
+         [ntfy]\nurl = \"http://127.0.0.1:9\"\ntopic = \"t\"\n"
+    );
+    let st = AppState::new(
+        pool.clone(),
+        Config::from_sources(Some(&toml), &|_| None).unwrap(),
+    )
+    .unwrap();
+    let mut items = Vec::new();
+    for s in ["ubuntu", "debian"] {
+        let runs::Start::Created(id) = runs::start(&pool, s, runs::Trigger::Manual, None)
+            .await
+            .unwrap()
+        else {
+            panic!("kein Lauf");
+        };
+        items.push((id, s.to_owned()));
+    }
+    let st2 = st.clone();
+    let all = tokio::spawn(async move { runs::execute_all(&st2, items).await });
+    let status = |s: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT status FROM feed_runs WHERE source = $1 ORDER BY id DESC LIMIT 1",
+            )
+            .bind(s)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    // Debian ist fertig, während Ubuntu noch hängt (sonst würde Debian auf Ubuntu warten).
+    let t0 = std::time::Instant::now();
+    loop {
+        let d = status("debian").await;
+        if d != "queued" && d != "running" {
+            assert_eq!(d, "ok");
+            assert_eq!(
+                status("ubuntu").await,
+                "running",
+                "Ubuntu läuft noch parallel (nach {:?})",
+                t0.elapsed()
+            );
+            break;
+        }
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(3),
+            "Debian wartet auf Ubuntu"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(30), all)
+        .await
+        .expect("Läufe enden")
+        .unwrap();
+    assert_eq!(status("ubuntu").await, "failed", "Wächter bricht Ubuntu ab");
+    assert_eq!(
+        status("debian").await,
+        "ok",
+        "Debian bleibt davon unberührt"
+    );
 }

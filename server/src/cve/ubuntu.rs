@@ -323,9 +323,10 @@ impl Ubuntu {
         let mut interrupted: Option<FeedError> = None;
         let mut est_pages = resume.and_then(|b| b.est_pages);
 
+        super::runs::report_page_size(PAGE as u32);
         'pages: for i in 0..self.max_pages as usize {
             if i > 0 && !self.page_pause.is_zero() {
-                tokio::time::sleep(self.page_pause).await;
+                super::runs::wait(self.page_pause).await;
             }
             ctx.progress.beat();
             let url = page_url(&self.base, PAGE, start_offset + i * PAGE);
@@ -734,6 +735,7 @@ impl Ubuntu {
         } else {
             snap(incr.page_size).min(cap)
         };
+        super::runs::report_page_size(size);
         // Fortschritt nur fortsetzen, wenn er zum bestätigten Cursor gehört.
         let resume = confirmed.is_some() && incr.pending.as_deref().and_then(parse_time).is_some();
         let mut offset = if resume { incr.next_offset as usize } else { 0 };
@@ -749,7 +751,7 @@ impl Ubuntu {
 
         while pages < self.incr_pages {
             if (pages > 0 || shrunk) && !self.page_pause.is_zero() {
-                tokio::time::sleep(self.page_pause).await;
+                super::runs::wait(self.page_pause).await;
             }
             ctx.progress.beat();
             let url = page_url(&self.base, size as usize, offset);
@@ -798,7 +800,7 @@ impl Ubuntu {
                         + http::jitter(self.lim.base_delay.as_millis() as u64);
                     if failure.is_none() && !wait.is_zero() {
                         ctx.progress.beat();
-                        tokio::time::sleep(wait).await;
+                        super::runs::wait(wait).await;
                     }
                     incr.last_status = status_of(&e);
                     incr.last_error = Some(e.to_string());
@@ -826,6 +828,8 @@ impl Ubuntu {
             };
         }
         incr.pages_last = pages;
+        // Gemeldet wird die zuletzt benutzte Seitengröße (nach einem Schrumpfen die kleinere).
+        super::runs::report_page_size(size);
         match failure {
             None => {
                 // Nach einem fehlerfreien Lauf wieder wachsen, höchstens bis zum (gelernten) Maximum.
