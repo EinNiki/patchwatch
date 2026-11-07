@@ -33,7 +33,9 @@ export function setCsrf(token: string | null) {
 
 async function request<T>(method: string, path: string, body?: unknown, opts: WriteOptions = {}): Promise<T> {
   const headers: Record<string, string> = {};
-  if (body !== undefined) headers["content-type"] = "application/json";
+  // Blob: Rohdaten mit ihrem eigenen Typ (Profilbild); sonst JSON.
+  const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
+  if (body !== undefined) headers["content-type"] = isBlob ? (body as Blob).type : "application/json";
   if (method !== "GET" && csrf) headers["x-csrf-token"] = csrf;
   // Schreibzugriffe zeigen ihren Fehler selbst als Toast; Lesezugriffe zeigen Fehler an der Stelle, die sie braucht.
   const notify = (status: number, message?: string, retryAfter?: number) => {
@@ -49,7 +51,7 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Wr
       method,
       headers,
       credentials: "same-origin",
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isBlob ? (body as Blob) : JSON.stringify(body),
     });
   } catch {
     notify(0);

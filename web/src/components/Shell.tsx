@@ -10,6 +10,7 @@ import { useStoredFlag } from "@/lib/useStoredFlag";
 import type { Feed, ChannelView, Host, NotificationsResponse } from "@/lib/types";
 import { HOST_STATUS } from "@/lib/status";
 import { useLiveEvents } from "@/lib/live";
+import { Avatar } from "./Avatar";
 import { useAuth } from "./AuthProvider";
 import { feedSummary } from "./FeedStatus";
 import { Icon, Logo, NavIcon, type NavIconName } from "./Icons";
@@ -334,10 +335,14 @@ function SidebarBody({ pathname, collapse }: { pathname: string; collapse?: { co
       <div className="flex flex-col gap-1 border-t border-line px-2 py-3">
         <FeedStrip />
         <LiveIndicator />
-        <p className="truncate px-3 text-xs text-fg2 rail:sr-only">
-          <span className="sr-only">Angemeldet als </span>
-          {me.username}
-        </p>
+        <div className="group/item relative flex items-center gap-2 px-3 py-1 rail:justify-center rail:px-0" title={me.username}>
+          <Avatar name={me.username} version={me.avatar} size={28} />
+          <p className="min-w-0 truncate text-xs text-fg2 rail:sr-only">
+            <span className="sr-only">Angemeldet als </span>
+            {me.username}
+          </p>
+          <RailTip>{me.username}</RailTip>
+        </div>
         <div className="group/item relative">
           <button
             type="button"

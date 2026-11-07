@@ -303,6 +303,8 @@ export interface Me {
   csrf_token: string;
   /** Start-Passwort (erzeugt oder früherer Standardwert): bis zum Wechsel ist nur der Passwortwechsel möglich. */
   must_change_password?: boolean;
+  /** Zeitstempel (Sekunden) des eigenen Profilbilds; `null` = Kreis mit Initialen. Dient als Cache-Schlüssel. */
+  avatar?: number | null;
 }
 
 export interface NewHost {

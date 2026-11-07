@@ -10,6 +10,8 @@ import { ForcedPasswordChange } from "@/components/ForcedPasswordChange";
 interface AuthValue {
   me: Me;
   logout: () => Promise<void>;
+  /** Neuer Cache-Schlüssel des Profilbilds nach Hochladen (Zahl) oder Entfernen (`null`). */
+  setAvatar: (v: number | null) => void;
 }
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -73,5 +75,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   if (me.must_change_password) {
     return <ForcedPasswordChange username={me.username} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={() => void logout()} />;
   }
-  return <Ctx.Provider value={{ me, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ me, logout, setAvatar: (v) => setMe({ ...me, avatar: v }) }}>{children}</Ctx.Provider>;
 }

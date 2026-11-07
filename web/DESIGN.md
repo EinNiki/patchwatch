@@ -193,6 +193,12 @@ und ein kleiner Hook genügen (Messung: First-Load-JS +0,4 KB gegenüber +30–4
 - Erfolg: Zusammenfassung als Toast, Details klappen nach 5 s ein. Fehlschlag: Details bleiben mit Meldung und
   „Erneut versuchen“, bis sie geschlossen werden.
 
+## Profilbild
+
+Kreis, 28 px in der Seitenleiste (48 px in den Einstellungen), `alt=""` bzw. `aria-hidden` (dekorativ; der Name steht daneben oder als
+Tooltip). Initialen auf den Tokens `--av-1` … `--av-6` mit `--av-fg`; Kontrast ≥ 4,5:1 (Test liest die Tokens). Eigenes Bild nur von
+`/api/v1/auth/avatar`, bei Ladefehler fallen die Initialen ein.
+
 ## Barrierefreiheit
 
 - Text ≥ 4,5:1 (Tabellen oben), UI-Ränder/Icons ≥ 3:1, Fokusring auf allem Fokussierbaren.

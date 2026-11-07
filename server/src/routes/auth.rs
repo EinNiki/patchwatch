@@ -1,7 +1,8 @@
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{ClientIp, PendingAdmin, PendingCsrfAdmin};
+use crate::extract::{Admin, ClientIp, CsrfAdmin, PendingAdmin, PendingCsrfAdmin};
 use crate::security;
 use crate::state::AppState;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -173,10 +174,128 @@ pub async fn change_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn me(PendingAdmin(admin): PendingAdmin) -> Json<serde_json::Value> {
-    Json(json!({
+pub async fn me(
+    State(st): State<AppState>,
+    PendingAdmin(admin): PendingAdmin,
+) -> ApiResult<Json<serde_json::Value>> {
+    // Zeitstempel des Profilbilds (Sekunden) dient der Oberfläche als Cache-Schlüssel; `null` = kein eigenes Bild.
+    let avatar: Option<i64> = sqlx::query_scalar(
+        "SELECT extract(epoch FROM avatar_updated_at)::bigint FROM admin_users WHERE username = $1 AND avatar IS NOT NULL",
+    )
+    .bind(&admin.username)
+    .fetch_optional(&st.pool)
+    .await?
+    .flatten();
+    Ok(Json(json!({
         "username": admin.username,
         "csrf_token": admin.csrf_token,
         "must_change_password": admin.must_change_password,
-    }))
+        "avatar": avatar,
+    })))
+}
+
+/// Antwort mit festen Schutz-Headern: das Bild wird nie als Teil einer Seite eingebettet oder umgedeutet.
+fn avatar_response(kind: &'static str, data: Vec<u8>) -> Response {
+    let mut r = (StatusCode::OK, data).into_response();
+    let h = r.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=300"),
+    );
+    h.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'"),
+    );
+    h.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_static("inline; filename=\"avatar\""),
+    );
+    h.insert(
+        header::HeaderName::from_static("cross-origin-resource-policy"),
+        HeaderValue::from_static("same-origin"),
+    );
+    r
+}
+
+/// Eigenes Profilbild (nur für angemeldete Admins; 404, wenn keines gesetzt ist).
+pub async fn avatar_get(
+    State(st): State<AppState>,
+    Admin { username, .. }: Admin,
+) -> ApiResult<Response> {
+    let row: Option<(Option<Vec<u8>>, Option<String>)> =
+        sqlx::query_as("SELECT avatar, avatar_type FROM admin_users WHERE username = $1")
+            .bind(&username)
+            .fetch_optional(&st.pool)
+            .await?;
+    match row {
+        Some((Some(data), Some(kind))) => {
+            // Der Typ kommt aus der Datenbank, wird aber nur aus der festen Liste ausgeliefert.
+            let kind = if kind == "image/webp" {
+                "image/webp"
+            } else {
+                "image/png"
+            };
+            Ok(avatar_response(kind, data))
+        }
+        _ => Err(ApiError::NotFound),
+    }
+}
+
+/// Setzt das Profilbild. Erwartet das im Browser neu kodierte Bild (PNG oder WebP, 128×128, höchstens 64 KB) als Rohdaten.
+pub async fn avatar_put(
+    State(st): State<AppState>,
+    CsrfAdmin(admin): CsrfAdmin,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> ApiResult<StatusCode> {
+    st.limiter
+        .check(
+            &format!("avatar:{}", admin.username.to_lowercase()),
+            10,
+            Duration::from_secs(600),
+        )
+        .map_err(|w| ApiError::TooManyRequests {
+            retry_after_secs: w.as_secs().max(1),
+        })?;
+    let kind = crate::avatar::validate(&body).map_err(|m| ApiError::BadRequest(m.into()))?;
+    // Der angegebene Typ muss zum Inhalt passen (kein „image/png“ über WebP-Daten und umgekehrt).
+    let declared = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+        });
+    if declared.as_deref() != Some(kind) {
+        return Err(ApiError::BadRequest(
+            "Dateityp und Inhalt passen nicht zusammen".into(),
+        ));
+    }
+    sqlx::query("UPDATE admin_users SET avatar = $2, avatar_type = $3, avatar_updated_at = now() WHERE username = $1")
+        .bind(&admin.username)
+        .bind(body.as_ref())
+        .bind(kind)
+        .execute(&st.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Entfernt das Profilbild (danach gilt wieder der Kreis mit Initialen).
+pub async fn avatar_delete(
+    State(st): State<AppState>,
+    CsrfAdmin(admin): CsrfAdmin,
+) -> ApiResult<StatusCode> {
+    sqlx::query("UPDATE admin_users SET avatar = NULL, avatar_type = NULL, avatar_updated_at = NULL WHERE username = $1")
+        .bind(&admin.username)
+        .execute(&st.pool)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }

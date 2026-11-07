@@ -158,6 +158,27 @@ Die Feeds der festen Standardquellen (Ubuntu, Debian, OSV, NVD, KEV) und OIDC la
 folgen den Proxy-Variablen; deren Ziele kommen nicht aus Benutzereingaben. Eine eigene, ebenfalls geprüfte
 Proxy-Einstellung gibt es nicht; sie wäre nur mit Prüfung der Proxy-Adresse selbst sinnvoll.
 
+### Profilbild
+
+In der Seitenleiste steht vor dem Namen ein rundes Profilbild (28 px; eingeklappt nur das Bild, der Name als Tooltip).
+Standard ist ein Kreis mit **Initialen**, lokal erzeugt: Farbe aus sechs festen Tokens (`--av-1` … `--av-6`, Kontrast
+≥ 4,5:1 in Hell und Dunkel), deterministisch aus dem Benutzernamen. Es gibt keinen Gravatar, keinen externen Dienst und keine
+frei wählbare Bild-URL.
+
+Unter Einstellungen → Konto lässt sich ein eigenes Bild setzen („Profilbild ändern“, „Entfernen“):
+
+- **Im Browser:** nur PNG, JPEG, WebP (Typ an den Bytes erkannt, nicht an der Endung; kein SVG, kein GIF), höchstens 2 MB,
+  Zuschnitt auf 128 × 128 (Zoom und Verschieben), Neukodierung als WebP bzw. PNG, höchstens 64 KB.
+- **Auf dem Server** (`PUT /api/v1/auth/avatar`, CSRF-Token, 10 Versuche je 10 Minuten): Es gibt **keine Bildbibliothek**
+  (keine neue Angriffsfläche). Stattdessen wird nur das im Browser neu kodierte Bild streng geprüft: Signatur, Länge ≤ 64 KB,
+  exakt 128 × 128, `Content-Type` passt zum Inhalt, bei PNG alle Chunk-Prüfsummen und nur Bild-Chunks, bei WebP nur
+  `VP8`/`VP8L`/`VP8X`/`ALPH`; Text, EXIF, XMP, Animation und Anhängsel werden abgelehnt. Ein kleines Farbprofil (ICC, ≤ 4 KB)
+  ist erlaubt, weil Chrome es an WebP anhängt. Der Server dekodiert nichts und kodiert nicht neu; wer die API direkt
+  anspricht, kann also nur ein Bild speichern, das diese Prüfung besteht.
+- **Speicherung:** in der Datenbank (`admin_users.avatar`, `bytea`, Migration `0018`). Auslieferung nur über
+  `GET /api/v1/auth/avatar` für angemeldete Admins mit festem `Content-Type`, `X-Content-Type-Options: nosniff`,
+  `Cache-Control: private`, `Content-Security-Policy: default-src 'none'`. Das Bild wird nie in die Seite eingebettet.
+
 ### Benachrichtigungskanäle
 
 ntfy, Matrix, Gotify, Discord-Webhook und „Live im Browser“ werden in der UI eingerichtet und in der Datenbank

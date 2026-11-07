@@ -54,6 +54,15 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/oidc/login", get(oidc::login))
         .route("/auth/oidc/callback", get(oidc::callback))
         .route("/auth/password", post(auth::change_password))
+        .route(
+            "/auth/avatar",
+            get(auth::avatar_get)
+                .put(auth::avatar_put)
+                .delete(auth::avatar_delete)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::avatar::MAX_BYTES + 1024,
+                )),
+        )
         .route("/hosts", get(hosts::list).post(hosts::create))
         .route("/hosts/request-report", post(hosts::request_report_all))
         .route("/hosts/{id}", get(hosts::detail).delete(hosts::remove))

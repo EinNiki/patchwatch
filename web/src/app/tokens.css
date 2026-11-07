@@ -1,6 +1,14 @@
 /* Design-Tokens v2.1, siehe web/DESIGN.md. Dunkel folgt dem System oder data-theme, Hell ist der Fallback. */
 :root {
   --bg: #f6f7f8;
+  /* Profilbild-Kreis: sechs gedämpfte Farben, Text in --av-fg; Kontrast ≥ 4,5:1 (siehe tests/avatar.test.mts). */
+  --av-1: #3f5f9e;
+  --av-2: #2d6a5a;
+  --av-3: #85497a;
+  --av-4: #8f5226;
+  --av-5: #58589a;
+  --av-6: #6b6320;
+  --av-fg: #ffffff;
   --surface: #ffffff;
   --sunk: #eef0f2;
   --line: #e1e4e8;
@@ -29,6 +37,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #15171a;
+    --av-1: #9db7ec;
+    --av-2: #8cd0bd;
+    --av-3: #dba5d0;
+    --av-4: #e4b07f;
+    --av-5: #b5b5ee;
+    --av-6: #d2c77c;
+    --av-fg: #15171a;
     --surface: #1a1d21;
     --sunk: #202328;
     --line: #2b2f35;
@@ -57,6 +72,13 @@
 
 :root[data-theme="dark"] {
   --bg: #15171a;
+  --av-1: #9db7ec;
+  --av-2: #8cd0bd;
+  --av-3: #dba5d0;
+  --av-4: #e4b07f;
+  --av-5: #b5b5ee;
+  --av-6: #d2c77c;
+  --av-fg: #15171a;
   --surface: #1a1d21;
   --sunk: #202328;
   --line: #2b2f35;

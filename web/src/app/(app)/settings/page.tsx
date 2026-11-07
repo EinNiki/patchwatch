@@ -13,6 +13,7 @@ import { ErrorNote, Loading } from "@/components/States";
 import { ThemeSelect } from "@/components/ThemeSelect";
 import { RelTime } from "@/components/RelTime";
 import { Mono } from "@/components/Version";
+import { AvatarForm } from "@/components/AvatarForm";
 
 const MIN_LEN = 12;
 
@@ -316,7 +317,10 @@ export default function SettingsPage() {
       <PageHeader title="Einstellungen" />
 
       <SettingsSection id="acct-h" title="Konto" description={<>Angemeldet als <Mono>{me.username}</Mono>.</>}>
-        <PasswordForm />
+        <div className="flex flex-col gap-6">
+          <AvatarForm />
+          <PasswordForm />
+        </div>
       </SettingsSection>
 
       <SettingsSection id="look-h" title="Darstellung" description="„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.">

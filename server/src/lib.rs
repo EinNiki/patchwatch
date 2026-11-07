@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod avatar;
 pub mod config;
 pub mod cve;
 pub mod error;
