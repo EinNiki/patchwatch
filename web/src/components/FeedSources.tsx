@@ -38,7 +38,7 @@ const ADDABLE: { name: Feed["type"]; title: string; text: string }[] = [
   { name: "cisa_kev", title: "CISA KEV", text: "Markiert bekannte CVEs, die aktiv ausgenutzt werden. Der Fix-Stand bleibt davon unberührt." },
 ];
 
-const BTN = "min-w-28";
+const BTN = "min-w-28 lg:max-xl:min-w-0";
 
 const TYPE_TITLE: Record<Feed["type"], string> = { debian: "Debian", ubuntu: "Ubuntu", osv: "OSV", nvd: "NVD", cisa_kev: "CISA KEV" };
 
@@ -287,9 +287,9 @@ export function FeedSources() {
               <tr>
                 <th scope="col"><span className="th-pad">Quelle</span></th>
                 <th scope="col"><span className="th-pad">Zustand</span></th>
-                <th scope="col"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
+                <th scope="col" className="max-xl:whitespace-normal"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
                 <th scope="col"><span className="th-pad">Intervall</span></th>
-                <th scope="col"><span className="th-pad">Nächster Versuch</span></th>
+                <th scope="col" className="max-xl:whitespace-normal"><span className="th-pad">Nächster Versuch</span></th>
                 <th scope="col"><span className="th-pad">Details</span></th>
                 <th scope="col"><span className="th-pad">Aktionen</span></th>
               </tr>
@@ -316,15 +316,16 @@ export function FeedSources() {
                   </td>
                   <td data-label="Letzter Erfolg">
                     <RelTime iso={f.last_success_at} />
-                    {f.last_success_at ? <div className="text-xs text-fg3 max-md:hidden">{absTime(f.last_success_at)}</div> : null}
+                    {f.last_success_at ? <div className="text-xs text-fg3 max-xl:hidden">{absTime(f.last_success_at)}</div> : null}
                   </td>
-                  <td data-label="Intervall" className="whitespace-nowrap">
-                    alle {f.interval_minutes} Min.
+                  <td data-label="Intervall" className="xl:whitespace-nowrap">
+                    <span className="xl:hidden">{f.interval_minutes} Min.</span>
+                    <span className="max-xl:hidden">alle {f.interval_minutes} Min.</span>
                   </td>
-                  <td data-label="Nächster Versuch" className={f.enabled && f.next_attempt_at ? "whitespace-nowrap" : "max-md:hidden"}>
+                  <td data-label="Nächster Versuch" className={f.enabled && f.next_attempt_at ? "xl:whitespace-nowrap" : "max-md:hidden"}>
                     {f.enabled && f.next_attempt_at ? <RelTime iso={f.next_attempt_at} /> : null}
                   </td>
-                  <td className={`max-w-[28rem] max-md:max-w-none ${detailLines(f).length ? "" : "max-md:hidden"}`}>
+                  <td className={`max-w-[17rem] max-md:max-w-none xl:max-w-[28rem] ${detailLines(f).length ? "" : "max-md:hidden"}`}>
                     <DetailsCell feed={f} open={detailsOpen.has(f.source)} onToggle={() => setDetailsOpen((o) => { const n = new Set(o); if (n.has(f.source)) n.delete(f.source); else n.add(f.source); return n; })} />
                   </td>
                   <td>

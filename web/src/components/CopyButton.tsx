@@ -53,7 +53,7 @@ export function CopyButton({ text, label = "Kopieren", onSelect }: { text: strin
       onClick={(e) => void copy(e)}
       aria-label={label}
       title={label}
-      className="relative inline-flex size-6 shrink-0 items-center justify-center rounded-xs text-fg2 hover:bg-sunk hover:text-fg before:absolute before:-inset-2.5 before:content-[''] md:before:hidden"
+      className="inline-flex size-6 max-md:size-11 shrink-0 items-center justify-center rounded-xs text-fg2 hover:bg-sunk hover:text-fg"
     >
       <CopyIcon done={done} />
       <span role="status" aria-live="polite" className="sr-only">

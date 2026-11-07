@@ -50,7 +50,7 @@ try {
       return { svg: [Math.round(s.width), Math.round(s.height)], sw: svg.getAttribute("stroke-width"), btn: Math.round(b.height), lh, fieldW: el.parentElement.getBoundingClientRect().width, vw: innerWidth, hit: Math.round(parseFloat(getComputedStyle(el, "::before").height) || 0) };
     });
     ok(g.svg[0] === 16 && g.svg[1] === 16 && g.sw === "1.5", `${L}: Symbol 16 px, Linie 1.5 (${g.svg})`);
-    ok(g.btn <= 28 && g.btn >= g.lh - 1, `${L}: Knopfhöhe ${g.btn} px passt zur Zeilenhöhe ${g.lh} px`);
+    ok(g.btn <= 44 && g.btn >= g.lh - 1, `${L}: Knopfhöhe ${g.btn} px passt zur Zeilenhöhe ${g.lh} px`);
     ok(g.fieldW <= g.vw, `${L}: Codefeld passt in den Bildschirm`);
     return btn;
   }
@@ -64,8 +64,8 @@ try {
     ok((await page.getByRole("button", { name: /^(Befehl|Token) kopieren$/ }).filter({ hasText: /\S/ }).count()) === 0, `${L}: kein Textknopf "Befehl kopieren" im DOM`);
     const btn = await structure(page.locator("main"), "Befehl kopieren", L);
     if (w < 768) {
-      const hit = await btn.evaluate((el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el, "::before"); return { w: r.width + 2 * Math.abs(parseFloat(cs.left) || 0), pos: cs.position, inset: cs.top }; });
-      ok(hit.pos === "absolute" && hit.w >= 44, `${L}: Trefferfläche mobil >= 44 px (${hit.w})`);
+      const hit = await btn.evaluate((el) => { const r = el.getBoundingClientRect(); return { w: r.width, h: r.height }; });
+      ok(hit.w >= 44 && hit.h >= 44, `${L}: Trefferfläche mobil >= 44 px (${hit.w}x${hit.h})`);
     }
     // Klick: Zwischenablage, Haken, Toast.
     await btn.click();
