@@ -441,7 +441,11 @@ async fn store(
     };
     let mut tx = state.pool.begin().await?;
     let stats = match ingest::ingest_with(&mut tx, kind, name, &records, !enrich).await {
-        Ok(s) => s,
+        Ok(s) => {
+            // Nur tatsächlich geänderte Zeilen zählen (unveränderte werden nicht geschrieben).
+            runs::report_rows(s.changed_rows);
+            s
+        }
         Err(e) => {
             drop(tx);
             let msg = format!("Speichern fehlgeschlagen: {e}");

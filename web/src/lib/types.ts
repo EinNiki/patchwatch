@@ -277,8 +277,15 @@ export interface FeedRunStats {
     wait_ms: number | null;
     page_size: number | null;
     bytes: number;
+    /** Über das Netz übertragen; null = nicht messbar (komprimierte Antworten werden vom HTTP-Client entpackt). */
+    bytes_wire?: number | null;
+    bytes_unpacked?: number | null;
+    /** Geschriebene Datenbankzeilen; unveränderte zählen nicht. */
+    rows_written?: number | null;
     statuses: Record<string, number>;
   } | null;
+  /** Summe der letzten 24 Stunden (nur Zahlen). */
+  day?: { runs: number; not_modified: number; bytes_wire: number; bytes_unpacked: number; rows_written: number; unmeasured: number };
   median_ms: number | null;
   phase_median_ms: Record<string, number>;
   runs: number;

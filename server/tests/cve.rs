@@ -4047,11 +4047,7 @@ async fn filter_rejects_bad_values_and_survives_special_characters(pool: PgPool)
     let e = filter_env(pool).await;
     e.row("CVE-2026-33001", "debian", "trixie", "linux", "fixed")
         .await;
-    for bad in [
-        "&debian=nix",
-        "&ubuntu=1%27%20OR%201=1",
-        "&debian=FIXED",
-    ] {
+    for bad in ["&debian=nix", "&ubuntu=1%27%20OR%201=1", "&debian=FIXED"] {
         let r = call(
             &e.app,
             Method::GET,
@@ -6670,4 +6666,174 @@ async fn unknown_releases_value_is_ignored_and_acts_like_mine(pool: PgPool) {
     for v in ["jeder", "mine", "", "ALL"] {
         assert_eq!(e.ids(&format!("&releases={v}")).await, mine, "releases={v}");
     }
+}
+
+/// Letzter Lauf einer Quelle: (bytes_wire, bytes_unpacked, rows_written).
+async fn last_transfer(pool: &PgPool, source: &str) -> (Option<i64>, Option<i64>, Option<i64>) {
+    sqlx::query_as(
+        "SELECT bytes_wire, bytes_unpacked, rows_written FROM feed_runs \
+         WHERE source = $1 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(source)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Entpackte Bytes und geschriebene Zeilen stimmen mit dem Mock überein; ein 304 überträgt und schreibt nichts
+/// von der Massendatei, und die 24-Stunden-Summe der Statistik addiert die Läufe.
+#[sqlx::test(migrations = "./migrations")]
+async fn transfer_counters_match_the_mock_and_a_304_moves_nothing(pool: PgPool) {
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let xml = oval_xml(
+        "noble",
+        &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+    );
+    set_oval(&mock, "noble", &xml, "\"v1\"");
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+
+    let r = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.json);
+    let id = r.json["run"]["id"].as_i64().unwrap();
+    assert_eq!(wait_run(&pool, id, 30).await, "ok");
+    let (_, unpacked1, rows1) = last_transfer(&pool, "ubuntu").await;
+    assert!(
+        unpacked1.unwrap() >= xml.len() as i64,
+        "entpackte XML-Bytes ({}) sind enthalten: {unpacked1:?}",
+        xml.len()
+    );
+    assert!(rows1.unwrap() > 0, "neue Zeilen gezählt: {rows1:?}");
+
+    // Zweiter Lauf: Datei fällig, aber unverändert → 304, nichts entpackt, nichts geschrieben.
+    make_bulk_due(&pool).await;
+    // Abkühlzeit für manuelle Läufe überspringen: den ersten Lauf in die Vergangenheit schieben.
+    sqlx::query(
+        "UPDATE feed_runs SET created_at = created_at - interval '1 hour', \
+         started_at = started_at - interval '1 hour', finished_at = finished_at - interval '1 hour'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let r = post_json(&app, &h, "/api/v1/feeds/ubuntu/run", None).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.json);
+    let id2 = r.json["run"]["id"].as_i64().unwrap();
+    assert_eq!(wait_run(&pool, id2, 30).await, "ok");
+    assert_eq!(
+        attempts(&mock, "oval com.ubuntu.noble.cve.oval.xml.bz2 conditional"),
+        1
+    );
+    let (_, unpacked2, rows2) = last_transfer(&pool, "ubuntu").await;
+    // Die API-Seiten sind in beiden Läufen gleich; der Unterschied ist genau die entpackte OVAL-Datei.
+    assert_eq!(
+        unpacked1.unwrap() - unpacked2.unwrap(),
+        xml.len() as i64,
+        "304: die Datei wird nicht entpackt"
+    );
+    assert_eq!(rows2, Some(0), "304 schreibt nichts");
+
+    // Statistik: Summe der letzten 24 Stunden über beide Läufe.
+    let row = ubuntu_feed_row(&app, &h).await;
+    let day = &row["run_stats"]["day"];
+    assert!(
+        day["runs"].as_i64().unwrap() >= 2,
+        "24-h-Summe zählt Läufe: {}",
+        row["run_stats"]
+    );
+    assert_eq!(
+        day["bytes_unpacked"].as_i64().unwrap(),
+        unpacked1.unwrap() + unpacked2.unwrap()
+    );
+    assert_eq!(
+        day["rows_written"].as_i64().unwrap(),
+        rows1.unwrap() + rows2.unwrap()
+    );
+}
+
+/// Der Server legt nirgends Dateien an: Downloads werden gestreamt. Dieser Test hält das fest, damit eine
+/// spätere Änderung (Temp-Datei, Cache auf Platte) bewusst Aufräum- und Rechtelogik mitbringen muss.
+#[test]
+fn server_sources_never_write_files_for_feed_downloads() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+    let needles = [
+        "tempfile",
+        "File::create",
+        "fs::write",
+        "tokio::fs",
+        "OpenOptions",
+        "temp_dir",
+    ];
+    for f in files {
+        let src = std::fs::read_to_string(&f).unwrap();
+        // Tests im selben File dürfen Dateien anlegen; geprüft wird der Code davor.
+        let prod = src.split("#[cfg(test)]").next().unwrap();
+        for n in needles {
+            let hits: Vec<_> = prod
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//") && l.contains(n))
+                .collect();
+            assert!(
+                hits.is_empty() || f.ends_with("config.rs") || f.ends_with("main.rs"),
+                "{} nutzt {n}: {hits:?} – Feed-Downloads müssen gestreamt bleiben",
+                f.display()
+            );
+        }
+    }
+}
+
+/// Fehler, Abbruch und abgeschnittene Dateien hinterlassen nichts im Temp-Verzeichnis.
+#[sqlx::test(migrations = "./migrations")]
+async fn failed_runs_leave_no_files_behind(pool: PgPool) {
+    fn snapshot() -> std::collections::BTreeSet<String> {
+        std::fs::read_dir(std::env::temp_dir())
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| {
+                        n.contains("oval") || n.contains("patchwatch") || n.ends_with(".bz2")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    let before = snapshot();
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let good = oval_xml(
+        "noble",
+        &[("CVE-2026-20001", &[("linux", "6.8.0-20.20")], false)],
+    );
+    set_oval(&mock, "noble", &good, "\"v1\"");
+    let st = setup_hybrid(pool.clone(), &base, "ubuntu_bulk_releases = [\"noble\"]").await;
+    refresh::refresh_all(&st).await;
+    // Zweiter Import mit abgeschnittener Datei.
+    make_bulk_due(&pool).await;
+    let body = bz2(good.as_bytes());
+    mock.lock().unwrap().oval.insert(
+        "com.ubuntu.noble.cve.oval.xml.bz2".to_owned(),
+        OvalFile {
+            cut_at: Some(body.len() / 2),
+            body,
+            etag: "\"v2\"".to_owned(),
+            ..Default::default()
+        },
+    );
+    refresh::refresh_all(&st).await;
+    assert_eq!(snapshot(), before, "keine Reste im Temp-Verzeichnis");
 }

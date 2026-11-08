@@ -53,6 +53,14 @@ struct Inner {
     /// Dauer je abgeschlossener Phase in Millisekunden.
     ms: Vec<(Phase, u128)>,
     bytes: u64,
+    /// Entpackte Bytes (was der Parser gesehen hat).
+    unpacked: u64,
+    /// Exakt gemessene Übertragung (OVAL: komprimierter Strom).
+    wire_exact: u64,
+    /// Mindestens eine Antwort wurde vom HTTP-Client entpackt (gzip): die Übertragungsmenge ist dann nicht messbar.
+    wire_unknown: bool,
+    /// Geschriebene Zeilen in der Datenbank.
+    rows: Option<i64>,
     items: Option<i64>,
     hosts: Option<i64>,
     requests: u32,
@@ -79,6 +87,10 @@ impl Default for Sink {
             since: Instant::now(),
             ms: Vec::new(),
             bytes: 0,
+            unpacked: 0,
+            wire_exact: 0,
+            wire_unknown: false,
+            rows: None,
             items: None,
             hosts: None,
             requests: 0,
@@ -110,6 +122,10 @@ pub struct Metrics {
     pub retries: u32,
     pub wait_ms: u64,
     pub page_size: Option<u32>,
+    /// Über das Netz übertragene Bytes; `None`, wenn nicht messbar.
+    pub wire: Option<u64>,
+    pub unpacked: u64,
+    pub rows: Option<i64>,
     /// {"200": 10, "503": 1}
     pub statuses: Value,
     /// [[Status, Bytes, ms], ...]
@@ -135,6 +151,30 @@ impl Sink {
         self.0.lock().map_or((Phase::Connect, Duration::ZERO), |i| {
             (i.phase, i.since.elapsed())
         })
+    }
+
+    pub fn add_unpacked(&self, n: u64) {
+        if let Ok(mut i) = self.0.lock() {
+            i.unpacked = i.unpacked.saturating_add(n);
+        }
+    }
+
+    pub fn add_wire(&self, n: u64) {
+        if let Ok(mut i) = self.0.lock() {
+            i.wire_exact = i.wire_exact.saturating_add(n);
+        }
+    }
+
+    pub fn mark_wire_unknown(&self) {
+        if let Ok(mut i) = self.0.lock() {
+            i.wire_unknown = true;
+        }
+    }
+
+    pub fn set_rows(&self, n: i64) {
+        if let Ok(mut i) = self.0.lock() {
+            i.rows = Some(i.rows.unwrap_or(0) + n);
+        }
     }
 
     pub fn add_bytes(&self, n: u64) {
@@ -214,6 +254,9 @@ impl Sink {
                 retries: i.retries,
                 wait_ms: i.wait_ms,
                 page_size: i.page_size,
+                wire: (!i.wire_unknown && i.requests > 0).then_some(i.wire_exact),
+                unpacked: i.unpacked,
+                rows: i.rows,
                 statuses: Value::Object(
                     i.statuses
                         .iter()
@@ -287,6 +330,22 @@ pub async fn wait(d: Duration) {
 
 pub fn report_bytes(n: u64) {
     let _ = SINK.try_with(|s| s.add_bytes(n));
+}
+/// Entpackte Bytes (nach gzip/bzip2).
+pub fn report_unpacked(n: u64) {
+    let _ = SINK.try_with(|s| s.add_unpacked(n));
+}
+/// Exakt gemessene Übertragung (komprimierter Strom, ohne Entpacken durch den HTTP-Client).
+pub fn report_wire(n: u64) {
+    let _ = SINK.try_with(|s| s.add_wire(n));
+}
+/// Der HTTP-Client hat entpackt: die Übertragungsmenge dieser Antwort ist nicht messbar.
+pub fn report_wire_unknown() {
+    let _ = SINK.try_with(|s| s.mark_wire_unknown());
+}
+/// Tatsächlich geschriebene Datenbankzeilen.
+pub fn report_rows(n: usize) {
+    let _ = SINK.try_with(|s| s.set_rows(n as i64));
 }
 pub fn report_items(n: usize) {
     let _ = SINK.try_with(|s| s.set_items(n as i64));
@@ -372,9 +431,12 @@ pub struct RunRow {
     pub wait_ms: Option<i64>,
     pub page_size: Option<i32>,
     pub statuses: Value,
+    pub bytes_wire: Option<i64>,
+    pub bytes_unpacked: Option<i64>,
+    pub rows_written: Option<i64>,
 }
 
-pub const RUN_COLS: &str = "id, source, trigger, started_by, status, phase, created_at, started_at, finished_at, bytes, items, hosts, error, phases, requests, retries, wait_ms, page_size, statuses";
+pub const RUN_COLS: &str = "id, source, trigger, started_by, status, phase, created_at, started_at, finished_at, bytes, items, hosts, error, phases, requests, retries, wait_ms, page_size, statuses, bytes_wire, bytes_unpacked, rows_written";
 
 pub async fn get(pool: &PgPool, id: i64) -> sqlx::Result<Option<RunRow>> {
     sqlx::query_as(&format!("SELECT {RUN_COLS} FROM feed_runs WHERE id = $1"))
@@ -561,7 +623,7 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
     let _ = sqlx::query(
         "UPDATE feed_runs SET status = $2, phase = $8, finished_at = now(), heartbeat_at = now(), error = $3, \
          bytes = $4, items = $5, hosts = $6, phases = $7, requests = $9, retries = $10, wait_ms = $11, page_size = $12, \
-         statuses = $13, page_stats = $14 WHERE id = $1",
+         statuses = $13, page_stats = $14, bytes_wire = $15, bytes_unpacked = $16, rows_written = $17 WHERE id = $1",
     )
     .bind(run_id)
     .bind(status)
@@ -577,6 +639,9 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
     .bind(metrics.page_size.map(|n| n as i32))
     .bind(&metrics.statuses)
     .bind(&metrics.page_stats)
+    .bind(metrics.wire.map(|n| n as i64))
+    .bind(metrics.unpacked as i64)
+    .bind(metrics.rows)
     .execute(&state.pool)
     .await;
     prune(&state.pool, source).await;

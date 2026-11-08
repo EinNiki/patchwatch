@@ -137,6 +137,21 @@ fn attr(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
         .and_then(|a| a.unescape_value().ok().map(|v| v.into_owned()))
 }
 
+/// Zählt die gelesenen (entpackten) Bytes.
+struct CountRead<R> {
+    inner: R,
+    n: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl<R: Read> Read for CountRead<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let k = self.inner.read(buf)?;
+        self.n
+            .fetch_add(k as u64, std::sync::atomic::Ordering::Relaxed);
+        Ok(k)
+    }
+}
+
 /// Parst eine `cve.oval.xml` eines Releases gestreamt. Fehler (Abschnitt fehlt, kaputtes XML, abgeschnittene oder
 /// zu große Datei) ergeben `Err`; es werden nie Teilergebnisse geliefert.
 pub fn parse_cve_oval<R: Read>(
@@ -358,13 +373,23 @@ async fn import_inner(
     super::runs::report_phase(super::runs::Phase::Download);
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<Vec<u8>>>(8);
     let (rel, max_xml) = (release.to_owned(), p.max_xml_bytes);
+    // Entpackte Bytes zählt der Parser-Thread (dort gibt es keinen Sammler); gemeldet wird nach dem Parsen.
+    let unpacked = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counter = unpacked.clone();
     let parser = tokio::task::spawn_blocking(move || {
         let decoder = bzip2::read::BzDecoder::new(ChannelRead {
             rx,
             cur: Vec::new(),
             pos: 0,
         });
-        parse_cve_oval(decoder, &rel, max_xml)
+        parse_cve_oval(
+            CountRead {
+                inner: decoder,
+                n: counter,
+            },
+            &rel,
+            max_xml,
+        )
     });
     let mut bytes = 0u64;
     let mut net_err: Option<FeedError> = None;
@@ -378,6 +403,7 @@ async fn import_inner(
                 }
                 beat.beat();
                 super::runs::report_bytes(chunk.len() as u64);
+                super::runs::report_wire(chunk.len() as u64);
                 if tx.send(Ok(chunk.to_vec())).await.is_err() {
                     break; // der Parser hat schon aufgehört (Fehler); sein Ergebnis folgt unten
                 }
@@ -409,7 +435,9 @@ async fn import_inner(
     super::runs::report_phase(super::runs::Phase::Parse);
     let parsed = parser
         .await
-        .map_err(|e| FeedError::Format(format!("Auswertung abgebrochen: {e}")))?;
+        .map_err(|e| FeedError::Format(format!("Auswertung abgebrochen: {e}")));
+    super::runs::report_unpacked(unpacked.load(std::sync::atomic::Ordering::Relaxed));
+    let parsed = parsed?;
     if let Some(e) = net_err {
         return Err(e);
     }

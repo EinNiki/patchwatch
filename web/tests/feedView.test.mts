@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { duration, runStatLines, detailLines, errorChip, errorLine, stripNextAttempt, VISIBLE_DETAIL_LINES } from "../src/lib/feedView.ts";
+import { byteSize, transferLines, duration, runStatLines, detailLines, errorChip, errorLine, stripNextAttempt, VISIBLE_DETAIL_LINES } from "../src/lib/feedView.ts";
 import type { Feed, FeedBulk } from "../src/lib/types.ts";
 
 const bulk = (o: Partial<FeedBulk> = {}): FeedBulk => ({
@@ -61,7 +61,7 @@ test("durations read naturally", () => {
 
 test("last run line lists phases, pages and size; median follows", () => {
   const l = runStatLines(stats() as never, true);
-  assert.equal(l[0]!.text, "Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · Seitengröße 10 · 14,2 MB)");
+  assert.equal(l[0]!.text, "Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · Seitengröße 10)");
   assert.equal(l[1]!.text, "Median der letzten 10 Läufe: 52 s");
   assert.deepEqual(runStatLines(undefined, true), []);
   assert.deepEqual(runStatLines({ last: null, median_ms: null, phase_median_ms: {}, runs: 0 }, true), []);
@@ -71,4 +71,30 @@ test("a failed last run is marked and waits and retries are shown", () => {
   const l = runStatLines(stats({ status: "failed", retries: 2, wait_ms: 15_000 }) as never, false);
   assert.equal(l[0]!.tone, "warn");
   assert.match(l[0]!.text, /fehlgeschlagen.*10 Anfragen.*2 Wiederholungen.*15 s Wartezeit/);
+});
+
+test("byte sizes: 0 B, KB, MB with comma, GB", () => {
+  assert.equal(byteSize(0), "0 B");
+  assert.equal(byteSize(512), "512 B");
+  assert.equal(byteSize(4_928_307), "4,7 MB");
+  assert.equal(byteSize(85 * 1024 * 1024), "85 MB");
+  assert.equal(byteSize(1.77 * 1024 ** 3), "1,8 GB");
+});
+
+test("transfer lines separate wire, unpacked, database and disk", () => {
+  const s = stats({ bytes_wire: 4_928_307, bytes_unpacked: 85 * 1024 * 1024, rows_written: 1204 });
+  const t = transferLines({ ...s, day: { runs: 3, not_modified: 1, bytes_wire: 9_000_000, bytes_unpacked: 170 * 1024 * 1024, rows_written: 1300, unmeasured: 0 } } as never).map((l) => l.text);
+  assert.equal(t[0], "Übertragen 4,7 MB (entpackt 85 MB)");
+  assert.equal(t[1], "Gespeichert in der Datenbank: +1.204 Zeilen");
+  assert.equal(t[2], "Temporär auf Platte: 0 B");
+  assert.equal(t[3], "Letzte 24 Stunden: 3 Läufe · 1× unverändert (304) · übertragen 8,6 MB · entpackt 170 MB · +1.300 Zeilen");
+});
+
+test("a 304 shows zero transferred; unknown wire size is said so, never guessed", () => {
+  const nm = transferLines(stats({ bytes_wire: 0, bytes_unpacked: 0, rows_written: 0, statuses: { "304": 1 } }) as never).map((l) => l.text);
+  assert.equal(nm[0], "Unverändert (304), 0 B übertragen");
+  assert.equal(nm[1], "Gespeichert in der Datenbank: 0 Zeilen");
+  const un = transferLines(stats({ bytes_wire: null, bytes_unpacked: 88_000_000, rows_written: 5 }) as never).map((l) => l.text);
+  assert.equal(un[0], "Übertragen: nicht messbar (entpackt 83,9 MB)");
+  assert.ok(!transferLines({ last: null } as never).length);
 });

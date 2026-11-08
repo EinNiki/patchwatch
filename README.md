@@ -462,3 +462,7 @@ und haben kein Passwort. Die Signatur des ID-Tokens wird nicht geprüft, weil er
 ### Ubuntu-Erstabruf: Umfang und Entscheidung
 
 Die Ubuntu-API hat keinen „updated since“-Filter, `limit` ist auf 20 begrenzt. Gemessen: 22.307 CVEs ≈ 1.116 Seiten, ca. 90 KB je Seite im Netz (gzip, ca. 3,7 MB entpackt, 169 Kernel-Varianten je CVE), insgesamt ca. 100 MB Übertragung und ca. 5,6 Mio. gespeicherte Statuszeilen bei vollständigem Abruf; Antwortzeit 0,2–30 s je Seite. Bei 100 Seiten je Lauf und 60 Minuten Intervall sind das ca. 12 Läufe (ca. 12 Stunden) für die ganze Liste. Etwa 4.000 CVEs wurden in der letzten Woche geändert (Sammelaktualisierungen), ein kurzer Horizont spart daher kaum Seiten; 365 Tage decken ca. 95 % der Liste ab. **Entscheidung:** Horizont = konfigurierbares Alter nach `updated`, Standard 365 Tage; `PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS=0` lädt alles. Ein Filter `package=linux` reduziert die Treffer von 85.337 auf 22.307, die Liste der anderen Kernel-Varianten ist kleiner (z. B. azure 20.597), aber die Records enthalten alle Varianten; vollständig belegt ist die Auslassungsfreiheit nicht, deshalb wird der Filter **nicht** verwendet.
+
+### Datenmengen der Feeds
+
+Feed-Downloads werden gestreamt und nie als Datei abgelegt. Die Details je Quelle zeigen pro Lauf „Übertragen / entpackt“, die in die Datenbank geschriebenen Zeilen, „Temporär auf Platte: 0 B“ und die Summe der letzten 24 Stunden. Siehe `docs/ubuntu-source.md`.

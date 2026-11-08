@@ -121,6 +121,9 @@ async fn once(req: RequestBuilder, lim: Limits) -> Result<Fetched, FeedError> {
         }
         got += chunk.len() as u64;
         report_bytes(chunk.len() as u64);
+        // reqwest entpackt gzip selbst: gezählt wird, was der Parser sieht; die Übertragungsmenge ist hier nicht messbar.
+        crate::cve::runs::report_unpacked(chunk.len() as u64);
+        crate::cve::runs::report_wire_unknown();
         body.extend_from_slice(&chunk);
     }
     report_request(status.as_u16(), got, started);

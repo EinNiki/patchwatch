@@ -177,3 +177,28 @@ erreichbar ist. Das stündliche Blättern der ersten Seiten läuft unabhängig d
 * „Alle abrufen“ startet Debian und Ubuntu gleichzeitig (je Quelle weiter höchstens eine Anfrage). Anreicherungsquellen
   (OSV, NVD, KEV) laufen allein, nachdem diese beiden fertig sind. Der Ausfall einer Quelle stoppt die andere nicht.
   OVAL-Importe der Releases laufen nacheinander (höchstens einer, damit unter der Grenze von zwei bleibt).
+
+## Downloads, Platte und Datenmengen
+
+**Es werden keine Feed-Dateien auf der Platte abgelegt.** Alle Quellen (Debian-Tracker-JSON, Ubuntu-API-Seiten,
+OVAL-`.bz2`) werden im Arbeitsspeicher gelesen bzw. gestreamt: die OVAL-Datei läuft in Chunks über einen Kanal
+durch den bzip2-Dekoder direkt in den XML-Parser, die JSON-Antworten werden als Bytes gepuffert und geparst.
+Es gibt daher weder Temp-Dateien noch einen Cache, der aufgeräumt, mit 0600 angelegt oder in der Größe begrenzt
+werden müsste. Bei Abbruch, Fehler oder Zeitüberschreitung wird der Kanal geschlossen, der Parser endet mit
+Fehler und alle Puffer werden freigegeben; es bleibt nichts Halbes zurück, und in die Datenbank schreibt nur ein
+vollständig geparstes Ergebnis (OVAL: nie Teilergebnisse). Ein Test (`server_sources_never_write_files_for_feed_downloads`)
+schlägt an, sobald im Servercode Datei-APIs für Downloads auftauchen; wer das ändert, muss Aufräumen, Rechte und
+Größenlimit gleich mitbringen. „Temporär auf Platte“ steht in den Details deshalb immer bei 0 B.
+
+**Was „85 MB“ ist:** die *entpackte* Größe des Debian-Tracker-JSON (rund 88 MB je Lauf), nicht die Übertragung.
+Der HTTP-Client entpackt gzip selbst; die Größe auf der Leitung ist für gzip-Antworten nicht messbar, ohne eine
+zusätzliche Abhängigkeit einzuführen. In den Details steht dann „Übertragen: nicht messbar (entpackt …)“. Exakt
+gemessen wird die Leitung bei der OVAL-Datei (komprimierte Chunks) und bei 304 (0 B).
+
+**Bedingte Anfragen:** OVAL: `If-None-Match` und `If-Modified-Since` → 304 ohne Körper. Debian: nur
+`If-Modified-Since` (der Tracker liefert kein ETag); ändert sich die Datei in kurzen Abständen, folgt ein vollständiger
+Abruf. Die Details zeigen „Unverändert (304), 0 B übertragen“.
+
+**Pro Lauf und je 24 Stunden** speichert `feed_runs` die Zähler `bytes_wire`, `bytes_unpacked` und `rows_written`
+(nur geänderte Zeilen zählen). Die Details zeigen sie getrennt (Übertragen / entpackt / Datenbank / Platte) und
+summieren die letzten 24 Stunden. Es werden nur Zahlen gespeichert, keine Antwortinhalte.
