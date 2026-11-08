@@ -281,17 +281,24 @@ export function FeedSources() {
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>
       ) : (
         <div className="max-lg:overflow-x-auto">
-          <table className="tbl stack">
+          {/* Feste Spaltenbreiten: Zähler und Laufmeldungen ändern sich im Sekundentakt; bei table-layout: auto würden sie die
+              Spalten ständig neu verteilen (gemessen: bis zu 118 px Breitenänderung). Zellen umbrechen, statt zu verbreitern. */}
+          <table className="tbl stack md:min-w-[48rem] md:table-fixed md:[&_td]:[overflow-wrap:anywhere]">
             <caption>Zustand der CVE-Quellen</caption>
+            <colgroup>
+              {["md:w-[14%]", "md:w-[19%]", "md:w-[14%]", "md:w-[9%]", "md:w-[11%]", "md:w-[15%]", "md:w-[18%]"].map((c) => (
+                <col key={c} className={c} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th scope="col"><span className="th-pad">Quelle</span></th>
-                <th scope="col"><span className="th-pad">Zustand</span></th>
-                <th scope="col" className="max-xl:whitespace-normal"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
-                <th scope="col"><span className="th-pad">Intervall</span></th>
-                <th scope="col" className="max-xl:whitespace-normal"><span className="th-pad">Nächster Versuch</span></th>
-                <th scope="col"><span className="th-pad">Details</span></th>
-                <th scope="col"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Quelle</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Zustand</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Intervall</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Nächster Versuch</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Details</span></th>
+                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -308,21 +315,21 @@ export function FeedSources() {
                       {f.secret_set ? " · Schlüssel gesetzt" : ""}
                     </div>
                   </td>
-                  <td className="cell-status lead">
+                  <td className="cell-status lead max-md:flex-[1_0_100%]!">
                     <StatusBadge info={FEED_STATE[f.state]} label={(f.state === "stale" || f.state === "incomplete") && f.stale_since ? `${f.state === "stale" ? "Veraltet" : "Unvollständig"} seit ${absTime(f.stale_since)}` : undefined} />
                     {errorChip(f) ? <StatusBadge info={errorChip(f)!} /> : null}
                     {errorLine(f) ? <p className="w-full max-w-[28rem] text-xs text-warn">{errorLine(f)}</p> : null}
                     {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}
                   </td>
-                  <td data-label="Letzter Erfolg">
+                  <td data-label="Letzter Erfolg" className="max-md:shrink-0 max-md:grow-0 max-md:basis-[calc(50%-6px)]">
                     <RelTime iso={f.last_success_at} />
                     {f.last_success_at ? <div className="text-xs text-fg3 max-xl:hidden">{absTime(f.last_success_at)}</div> : null}
                   </td>
-                  <td data-label="Intervall" className="xl:whitespace-nowrap">
+                  <td data-label="Intervall" className="max-md:shrink-0 max-md:grow-0 max-md:basis-[calc(50%-6px)]">
                     <span className="xl:hidden">{f.interval_minutes} Min.</span>
                     <span className="max-xl:hidden">alle {f.interval_minutes} Min.</span>
                   </td>
-                  <td data-label="Nächster Versuch" className={f.enabled && f.next_attempt_at ? "xl:whitespace-nowrap" : "max-md:hidden"}>
+                  <td data-label="Nächster Versuch" className={`max-md:shrink-0 max-md:grow-0 max-md:basis-[calc(50%-6px)] ${f.enabled && f.next_attempt_at ? "" : "max-md:hidden"}`}>
                     {f.enabled && f.next_attempt_at ? <RelTime iso={f.next_attempt_at} /> : null}
                   </td>
                   <td className={`max-w-[17rem] max-md:max-w-none xl:max-w-[28rem] ${detailLines(f).length ? "" : "max-md:hidden"}`}>

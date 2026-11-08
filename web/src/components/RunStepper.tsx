@@ -85,7 +85,7 @@ export function RunStepper({ run, label, phaseMedians, onRetry, onClose }: { run
           );
         })}
       </ol>
-      <p className="mt-1 text-xs text-fg2" role="status">
+      <p className="mt-1 text-xs tabular-nums text-fg2" role="status">
         {runText(run, now)}
         {d ? ` · ${d}` : ""}
       </p>
@@ -128,7 +128,7 @@ export function MiniStepper({ run, onToggle, open }: { run: FeedRun; onToggle: (
           />
         ))}
       </span>
-      <span className={`text-xs ${isFailure(run) ? "text-crit" : "text-fg2"}`}>{runText(run, now)}</span>
+      <span className={`text-xs tabular-nums ${isFailure(run) ? "text-crit" : "text-fg2"}`}>{runText(run, now)}</span>
     </button>
   );
 }
