@@ -15,15 +15,15 @@ const SUITE_TONE: Record<string, { tone: Tone; icon: IconName; muted?: boolean }
 /**
  * Chip je Quelle und Release: Icon + Text + Farbe (nie nur Farbe). Release in Graustufe, Statuswort in der Statusfarbe,
  * Fix-Version in Mono. Umriss statt Fläche; gestrichelt und gedämpft = Release läuft auf keinem deiner Hosts
- * (außerhalb des Umfangs „meine Releases“). Debian zeigt Security und Archiv getrennt, wenn sie sich unterscheiden.
+ * (Release ohne Host). Debian zeigt Security und Archiv getrennt, wenn sie sich unterscheiden.
  */
-export function DistroChip({ d, allScope = false }: { d: Distro; allScope?: boolean }) {
+export function DistroChip({ d }: { d: Distro }) {
   const s = STATUS[d.status] ?? STATUS.unknown!;
-  const outside = !allScope && !d.mine;
+  const outside = !d.mine;
   const parts = suiteParts(d);
   return (
     <span
-      title={chipTitle(d, allScope)}
+      title={chipTitle(d)}
       className={`chip-fade inline-flex h-(--chip-h) items-center gap-1 whitespace-nowrap max-md:h-auto max-md:min-h-(--chip-h) max-md:max-w-full max-md:flex-wrap max-md:whitespace-normal rounded-xs border pl-1 pr-1.5 text-xs ${
         outside ? "border-dashed border-line bg-sunk opacity-80" : "border-line"
       }`}

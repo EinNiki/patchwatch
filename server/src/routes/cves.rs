@@ -386,11 +386,9 @@ pub async fn list(
 ) -> ApiResult<Json<Vec<CveOut>>> {
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let offset = q.offset.unwrap_or(0).max(0);
-    let all_releases = match q.releases.as_deref() {
-        None | Some("mine") => false,
-        Some("all") => true,
-        Some(_) => return Err(ApiError::BadRequest("releases: mine oder all".into())),
-    };
+    // Die Oberfläche kennt keinen Umfang mehr (fest: Releases deiner Hosts); `releases=all` bleibt für andere Clients,
+    // jeder andere Wert gilt als `mine` (unbekannte Werte werden ignoriert, kein Fehler).
+    let all_releases = matches!(q.releases.as_deref(), Some("all"));
     // Beobachtete CVEs stehen immer oben; danach gilt die gewählte Sortierung (feste Texte, nie Nutzereingabe).
     let dir = match q.dir.as_deref() {
         None | Some("") | Some("desc") => "DESC",

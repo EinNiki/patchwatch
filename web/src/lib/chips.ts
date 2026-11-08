@@ -46,14 +46,14 @@ export function suiteParts(d: Distro): SuitePart[] | null {
   ];
 }
 
-/** Tooltip eines Chips (Klartext; ohne Umfangs-Wörter, die Umfangs-Kennzeichnung ist der gestrichelte Rand). */
-export function chipTitle(d: Distro, allScope: boolean): string {
+/** Tooltip eines Chips (Klartext; die Kennzeichnung „läuft auf keinem Host“ ist der gestrichelte Rand). */
+export function chipTitle(d: Distro): string {
   const s = STATUS[d.status] ?? STATUS.unknown!;
   const parts = suiteParts(d);
   const detail = parts
     ? parts.map((p) => `${p.label ? p.label + " " : ""}${SUITE_WORD[p.status] ?? p.status}${p.version ? ` ${p.version}` : ""}`).join(", ")
     : `${s.word}${d.fix_version ? ` ab ${d.fix_version}` : ""}`;
-  const outside = !allScope && !d.mine;
+  const outside = !d.mine;
   return `${distroName(d.source)} ${d.release}: ${detail} (Paket ${d.package}${d.packages > 1 ? ` und ${d.packages - 1} weitere` : ""}, Stand ${absTime(d.updated_at)})${
     outside ? ". Läuft auf keinem deiner Hosts" : ""
   }`;

@@ -281,23 +281,27 @@ Die CVE-Seite filtert je Distribution (Debian, Ubuntu) nach „gefixt“, „off
 ungünstigste aller Pakete (verwundbar, dann Fix angekündigt, unbekannt, gefixt); bei Releases, die auf einem Host laufen, zählen
 nur die Pakete, auf die sich die Bewertung der Hosts stützt.
 
-- **gefixt** = mindestens ein Release der Distribution im aktuellen Umfang hat einen Chip „gefixt“. Bei Debian gilt ein
+- **gefixt** = mindestens ein Release der Distribution auf einem deiner Hosts hat einen Chip „gefixt“. Bei Debian gilt ein
   Release als gefixt, wenn die Security-Suite **oder** das Archiv die Fix-Version enthält; eine CVE, die nur im Archiv offen,
   aber in Security gefixt ist, zählt als „gefixt“.
-- **offen** = mindestens ein Release im aktuellen Umfang hat einen Chip „verwundbar“ oder „Fix angekündigt“. Bei Debian:
+- **offen** = mindestens ein Release auf einem deiner Hosts hat einen Chip „verwundbar“ oder „Fix angekündigt“. Bei Debian:
   weder Security noch Archiv enthält die Fix-Version (z. B. nur in einem Zwischenarchiv).
-- Chips außerhalb des Umfangs (Release läuft auf keinem deiner Hosts) sind gestrichelt und gedämpft; die Legende darüber
+- Chips anderer Releases (Release läuft auf keinem deiner Hosts) sind gestrichelt und gedämpft; die Legende darüber
   erscheint nur, wenn ein solcher Chip auf der Seite steht.
 - **egal** = keine Bedingung. Debian und Ubuntu sind mit **UND** verknüpft.
-- **Umfang** (im Filterbereich, gilt für Anzeige und Filter gleich): „Meine Releases“ (Standard; im Auswahlfeld „Releases auf meinen Hosts“) oder „Alle
-  Releases“. Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird im Standardumfang nicht als „gefixt“ gefunden;
-  sie erscheint dort nur hinter „+ n weitere Releases“. Findet ein Filter nichts, nennt die Seite die aktiven Filter und
-  bietet an, den Umfang auf „Alle Releases“ zu stellen oder die Filter zurückzusetzen.
+- **Fester Bezug auf deine Hosts** (kein Auswahlfeld mehr): Die Filter „Debian/Ubuntu gefixt/offen“ und „Betrifft meine Hosts“
+  beziehen sich ausschließlich auf Releases, die auf mindestens einem Host laufen. In der Spalte „Distributionen“ stehen zuerst
+  die Chips dieser Releases; alle anderen stehen eingeklappt unter „+ N weitere Releases“ (gestrichelt, gedämpft, Tooltip „Läuft
+  auf keinem deiner Hosts“), ohne Einfluss auf Filter und Sortierung; Aufklappen bleibt möglich. Die Legende über der Tabelle
+  sagt: „Filter berücksichtigen nur Releases deiner Hosts.“ Der alte URL-Parameter `releases=` wird von der Oberfläche ignoriert.
+  Eine CVE, die nur in einem Release ohne eigenen Host gefixt ist, wird deshalb nicht als „gefixt“ gefunden. Findet ein Filter
+  nichts, nennt die Seite die aktiven Filter und bietet „Filter zurücksetzen“ an. Die API behält `releases=all` unverändert für
+  andere Clients und Tests (unbekannte Werte gelten als `mine`, kein Fehler).
 - **Betrifft** (Auswahlfeld in der Filterzeile, `?affects=all` in der URL, Standard „Meine Hosts“, Alternative „Alle“): „Meine Hosts“ zeigt nur CVEs, bei
   denen **mindestens ein Host** den Zustand *verwundbar*, *Fix angekündigt* oder *Neustart nötig* hat. *Unbekannt* (z. B.
   Proxmox), *gefixt* und *nicht betroffen* zählen nicht; unbekannte Hosts werden in der Spalte „Hosts“ trotzdem genannt.
   Beobachtete CVEs (Watchlist) und die gezielte Suche zeigen unabhängig davon alles. Über der Tabelle steht „N CVEs betreffen
-  deine Hosts“ als reiner Text (die Zahl gilt für den eingestellten Umfang und die übrigen Filter). Ist die Liste im Standard
+  deine Hosts“ als reiner Text (die Zahl gilt für die übrigen Filter). Ist die Liste im Standard
   leer, steht „Keine CVE betrifft deine Hosts“ mit dem Textlink „Alle CVEs anzeigen“, der das Feld auf „Alle“ stellt.
 - **Sortierung** (`?sort=`, serverseitig, feste Liste): Standard `hosts` = zuerst die CVEs mit den meisten betroffenen Hosts, dann
   Level (hoch zuerst), dann die neuere Veröffentlichung; die Spalte „Hosts“ sortiert danach (Pfeil kehrt um). Daneben `latest`
@@ -312,9 +316,8 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
 - **Zeiten** erscheinen in der Oberfläche in **Europe/Berlin** (absolut im Tooltip), unabhängig von Server (UTC) und Browser; „vor n Tagen“
   zählt Berliner Kalendertage, auch über den Sommerzeitwechsel. Die **Uptime** der Hosts wird aus der Bootzeit berechnet
   (Reportzeit minus vom Agenten gemeldete Uptime) und läuft zwischen den Reports weiter; die Host-Seite nennt die Bootzeit („gestartet 06.11. 22:27“).
-- **Zusammenspiel**: *Umfang* bestimmt, welche Release-Chips und Release-Filter zählen. *Debian/Ubuntu* filtern über diese
-  Chips. *Betrifft* filtert über die Hosts und ist davon unabhängig; alle drei sind mit **UND** verknüpft. „Betrifft: Alle“ plus
-  Umfang „Alle Releases“ zeigt alles.
+- **Zusammenspiel**: *Debian/Ubuntu* filtern über die Chips der Releases deiner Hosts. *Betrifft* filtert über die Hosts und ist
+  davon unabhängig; beide sind mit **UND** verknüpft.
 - Der Filter hängt am **Typ** der Quelle (`debian`, `ubuntu`), nicht an ihrer stabilen ID; abgeschaltete oder gelöschte Quellen
   behalten ihre Daten, die weiter angezeigt und gefiltert werden.
 
@@ -368,7 +371,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
 **UI v2** (Seitenleiste: Hosts · CVEs · Agents · Benachrichtigungen · Einstellungen):
 
 - **CVEs**: Spalte „Distributionen“ mit einem Chip je Quelle und Release (Icon + Text + Fix-Version). Standard sind nur
-  Releases, die auf deinen Hosts laufen („+ n weitere Releases“ bzw. „Alle Releases“ blendet den Rest ein). Filter:
+  Releases, die auf deinen Hosts laufen („+ n weitere Releases“ blendet den Rest ein). Filter:
   Distribution sowie „Debian gefixt, Ubuntu offen“ und umgekehrt. `/cves/<ID>` zeigt Quellen-Links, letzte Änderung und
   betroffene Hosts.
 - **Host-Detail, CVE-Lage**: ein Satz als Entscheidungshilfe („Nach dem Neustart auf 7.0.0-42.42 sind noch 81 CVEs

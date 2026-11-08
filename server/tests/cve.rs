@@ -4050,7 +4050,6 @@ async fn filter_rejects_bad_values_and_survives_special_characters(pool: PgPool)
     for bad in [
         "&debian=nix",
         "&ubuntu=1%27%20OR%201=1",
-        "&releases=jeder",
         "&debian=FIXED",
     ] {
         let r = call(
@@ -6658,4 +6657,17 @@ async fn announced_fix_is_not_counted_as_fix_in_archive(pool: PgPool) {
         pending["fix_version"], "6.8.0-99.99",
         "die erwartete Version bleibt für die Anzeige erhalten"
     );
+}
+
+/// Der Umfang ist in der Oberfläche fest (Releases deiner Hosts): ein unbekannter Wert von `releases` (auch der alte
+/// Parameter aus Lesezeichen) ist kein Fehler und verhält sich wie `mine`.
+#[sqlx::test(migrations = "./migrations")]
+async fn unknown_releases_value_is_ignored_and_acts_like_mine(pool: PgPool) {
+    let e = filter_env(pool).await;
+    e.row("CVE-2026-33002", "debian", "trixie", "linux", "fixed")
+        .await;
+    let mine = e.ids("").await;
+    for v in ["jeder", "mine", "", "ALL"] {
+        assert_eq!(e.ids(&format!("&releases={v}")).await, mine, "releases={v}");
+    }
 }

@@ -342,7 +342,6 @@ async fn cve_list_shows_my_releases_by_default_and_filters(pool: PgPool) {
     );
 
     for bad in [
-        "releases=x",
         "distro=arch",
         "split=foo",
         "distro=ubuntu%27%3B--",

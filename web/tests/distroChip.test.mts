@@ -50,15 +50,14 @@ test("kein Chip-Text enthält 'zählt' oder 'zählen' (alle Chiptypen, innerhalb
     { ...base, suites: suites(["a-1", "vulnerable"], ["a-2", "fixed"]), mine: false },
     { ...base, release: "bookworm", status: "vulnerable", fix_version: null, mine: false },
   ];
-  for (const d of cases) for (const all of [false, true]) assert.doesNotMatch(chipTitle(d, all), /zähl/i);
+  for (const d of cases) assert.doesNotMatch(chipTitle(d), /zähl/i);
 });
 
 test("außerhalb des Umfangs nennt der Tooltip den Grund, im Umfang nicht", () => {
-  assert.match(chipTitle({ ...base, mine: false }, false), /Läuft auf keinem deiner Hosts/);
-  assert.doesNotMatch(chipTitle({ ...base, mine: false }, true), /keinem deiner Hosts/);
-  assert.doesNotMatch(chipTitle(base, false), /keinem deiner Hosts/);
+  assert.match(chipTitle({ ...base, mine: false }), /Läuft auf keinem deiner Hosts/);
+  assert.doesNotMatch(chipTitle(base), /keinem deiner Hosts/);
 });
 
 test("Sonderzeichen im Release-Namen brechen nichts", () => {
-  assert.doesNotThrow(() => chipTitle({ ...base, release: "café 🔥 <b>", package: "ünï" }, false));
+  assert.doesNotThrow(() => chipTitle({ ...base, release: "café 🔥 <b>", package: "ünï" }));
 });
