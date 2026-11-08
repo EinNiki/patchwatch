@@ -286,7 +286,7 @@ export function FeedSources() {
           <table className="tbl stack md:min-w-[48rem] md:table-fixed md:[&_td]:[overflow-wrap:anywhere]">
             <caption>Zustand der CVE-Quellen</caption>
             <colgroup>
-              {["md:w-[14%]", "md:w-[19%]", "md:w-[14%]", "md:w-[9%]", "md:w-[11%]", "md:w-[15%]", "md:w-[18%]"].map((c) => (
+              {["md:w-[13%]", "md:w-[17%]", "md:w-[13%]", "md:w-[8%]", "md:w-[10%]", "md:w-[16%]", "md:w-[23%]"].map((c) => (
                 <col key={c} className={c} />
               ))}
             </colgroup>
