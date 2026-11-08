@@ -63,6 +63,8 @@ for (const scheme of ["light", "dark"]) {
     await page.getByRole("button", { name: "Agent hinzufügen" }).first().click();
     await scan(page, `/agents (Dialog) ${vpName}/${scheme}`);
     await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Weitere Aktionen für web-01" }).click();
+    await scan(page, `/agents (Zeilenmenü) ${vpName}/${scheme}`);
     await page.getByRole("button", { name: "Agent web-01 löschen" }).click();
     await scan(page, `/agents (Bestätigung) ${vpName}/${scheme}`);
     await page.keyboard.press("Escape");

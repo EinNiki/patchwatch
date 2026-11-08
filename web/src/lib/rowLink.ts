@@ -4,10 +4,10 @@ import type { MouseEvent } from "react";
 
 import { INTERACTIVE, rowClickAction, type ClickInfo } from "./rowClick";
 
-/** Nur sichtbare Fenster zählen: das mobile Menü bleibt auf dem Desktop im DOM, ist aber ausgeblendet. */
+/** Nur sichtbare Fenster zählen: das mobile Menü bleibt im DOM und ist geschlossen nur per `visibility: hidden` (mobil) bzw. `display: none` (Desktop) ausgeblendet. */
 function overlayOpen(): boolean {
   if (typeof document === "undefined") return false;
-  return [...document.querySelectorAll("dialog[open], [aria-modal='true']")].some((e) => (e.checkVisibility ? e.checkVisibility() : (e as HTMLElement).offsetParent !== null));
+  return [...document.querySelectorAll("dialog[open], [aria-modal='true']")].some((e) => (e.checkVisibility ? e.checkVisibility({ visibilityProperty: true }) : (e as HTMLElement).offsetParent !== null));
 }
 
 function infoFrom(e: MouseEvent<HTMLElement>): ClickInfo {

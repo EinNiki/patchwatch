@@ -44,6 +44,7 @@ const ACTIONS = {
     await page.getByRole("button", { name: "Token kopieren" }).waitFor();
     return async () => {
       await page.getByRole("button", { name: "Fertig, Token gesichert" }).click();
+      await page.getByRole("button", { name: "Weitere Aktionen für demo-agent" }).click();
       await page.getByRole("button", { name: "Agent demo-agent löschen" }).click();
       await page.getByRole("button", { name: "demo-agent löschen", exact: true }).click();
       await page.getByRole("row").filter({ hasText: "demo-agent" }).waitFor({ state: "detached" });

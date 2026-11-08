@@ -374,7 +374,7 @@ export function FeedSources() {
                   </td>
                   <td>
                     <div className="flex items-center gap-2">
-                      <Button className={BTN} onClick={() => void runOne(f)} busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })} disabled={!f.enabled} aria-label={`${f.label} jetzt abrufen`}>
+                      <Button className="min-w-32" onClick={() => void runOne(f)} busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })} disabled={!f.enabled} aria-label={`${f.label} jetzt abrufen`}>
                         Jetzt abrufen
                       </Button>
                       <RowMenu

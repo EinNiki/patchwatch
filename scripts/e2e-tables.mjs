@@ -156,7 +156,7 @@ try {
   const r2 = list.locator("tbody tr").nth(1);
   const more = r2.getByRole("button", { name: /weitere Hosts/ });
   ok((await more.count()) === 1 && /\+2/.test(await more.innerText()), "„+2“-Schaltfläche an der Zeile mit 5 Hosts");
-  const oneLine = await r2.locator('ul[aria-label="Betroffene Hosts"] > li').evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size);
+  const oneLine = await r2.locator('ul[aria-label="Betroffene Hosts"] > li').evaluateAll((els) => { const c = els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; }); return Math.max(...c) - Math.min(...c) <= 2 ? 1 : 2; });
   ok(oneLine === 1, `Chips und „+N“ in einer Zeile (${oneLine} Zeilen)`);
   ok((await more.getAttribute("aria-expanded")) === "false", "„+N“ zunächst zu");
   await more.focus();
