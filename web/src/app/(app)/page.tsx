@@ -1,6 +1,7 @@
 "use client";
 
 import { DATA_LABEL, DATA_TIP } from "@/lib/terms";
+import { useRowLink } from "@/lib/rowLink";
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -288,8 +289,9 @@ function HostsView() {
 function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolean }) {
   const newer = h.newest_kernel && h.running_kernel && h.newest_kernel !== h.running_kernel;
   const stale = h.status === "stale";
+  const rowLink = useRowLink(`/hosts/${h.id}`);
   return (
-    <tr data-flash={flash ? "" : undefined}>
+    <tr data-flash={flash ? "" : undefined} {...rowLink}>
       <td className="cell-primary">
         <Link href={`/hosts/${h.id}`} className="font-semibold" onPointerEnter={() => prefetchHost(h.id)} onFocus={() => prefetchHost(h.id)}>
           {h.name}
@@ -330,7 +332,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </>
         )}
       </td>
-      <td className="cell-status">
+      <td className="cell-status" data-href={`/hosts/${h.id}?cve=${h.cve_vulnerable > 0 || h.cve_fix_pending > 0 ? "open" : h.cve_reboot > 0 ? "reboot" : h.cve_unknown > 0 ? "unknown" : "fixed"}`}>
         <CveCell h={h} feedOk={feedOk} />
       </td>
       <td className="cell-status lead">

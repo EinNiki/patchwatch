@@ -126,8 +126,18 @@ code,
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
-.tbl tbody tr:hover td {
-  background: color-mix(in srgb, var(--sunk) 60%, transparent);
+@media (hover: hover) {
+  .tbl tbody tr:hover td {
+    background: color-mix(in srgb, var(--sunk) 60%, transparent);
+  }
+}
+/* Ganze Zeile klickbar (useRowLink): Zeiger, Ring bei Tastaturfokus um die Zeile, keine Unterstreichung außer am Link. */
+.tbl tbody tr[data-rowlink] {
+  cursor: pointer;
+}
+.tbl tbody tr[data-rowlink]:has(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .tbl .num {
   text-align: right;
