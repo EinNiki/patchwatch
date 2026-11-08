@@ -1,7 +1,7 @@
 // CVE-Liste: URL-Parameter und Zähler. Muss ohne src/lib/cveList.ts fehlschlagen.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { affectedHosts, affectingLabel, hostChips, listStats, parseAffectsAll, parseSort } from "../src/lib/cveList.ts";
+import { affectedHosts, affectingLabel, hostChips, hostState, listStats, parseAffectsAll, parseSort } from "../src/lib/cveList.ts";
 import type { CveListItem } from "../src/lib/types.ts";
 
 test("Standard ist „betroffene Hosts zuerst“, Unsinn fällt darauf zurück", () => {
@@ -54,4 +54,13 @@ test("Host-Chips: höchstens max Namen, Rest aus den Zählern als „+N“", () 
   assert.deepEqual(hostChips(c, 4), { names: ["a", "b", "c", "d"], more: 3 });
   assert.deepEqual(hostChips(row({ hosts_vulnerable: 1, affected_hosts: ["a"] })), { names: ["a"], more: 0 });
   assert.deepEqual(hostChips(row({ hosts_vulnerable: 2 })), { names: [], more: 2 });
+});
+
+test("host state icon comes from the row counters; mixed rows have no single state", () => {
+  const z = { hosts_vulnerable: 0, hosts_fix_pending: 0, hosts_reboot: 0 };
+  assert.equal(hostState({ ...z, hosts_vulnerable: 2 })?.text, "verwundbar, Fix noch nicht installiert");
+  assert.equal(hostState({ ...z, hosts_fix_pending: 1 })?.icon, "warn");
+  assert.equal(hostState({ ...z, hosts_reboot: 1 })?.icon, "reboot");
+  assert.equal(hostState({ ...z, hosts_vulnerable: 1, hosts_reboot: 1 }), null);
+  assert.equal(hostState(z), null);
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -9,14 +9,15 @@ import { cacheGet, cacheSet } from "@/lib/apiCache";
 import type { CveDetail, CveListItem, Host } from "@/lib/types";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
-import { NavIcon } from "@/components/Icons";
-import { affectedHosts, affectingLabel, hostChips, listStats, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
+import { Icon, NavIcon } from "@/components/Icons";
+import { affectedHosts, affectingLabel, hostChips, hostState, listStats, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
 import { useFlash } from "@/lib/useFlash";
 import { toast } from "@/lib/toastStore";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ChipLegend, DistroChip } from "@/components/DistroChip";
 import { PageHeader } from "@/components/PageHeader";
+import { Popover } from "@/components/Popover";
 import { FeedSources } from "@/components/FeedSources";
 
 const PAGE = 100;
@@ -546,7 +547,6 @@ const CveRow = memo(function CveRow({
           <Distros c={c} />
         </td>
         <td data-label="Hosts">
-          <HostCounts c={c} />
           <HostChips c={c} ids={hostIds} />
         </td>
         <td className="max-wide:hidden">
@@ -611,69 +611,87 @@ function PackagesCell({ c }: { c: CveListItem }) {
 }
 
 /**
- * Betroffene Hosts als Chips, die zur Host-Seite führen (höchstens 3 sichtbar). Der Rest steht hinter „+N“, das alle
- * bekannten Hosts als Links auflistet. Die Liste der Namen kommt aus der CVE-Liste, die Adresse aus der Hostliste.
+ * Spalte „Hosts“: nur Hostnamen als Chips, jeder ein Link zur Host-Seite. Das Symbol vor dem Namen zeigt den Zustand
+ * (Form und Farbe, dazu Tooltip und aria-label). Höchstens 3 Chips in einer Zeile, der Rest steht hinter „+N“ im Popover.
+ * Die Namen kommen aus der CVE-Liste, die Adresse aus der Hostliste.
  */
 function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number> }) {
   const { names, more } = hostChips(c, 3);
   const all = c.affected_hosts ?? [];
-  const [open, setOpen] = useState(false);
-  const panel = useId();
-  if (names.length === 0 && more === 0) return null;
-  const chip = "inline-flex h-(--chip-h) max-w-32 items-center truncate rounded-xs border border-line bg-sunk px-1.5 text-xs no-underline hover:border-accent hover:text-accent max-md:min-h-11 max-md:px-3";
+  const state = hostState(c);
+  if (names.length === 0 && more === 0) {
+    // Keine Namen (nur „unbekannt“ oder gar nichts): Symbol mit Zahl statt Text, zugänglich benannt.
+    if (c.hosts_unknown === 0) return <span className="text-fg3" aria-label="keine betroffenen Hosts">–</span>;
+    const t = `${c.hosts_unknown} ${c.hosts_unknown === 1 ? "Host" : "Hosts"}: Lage unbekannt`;
+    return (
+      <span className="inline-flex items-center gap-1 text-unknown" title={t} aria-label={t}>
+        <Icon name="unknown" size={12} />
+        <span className="text-xs tabular-nums">{c.hosts_unknown}</span>
+      </span>
+    );
+  }
+  const chip = "inline-flex h-(--chip-h) max-w-32 items-center gap-1 rounded-xs border border-line bg-sunk px-1.5 text-xs no-underline hover:border-accent hover:text-accent max-md:min-h-11 max-md:max-w-28 max-md:px-2";
   const hostLink = (n: string, cls: string) => {
     const id = ids.get(n);
+    const label = `${n}: ${state ? state.text : "betroffen"}`;
+    const inner = (
+      <>
+        {state ? (
+          <span className={state.tone}>
+            <Icon name={state.icon} size={12} />
+          </span>
+        ) : null}
+        <span className="truncate">{n}</span>
+      </>
+    );
     return id === undefined ? (
-      <span className={cls}>{n}</span>
+      <span className={cls} title={label} aria-label={label}>
+        {inner}
+      </span>
     ) : (
-      <Link href={`/hosts/${id}`} className={cls} title={`Zu ${n} wechseln`} aria-label={`Zu ${n} wechseln`}>
-        {n}
+      <Link href={`/hosts/${id}`} className={cls} title={label} aria-label={label}>
+        {inner}
       </Link>
     );
   };
+  const rest = affectedHosts(c) - all.length;
   return (
-    <div className="mt-1 max-md:mt-0 max-md:basis-full">
-      <ul className="m-0 flex list-none items-center gap-1 p-0 max-md:flex-wrap" aria-label="Betroffene Hosts">
-        {names.map((n) => (
-          <li key={n}>{hostLink(n, chip)}</li>
-        ))}
-        {all.length > names.length || more > 0 ? (
-          <li>
-            <button
-              type="button"
-              aria-expanded={open}
-              aria-controls={panel}
-              title={open ? "Weitere Hosts ausblenden" : `${more} weitere Hosts anzeigen`}
-              onClick={() => setOpen(!open)}
-              className="inline-flex h-(--chip-h) items-center justify-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:min-w-11 max-md:px-3"
-            >
-              +{more}
-              <span className="sr-only"> weitere Hosts</span>
-            </button>
-          </li>
-        ) : null}
-      </ul>
-      {open ? (
-        <ul id={panel} className="m-0 mt-1 flex list-none flex-col gap-1 rounded-xs border border-line bg-sunk p-1.5 text-xs" aria-label={`Alle betroffenen Hosts von ${c.id}`}>
-          {all.map((n) => (
-            <li key={n}>{hostLink(n, "inline-flex min-h-6 items-center max-md:min-h-11")}</li>
-          ))}
-          {affectedHosts(c) > all.length ? <li className="text-fg3">und {affectedHosts(c) - all.length} weitere (siehe Host-Liste)</li> : null}
-        </ul>
+    <ul className="m-0 flex list-none flex-nowrap items-center gap-1 p-0" aria-label="Betroffene Hosts">
+      {names.map((n) => (
+        <li key={n} className="min-w-0">{hostLink(n, chip)}</li>
+      ))}
+      {all.length > names.length || more > 0 ? (
+        <li>
+          <Popover
+            label={`Alle betroffenen Hosts von ${c.id}`}
+            width={240}
+            trigger={(t) => (
+              <button
+                type="button"
+                ref={t.ref}
+                aria-haspopup={t["aria-haspopup"]}
+                aria-expanded={t["aria-expanded"]}
+                aria-controls={t["aria-controls"]}
+                title={`${more} weitere Hosts anzeigen`}
+                onClick={t.toggle}
+                className="inline-flex h-(--chip-h) items-center justify-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:min-w-11 max-md:px-3"
+              >
+                +{more}
+                <span className="sr-only"> weitere Hosts</span>
+              </button>
+            )}
+          >
+            <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+              {all.map((n) => (
+                <li key={n}>{hostLink(n, "inline-flex min-h-7 items-center gap-1.5 text-sm no-underline hover:underline max-md:min-h-11")}</li>
+              ))}
+              {rest > 0 ? <li className="text-fg3">und {rest} weitere (siehe Host-Liste)</li> : null}
+            </ul>
+          </Popover>
+        </li>
       ) : null}
-    </div>
+    </ul>
   );
-}
-
-function HostCounts({ c }: { c: CveListItem }) {
-  const parts = [
-    c.hosts_vulnerable > 0 && <span key="v" className="whitespace-nowrap font-semibold text-crit">{c.hosts_vulnerable} verwundbar</span>,
-    c.hosts_fix_pending > 0 && <span key="p" className="whitespace-nowrap text-warn">{c.hosts_fix_pending} Fix angekündigt</span>,
-    c.hosts_reboot > 0 && <span key="r" className="whitespace-nowrap text-warn">{c.hosts_reboot} Neustart nötig</span>,
-    c.hosts_unknown > 0 && <span key="u" className="whitespace-nowrap text-unknown">{c.hosts_unknown} unbekannt</span>,
-  ].filter(Boolean);
-  if (parts.length === 0) return <span className="text-fg3">keine betroffenen Hosts</span>;
-  return <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">{parts}</div>;
 }
 
 export default function CvesPage() {

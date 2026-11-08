@@ -103,17 +103,29 @@ try {
   const firstRow = list.locator("tbody tr").nth(0);
   const chip = firstRow.locator('ul[aria-label="Betroffene Hosts"] a').first();
   ok((await chip.count()) === 1 && (await chip.getAttribute("href")) === `/hosts/${real.id}`, "Chip ist ein Link zur Host-Seite");
-  ok((await chip.getAttribute("title")) === `Zu ${real.name} wechseln`, "Tooltip „Zu … wechseln“");
+  ok((await chip.getAttribute("title")) === `${real.name}: verwundbar, Fix noch nicht installiert` && (await chip.getAttribute("aria-label")) === `${real.name}: verwundbar, Fix noch nicht installiert`, "Tooltip und aria-label nennen Host und Zustand");
+  ok((await chip.locator("svg").count()) === 1, "Chip: Statussymbol vor dem Namen (nie nur Farbe)");
+  const hostsCellText = await firstRow.locator("td", { has: page.locator('ul[aria-label="Betroffene Hosts"]') }).innerText();
+  ok(!/verwundbar|angekündigt|Neustart/i.test(hostsCellText) && hostsCellText.trim() === real.name, `Spalte „Hosts“ enthält nur Hostnamen, keinen Zustandstext („${hostsCellText.trim()}“)`);
   ok((await chip.evaluate((e) => getComputedStyle(e).cursor)) === "pointer", "Chip: Zeiger");
   // vertikal mittig
   const mm = await mid(listSel);
   ok(mm.spread <= 14, `CVE-Tabelle: Zellen einer Zeile mittig (Streuung ${mm.spread.toFixed(1)}px, ${mm.n} Zellen)`);
-  const lineY = await firstRow.evaluate((tr) => {
-    const chipEl = tr.querySelector('ul[aria-label="Betroffene Hosts"] a'); const cell = chipEl.closest("td"); const cr = cell.getBoundingClientRect();
-    const items = [...cell.children].map((c) => c.getBoundingClientRect()); const top = Math.min(...items.map((b) => b.top)), bot = Math.max(...items.map((b) => b.bottom));
-    return { cellMid: (cr.top + cr.bottom) / 2, contentMid: (top + bot) / 2 };
+  // Chip, Distributions-Chip, Level und „Aktualisiert“ liegen auf einer Mittellinie (Abweichung ≤ 2 px).
+  const centers = await page.evaluate(() => {
+    const t = document.querySelector('table[data-t="cves"]');
+    const row = t.querySelector("tbody tr");
+    const heads = [...t.querySelectorAll("thead th")].filter((th) => th.offsetParent).map((th) => th.innerText.trim().split("\n")[0].trim());
+    const cells = [...row.children].filter((c) => c.offsetParent);
+    const mid = (el) => { const r = el.getBoundingClientRect(); return (r.top + r.bottom) / 2; };
+    const out = {};
+    heads.forEach((h, i) => { const c = cells[i]; if (!c) return; const chip = c.querySelector("ul a, ul span, a.inline-flex, .rounded-xs, time, span"); out[h] = { cell: mid(c), content: chip ? mid(chip) : null }; });
+    return out;
   });
-  ok(Math.abs(lineY.cellMid - lineY.contentMid) <= 2, `Hosts-Zelle: Inhalt mittig zur Zeile (Abweichung ${Math.abs(lineY.cellMid - lineY.contentMid).toFixed(1)}px)`);
+  const keys = ["Hosts", "Distributionen", "Aktualisiert"].filter((k) => centers[k]?.content != null);
+  const ys = keys.map((k) => centers[k].content);
+  ok(keys.length >= 3 && Math.max(...ys) - Math.min(...ys) <= 2, `Chips und Nachbarzellen auf einer Mittellinie (${keys.map((k) => `${k} ${centers[k].content.toFixed(1)}`).join(", ")})`);
+  ok(Math.abs(centers["Hosts"].cell - centers["Hosts"].content) <= 2, "Hosts-Chip mittig in der Zelle");
   const vaC = await list.evaluate((t) => [...new Set([...t.querySelectorAll("tbody td")].map((td) => getComputedStyle(td).verticalAlign))]);
   ok(vaC.length === 1 && vaC[0] === "middle", `CVE-Tabelle: vertical-align middle (${vaC})`);
 
@@ -139,18 +151,28 @@ try {
   await page.goto(`${base}/cves`);
   await list.locator("tbody tr").nth(2).waitFor();
 
-  // "+N"
+  // "+N": Popover mit allen Hosts als Links, Escape schließt, Fokus kehrt zurück.
   const r2 = list.locator("tbody tr").nth(1);
   const more = r2.getByRole("button", { name: /weitere Hosts/ });
   ok((await more.count()) === 1 && /\+2/.test(await more.innerText()), "„+2“-Schaltfläche an der Zeile mit 5 Hosts");
+  const oneLine = await r2.locator('ul[aria-label="Betroffene Hosts"] > li').evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size);
+  ok(oneLine === 1, `Chips und „+N“ in einer Zeile (${oneLine} Zeilen)`);
   ok((await more.getAttribute("aria-expanded")) === "false", "„+N“ zunächst zu");
   await more.focus();
   await page.keyboard.press("Enter");
-  const all = r2.locator('ul[aria-label^="Alle betroffenen Hosts"] a');
-  ok((await more.getAttribute("aria-expanded")) === "true" && (await all.count()) === 5, "„+N“ listet alle 5 Hosts als Links");
-  ok((await all.evaluateAll((els) => els.map((e) => e.getAttribute("href")))).every((h) => /^\/hosts\/\d+$/.test(h)), "alle Einträge der Liste verweisen auf Host-Seiten");
+  const pop = page.getByRole("dialog", { name: /Alle betroffenen Hosts/ });
+  await pop.waitFor();
+  ok((await more.getAttribute("aria-expanded")) === "true" && (await pop.locator("a").count()) === 5, "„+N“ öffnet ein Popover mit allen 5 Hosts als Links");
+  ok((await pop.locator("a").evaluateAll((els) => els.map((e) => e.getAttribute("href")))).every((h) => /^\/hosts\/\d+$/.test(h)), "alle Einträge verweisen auf Host-Seiten");
+  await page.keyboard.press("Escape");
+  await pop.waitFor({ state: "detached" });
+  ok(await more.evaluate((e) => e === document.activeElement), "Escape schließt das Popover, Fokus kehrt zum Auslöser zurück");
+  await more.click();
+  await pop.waitFor();
+  await page.locator("h1").click();
+  await pop.waitFor({ state: "detached" });
+  ok(true, "Klick daneben schließt das Popover");
 
-  // Sortierung nach Hosts
   // Standard ist „nach Hosts absteigend“; ein Klick auf die Überschrift kehrt die Richtung um (und zurück).
   const hostsTh = list.locator("thead th", { hasText: /^Hosts/ });
   const sortBtn = hostsTh.getByRole("button");

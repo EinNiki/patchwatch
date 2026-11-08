@@ -58,3 +58,12 @@ export function hostChips(c: Pick<CveListItem, "hosts_vulnerable" | "hosts_fix_p
   const names = (c.affected_hosts ?? []).slice(0, max);
   return { names, more: Math.max(0, affectedHosts(c) - names.length) };
 }
+
+/** Zustand der betroffenen Hosts einer CVE aus den Zählern der Zeile; `null`, wenn die Zeile mehrere Zustände mischt. */
+export function hostState(c: Pick<CveListItem, "hosts_vulnerable" | "hosts_fix_pending" | "hosts_reboot">): { icon: "crit" | "warn" | "reboot"; tone: string; text: string } | null {
+  const kinds = [c.hosts_vulnerable > 0, c.hosts_fix_pending > 0, c.hosts_reboot > 0].filter(Boolean).length;
+  if (kinds !== 1) return null;
+  if (c.hosts_vulnerable > 0) return { icon: "crit", tone: "text-crit", text: "verwundbar, Fix noch nicht installiert" };
+  if (c.hosts_fix_pending > 0) return { icon: "warn", tone: "text-warn", text: "Fix angekündigt, noch nicht installiert" };
+  return { icon: "reboot", tone: "text-warn", text: "Fix installiert, Neustart nötig" };
+}
