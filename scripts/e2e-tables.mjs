@@ -154,14 +154,17 @@ try {
   // Standard ist „nach Hosts absteigend“; ein Klick auf die Überschrift kehrt die Richtung um (und zurück).
   const hostsTh = list.locator("thead th", { hasText: /^Hosts/ });
   const sortBtn = hostsTh.getByRole("button");
+  await hostsTh.waitFor();
   const s0 = await hostsTh.getAttribute("aria-sort");
   await sortBtn.click();
-  await page.waitForFunction(([sel, prev]) => document.querySelector(sel)?.getAttribute("aria-sort") !== prev, ['table[data-t="cves"] thead th:nth-child(5)', s0]).catch(() => {});
-  const s1 = await hostsTh.getAttribute("aria-sort");
-  ok(s0 !== s1 && s1 !== "none" && s1 !== null, `Sortierung nach Hosts über die Überschrift (aria-sort ${s0} → ${s1})`);
-  await sortBtn.click();
+  // Richtung steht in der URL (Standard descending lässt den Parameter weg).
+  await page.waitForURL(/dir=asc/, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(500);
-  ok((await hostsTh.getAttribute("aria-sort")) === s0, "zweiter Klick kehrt zurück");
+  const s1 = await list.locator("thead th", { hasText: /^Hosts/ }).getAttribute("aria-sort");
+  ok(s0 !== s1 && s1 !== "none" && s1 !== null, `Sortierung nach Hosts über die Überschrift (aria-sort ${s0} → ${s1}, URL ${new URL(page.url()).search || "-"})`);
+  await list.locator("thead th", { hasText: /^Hosts/ }).getByRole("button").click();
+  await page.waitForTimeout(700);
+  ok((await list.locator("thead th", { hasText: /^Hosts/ }).getAttribute("aria-sort")) === s0, "zweiter Klick kehrt zurück");
 
   // Abstände und Überschriften der CVE-Liste (Beschreibung ist Fließtext: Paare mit ihr zählen nicht).
   await tag("CVEs mit", "cves");

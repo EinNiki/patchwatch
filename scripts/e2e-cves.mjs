@@ -122,8 +122,9 @@ try {
     g = await check(`${w}px`);
     const hdrs = await listTable.locator("thead th").allInnerTexts();
     ok(!hdrs.some((x) => /Betroffene Hosts/.test(x)), `${w}px: keine eigene Spalte „Betroffene Hosts“ (in „Hosts“ zusammengelegt)`);
-    if (w >= 1600) ok(hdrs.some((x) => /Pakete/.test(x)), `${w}px: Zusatzspalte Pakete sichtbar`);
-    else if (w >= 768) ok(!hdrs.some((x) => /Pakete/.test(x)), `${w}px: ohne Zusatzspalte Pakete`);
+    const paketeVisible = await listTable.locator("thead th", { hasText: "Pakete" }).isVisible();
+    if (w >= 1600) ok(paketeVisible, `${w}px: Zusatzspalte Pakete sichtbar`);
+    else if (w >= 768) ok(!paketeVisible, `${w}px: ohne Zusatzspalte Pakete`);
     if (w === 1600) {
       const chips = await listTable.locator('ul[aria-label="Betroffene Hosts"]').first().innerText();
       ok(/host-/.test(chips), "1600px: Host-Namen als Chips");

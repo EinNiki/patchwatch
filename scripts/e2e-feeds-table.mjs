@@ -88,7 +88,7 @@ try {
   await page.goto(`${base}/cves`);
   const ubuRow = page.getByRole("row").filter({ hasText: /Ubuntu/ }).first();
   await ubuRow.waitFor();
-  ok(await ubuRow.getByText("Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · Seitengröße 10 · 14,2 MB)").isVisible(), "Letzter Lauf mit Phasen, Seiten und Größe");
+  ok(await ubuRow.getByText("Letzter Lauf: 48 s (Herunterladen 41 s · Auswerten 5 s · Speichern 2 s · 10 Seiten · Seitengröße 10)").isVisible(), "Letzter Lauf mit Phasen und Seiten (Übertragung steht in eigenen Zeilen)");
   ok(await ubuRow.getByText("Median der letzten 10 Läufe: 52 s").isVisible(), "Median der letzten 10 Läufe");
   const started = new Date(Date.now() - 60_000).toISOString();
   await page.unrouteAll({ behavior: "ignoreErrors" });

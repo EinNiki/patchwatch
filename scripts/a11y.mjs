@@ -53,6 +53,10 @@ for (const scheme of ["light", "dark"]) {
     await page.waitForTimeout(400);
     await page.mouse.wheel(0, 500);
     await page.waitForTimeout(400);
+    // Die Filterzeile darf nicht zufällig halb unter der mitlaufenden Leiste landen (das hängt von der Datenmenge ab,
+    // nicht vom Layout): bei Bedarf so weit zurückscrollen, dass sie darunter vollständig sichtbar ist.
+    const hidden = await page.evaluate(() => { const e = document.querySelector("main button.bg-accent"); const t = e ? e.getBoundingClientRect().top : 999; return t < 72 ? 72 - t : 0; });
+    if (hidden > 0) { await page.mouse.wheel(0, -hidden); await page.waitForTimeout(300); }
     await scan(page, `/hosts db-02 gruppe offen, gescrollt ${vpName}/${scheme}`);
     // Zustände mit Dialog bzw. Menü
     await page.goto(`${base}/agents`);

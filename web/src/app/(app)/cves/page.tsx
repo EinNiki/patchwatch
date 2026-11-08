@@ -645,7 +645,7 @@ function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number
               aria-controls={panel}
               title={open ? "Weitere Hosts ausblenden" : `${more} weitere Hosts anzeigen`}
               onClick={() => setOpen(!open)}
-              className="inline-flex h-(--chip-h) items-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:px-3"
+              className="inline-flex h-(--chip-h) items-center justify-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:min-w-11 max-md:px-3"
             >
               +{more}
               <span className="sr-only"> weitere Hosts</span>
