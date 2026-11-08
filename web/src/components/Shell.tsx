@@ -50,7 +50,12 @@ function channelState(ch: ChannelView | undefined): { icon: "ok" | "warn" | "pen
 /** Beschriftung: blendet beim Einklappen in 120 ms aus (bleibt für Screenreader und Tooltips erhalten). */
 const LABEL = "min-w-0 flex-1 truncate transition-opacity duration-(--dur-1) ease-(--ease-out) motion-reduce:transition-none rail:opacity-0";
 /** Symbolfläche: feste Breite, damit das Symbol in beiden Zuständen an derselben Stelle (Mitte der Rail) steht. */
-const ICON = "grid size-4 shrink-0 place-items-center";
+const ICON = "grid size-5 shrink-0 place-items-center";
+/**
+ * Gemeinsames Zeilenraster der Seitenleiste (Navigation und Fußbereich): 36 px hoch (mobil 44 px), Symbolspalte 20 px,
+ * Text beginnt in jeder Zeile am selben x. Die Fußzeilen teilen sich außerdem eine Schrift (13 px, Gewicht 500, gedämpft).
+ */
+const FOOT_TEXT = "text-[13px] font-medium leading-5 text-fg2";
 
 function FeedStrip() {
   const { data } = useApi<Feed[]>("/feeds", 60_000);
@@ -59,7 +64,7 @@ function FeedStrip() {
   return (
     <Link
       href="/cves#feeds"
-      className="relative flex min-h-9 items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-sm px-3 text-xs text-fg2 no-underline hover:bg-sunk hover:text-fg max-md:min-h-11"
+      className={`${rowBase} ${FOOT_TEXT} hover:bg-sunk hover:text-fg`}
       title="Zustand der CVE-Feeds anzeigen"
     >
       <span className={`${ICON} ${s.ok ? "text-ok" : s.info.tone === "warn" ? "text-warn" : "text-unknown"}`}>
@@ -74,9 +79,12 @@ function LiveIndicator() {
   const state = useLiveState();
   const text = state === "live" ? "Live" : state === "connecting" ? "Verbinde …" : "Getrennt, verbinde neu …";
   return (
-    <p className="flex min-h-6 items-center gap-2.5 overflow-hidden whitespace-nowrap px-3 text-xs text-fg2" role="status" title={text}>
+    <p className={`${rowBase} ${FOOT_TEXT}`} role="status" title={text}>
       <span className={ICON}>
-        <span aria-hidden="true" className={`inline-block size-2 rounded-full ${state === "live" ? "bg-ok" : "border border-fg3"}`} />
+        {/* Punkt in derselben 16-px-Fläche wie die Symbole, damit Zustandswechsel nichts verschieben. */}
+        <span aria-hidden="true" className="grid size-4 place-items-center">
+          <span className={`block size-2 rounded-full ${state === "live" ? "bg-ok" : "border border-fg3"}`} />
+        </span>
       </span>
       <span className={LABEL}>{text}</span>
     </p>
@@ -114,7 +122,7 @@ function Badge({ count, tone, what, corner }: { count: number; tone: "crit" | "w
 }
 
 const rowBase =
-  "relative flex min-h-9 items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-sm border-l-2 border-transparent px-3 no-underline max-md:min-h-11";
+  "relative flex min-h-9 items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-sm border-l-2 border-transparent px-2 no-underline max-md:min-h-11";
 /** Der Hintergrund der aktiven Zeile ist die gleitende Fläche (GlideSurface), nicht die Zeile selbst. */
 const rowState = (active: boolean) => (active ? "font-semibold text-fg" : "text-fg2 hover:bg-sunk hover:text-fg");
 
@@ -332,29 +340,35 @@ function SidebarBody({ pathname, collapse }: { pathname: string; collapse?: { co
       <div className="flex-1 overflow-y-auto py-3 rail:overflow-visible">
         <NavLinks pathname={pathname} />
       </div>
-      <div className="flex flex-col gap-1 border-t border-line px-2 py-3">
-        <FeedStrip />
-        <LiveIndicator />
-        <div className="group/item relative flex items-center gap-2 px-3 py-1 rail:justify-center rail:px-0" title={me.username}>
-          <Avatar name={me.username} version={me.avatar} size={28} />
-          <p className="min-w-0 truncate text-xs text-fg2 rail:sr-only">
-            <span className="sr-only">Angemeldet als </span>
-            {me.username}
-          </p>
-          <RailTip>{me.username}</RailTip>
+      <div className="border-t border-line px-2 py-3">
+        {/* Gruppe 1: Zustand (Feeds, Live); Gruppe 2: Benutzer und Abmelden, getrennt durch eine feine Linie. */}
+        <div className="flex flex-col gap-0.5">
+          <FeedStrip />
+          <LiveIndicator />
         </div>
-        <div className="group/item relative">
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className={`${rowBase} w-full cursor-pointer text-left font-semibold text-fg2 hover:bg-sunk hover:text-fg`}
-          >
-            <span className={ICON}>
-              <NavIcon name="logout" />
-            </span>
-            <span className={LABEL}>Abmelden</span>
-          </button>
-          <RailTip>Abmelden</RailTip>
+        <div role="separator" className="mx-2 my-2 h-px bg-line" />
+        <div className="flex flex-col gap-0.5">
+          <div className="group/item relative">
+            <div className={`${rowBase} ${FOOT_TEXT}`} title={me.username}>
+              <span className={ICON}>
+                <Avatar name={me.username} version={me.avatar} size={20} />
+              </span>
+              <p className={LABEL}>
+                <span className="sr-only">Angemeldet als </span>
+                {me.username}
+              </p>
+            </div>
+            <RailTip>{me.username}</RailTip>
+          </div>
+          <div className="group/item relative">
+            <button type="button" onClick={() => void logout()} className={`${rowBase} ${FOOT_TEXT} w-full cursor-pointer text-left hover:bg-sunk hover:text-fg`}>
+              <span className={ICON}>
+                <NavIcon name="logout" />
+              </span>
+              <span className={LABEL}>Abmelden</span>
+            </button>
+            <RailTip>Abmelden</RailTip>
+          </div>
         </div>
       </div>
     </div>

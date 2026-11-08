@@ -31,7 +31,7 @@ export function Avatar({ name, version, size = 28, className = "" }: { name: str
   return (
     <span
       aria-hidden="true"
-      style={{ ...style, background: `var(--av-${colorIndex(name) + 1})`, color: "var(--av-fg)", fontSize: Math.round(size * 0.42) }}
+      style={{ ...style, background: `var(--av-${colorIndex(name) + 1})`, color: "var(--av-fg)", fontSize: size <= 24 ? 10 : Math.round(size * 0.42) }}
       className={`grid shrink-0 select-none place-items-center rounded-full font-semibold leading-none ${className}`}
     >
       {initials(name)}
