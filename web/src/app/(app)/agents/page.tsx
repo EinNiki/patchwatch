@@ -278,7 +278,7 @@ export default function AgentsPage() {
         </Empty>
       ) : (
         <div className="max-xl:overflow-x-auto">
-          <table className="tbl stack">
+          <table className="tbl stack fit">
             <caption>Agents mit Version, Zeitpunkt der letzten Daten und letzter Aktivität</caption>
             <thead>
               <tr>
@@ -290,6 +290,7 @@ export default function AgentsPage() {
                 <th scope="col"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
                 <th scope="col"><span className="th-pad">Aktualisierung</span></th>
                 <th scope="col"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="fill" aria-hidden="true" />
               </tr>
             </thead>
             <tbody>
@@ -308,7 +309,7 @@ export default function AgentsPage() {
                     <td data-label="Agent-Version">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
                     <td data-label={DATA_LABEL}><RelTime iso={h.last_report_at} /></td>
                     <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
-                    <td data-label="Aktualisierung" className="max-w-[18rem]"><RequestState h={h} now={now} schedule={settings.data?.report_schedule} /></td>
+                    <td data-label="Aktualisierung" className="wrap w-[18rem] max-w-[18rem]"><RequestState h={h} now={now} schedule={settings.data?.report_schedule} /></td>
                     <td data-label="Aktionen">
                       <div className="flex flex-wrap gap-2">
                         <Button onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
@@ -322,6 +323,7 @@ export default function AgentsPage() {
                         </Button>
                       </div>
                     </td>
+                    <td className="fill" aria-hidden="true" />
                   </tr>
                 );
               })}

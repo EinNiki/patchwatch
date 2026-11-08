@@ -121,14 +121,14 @@ try {
     await page.emulateMedia({ colorScheme: w % 2 ? "light" : "dark" });
     g = await check(`${w}px`);
     const hdrs = await listTable.locator("thead th").allInnerTexts();
-    const wideCols = hdrs.some((x) => /Pakete/.test(x)) && (await listTable.locator("thead th", { hasText: "Betroffene Hosts" }).isVisible());
-    if (w >= 1600) ok(wideCols, `${w}px: Zusatzspalten Pakete und Betroffene Hosts sichtbar`);
-    else if (w >= 768) ok(!(await listTable.locator("thead th", { hasText: "Betroffene Hosts" }).isVisible()), `${w}px: ohne Zusatzspalten`);
+    ok(!hdrs.some((x) => /Betroffene Hosts/.test(x)), `${w}px: keine eigene Spalte „Betroffene Hosts“ (in „Hosts“ zusammengelegt)`);
+    if (w >= 1600) ok(hdrs.some((x) => /Pakete/.test(x)), `${w}px: Zusatzspalte Pakete sichtbar`);
+    else if (w >= 768) ok(!hdrs.some((x) => /Pakete/.test(x)), `${w}px: ohne Zusatzspalte Pakete`);
     if (w === 1600) {
       const chips = await listTable.locator('ul[aria-label="Betroffene Hosts"]').first().innerText();
       ok(/host-/.test(chips), "1600px: Host-Namen als Chips");
-      const mx = await listTable.locator('ul[aria-label="Betroffene Hosts"]').evaluateAll((els) => Math.max(...els.map((e) => e.querySelectorAll("li:not([title])").length)));
-      ok(mx <= 4, `1600px: höchstens 4 Namen je Zeile (${mx})`);
+      const mx = await listTable.locator('ul[aria-label="Betroffene Hosts"]').evaluateAll((els) => Math.max(...els.map((e) => e.querySelectorAll("li:not(:has(button))").length)));
+      ok(mx <= 3, `1600px: höchstens 3 Namen je Zeile (${mx})`);
     }
     if (shots) await page.screenshot({ path: `${shots}/cves-${w}.png` });
     if (axeSrc && (w === 390 || w === 1920)) {

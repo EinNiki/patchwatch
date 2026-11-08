@@ -248,7 +248,7 @@ function HostsView() {
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
             <div className="max-lg:overflow-x-auto">
-              <table className="tbl stack">
+              <table className="tbl stack fit">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
@@ -270,6 +270,7 @@ function HostsView() {
                     <th scope="col" className="max-wide:hidden">
                       <span className="th-pad">Agent</span>
                     </th>
+                    <th scope="col" className="fill" aria-hidden="true" />
                   </tr>
                 </thead>
                 <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${updatesOnly}|${unknownOnly}|${q}`}>
@@ -345,6 +346,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
       </td>
       <td className="mono max-wide:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
+      <td className="fill" aria-hidden="true" />
     </tr>
   );
 }

@@ -74,6 +74,8 @@ code,
 @layer components {
 /* Tabellen: Hauptwerkzeug. Flach: nur Linien, kein Kasten; Kopf sticky; Zeile ca. 37 px bei 13 px Text. */
 .tbl {
+  /* Innenabstand links und rechts je Zelle: zwei Zellen ergeben 24 px Abstand zwischen den Inhalten (32 px ab 1600 px). */
+  --col-pad: 12px;
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -106,7 +108,7 @@ code,
   align-items: center;
   gap: 4px;
   width: 100%;
-  padding: 4px 12px;
+  padding: 4px var(--col-pad);
   min-height: var(--head-h);
   font: inherit;
   color: inherit;
@@ -122,9 +124,47 @@ code,
 }
 .tbl td {
   position: relative;
-  padding: 9px 12px;
+  padding: 9px var(--col-pad);
   border-bottom: 1px solid var(--line);
-  vertical-align: top;
+  /* Chips, Zahlen und Texte einer Zeile liegen auf einer Linie. */
+  vertical-align: middle;
+}
+@media (min-width: 1600px) {
+  .tbl {
+    --col-pad: 16px;
+  }
+}
+/* Spalten nach Inhalt: jede Spalte so schmal wie ihr Inhalt, damit alle Abstände gleich bleiben. Freier Platz bei breiten
+   Bildschirmen geht an die leere Füllspalte am Ende (.fill) oder, wo eine Spalte Fließtext trägt, an diese (td.grow). */
+@media (min-width: 768px) {
+  .tbl.fit th:not(.fill, .grow),
+  .tbl.fit td:not(.fill, .grow) {
+    width: 1%;
+    white-space: nowrap;
+  }
+  .tbl.fit th.grow,
+  .tbl.fit td.grow {
+    width: 100%;
+  }
+  .tbl.fit td.wrap,
+  .tbl.fit th.wrap {
+    white-space: normal;
+  }
+  .tbl.fit .fill {
+    width: auto;
+    padding: 0;
+  }
+  .tbl.fit td.fill {
+    cursor: inherit;
+  }
+}
+.tbl .fill {
+  display: none;
+}
+@media (min-width: 768px) {
+  .tbl .fill {
+    display: table-cell;
+  }
 }
 @media (hover: hover) {
   .tbl tbody tr:hover td {

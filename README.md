@@ -377,6 +377,12 @@ Feed-Zustand je Quelle („veraltet seit …“).
 
 **UI v2** (Seitenleiste: Hosts · CVEs · Agents · Benachrichtigungen · Einstellungen):
 
+- **Tabellen**: In der Hostliste ist die ganze Zeile klickbar (Maus, Touch; Hostname bleibt der echte Link, Strg/Cmd/Shift und
+  Mittelklick öffnen einen neuen Tab, markierter Text und Bedienelemente in der Zeile lösen nichts aus; die CVE-Zelle öffnet
+  die Host-Seite gefiltert). Spalten sind so breit wie ihr Inhalt, der Abstand zwischen ihnen ist überall gleich (24 px,
+  ab 1600 px 32 px), alle Zellen stehen vertikal mittig. In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und
+  darunter die Hostnamen als Links (höchstens 3, der Rest hinter „+N“).
+
 - **CVEs**: Spalte „Distributionen“ mit einem Chip je Quelle und Release (Icon + Text + Fix-Version). Standard sind nur
   Releases, die auf deinen Hosts laufen („+ n weitere Releases“ blendet den Rest ein). Filter:
   Distribution sowie „Debian gefixt, Ubuntu offen“ und umgekehrt. `/cves/<ID>` zeigt Quellen-Links, letzte Änderung und

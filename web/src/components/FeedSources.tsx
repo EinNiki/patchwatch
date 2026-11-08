@@ -283,10 +283,10 @@ export function FeedSources() {
         <div className="max-lg:overflow-x-auto">
           {/* Feste Spaltenbreiten: Zähler und Laufmeldungen ändern sich im Sekundentakt; bei table-layout: auto würden sie die
               Spalten ständig neu verteilen (gemessen: bis zu 118 px Breitenänderung). Zellen umbrechen, statt zu verbreitern. */}
-          <table className="tbl stack md:min-w-[48rem] md:table-fixed md:[&_td]:[overflow-wrap:anywhere]">
+          <table data-t="feeds" className="tbl stack md:min-w-[48rem] md:table-fixed md:[&_td]:[overflow-wrap:anywhere]">
             <caption>Zustand der CVE-Quellen</caption>
             <colgroup>
-              {["md:w-[13%]", "md:w-[17%]", "md:w-[13%]", "md:w-[8%]", "md:w-[10%]", "md:w-[16%]", "md:w-[23%]"].map((c) => (
+              {["md:w-[12%]", "md:w-[13%]", "md:w-[13%]", "md:w-[8%]", "md:w-[10%]", "md:w-[24%]", "md:w-[20%]"].map((c) => (
                 <col key={c} className={c} />
               ))}
             </colgroup>

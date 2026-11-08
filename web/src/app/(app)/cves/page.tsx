@@ -1,12 +1,12 @@
 "use client";
 
-import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { cacheGet, cacheSet } from "@/lib/apiCache";
-import type { CveDetail, CveListItem } from "@/lib/types";
+import type { CveDetail, CveListItem, Host } from "@/lib/types";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
 import { NavIcon } from "@/components/Icons";
@@ -94,6 +94,9 @@ function CveView() {
   if (debianFix) qs.set("debian", debianFix);
   if (ubuntuFix) qs.set("ubuntu", ubuntuFix);
   const listPath = `/cves?${qs}`;
+  // Hostnamen der Chips → Adresse der Host-Seite (die CVE-Liste liefert nur Namen; Hostnamen sind eindeutig).
+  const hostList = useApi<Host[]>("/hosts", 60_000);
+  const hostIds = useMemo(() => new Map((hostList.data ?? []).map((h) => [h.name, h.id] as const)), [hostList.data]);
   const cves = useApi<CveListItem[]>(listPath, 60_000, ["host_cve_status", "report_received"], undefined, { keepPrevious: true });
   // Zählung „betrifft meine Hosts“ für die Kennzahlzeile (gleiche Filterlogik wie die Liste).
   const countQs = new URLSearchParams(qs);
@@ -442,17 +445,16 @@ function CveView() {
         ) : (
           <>
             <div className="updatable max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
-              <table className="tbl stack">
+              <table className="tbl stack fit">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
                   <tr>
                     <th scope="col" className="w-10"><span className="th-pad"><span className="sr-only">Beobachten</span></span></th>
                     <SortTh label="CVE" hint={sort === "latest" ? (dir === "desc" ? "neueste zuerst" : "älteste zuerst") : "nach Datum sortieren"} active={sort === "latest"} dir={dir} onClick={() => sortBy("latest")} />
-                    <th scope="col"><span className="th-pad">Beschreibung</span></th>
+                    <th scope="col" className="grow"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col"><span className="th-pad">Distributionen</span></th>
                     <SortTh label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
                     <th scope="col" className="max-wide:hidden"><span className="th-pad">Pakete</span></th>
-                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Betroffene Hosts</span></th>
                     <SortTh label="Level" className="max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
                     <SortTh label="Aktualisiert" className="md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />
                   </tr>
@@ -464,7 +466,8 @@ function CveView() {
                       c={c}
                       flash={flashed.has(c.id)}
                       hide={hiding.get(c.id)}
-                                            onToggle={onToggle}
+                      hostIds={hostIds}
+                      onToggle={onToggle}
                     />
                   ))}
                 </tbody>
@@ -491,11 +494,13 @@ const CveRow = memo(function CveRow({
   c,
   flash,
   hide,
+  hostIds,
   onToggle,
 }: {
   c: CveListItem;
   flash: boolean;
   hide: "wait" | "fade" | undefined;
+  hostIds: ReadonlyMap<string, number>;
   onToggle: (c: CveListItem) => void;
 }) {
   const [pop, setPop] = useState(false);
@@ -533,8 +538,8 @@ const CveRow = memo(function CveRow({
           {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
           {c.level ? <div className="text-xs text-fg3 wide:hidden">Level {c.level}/10</div> : null}
         </td>
-        <td className="w-full min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
-          {c.description ? <span className="line-clamp-2 max-w-[44rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
+        <td className="grow wrap min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
+          {c.description ? <span className="line-clamp-2 max-w-[64rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
           {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
         </td>
         <td className="cell-status min-w-[12rem] max-md:min-w-0 max-md:flex-[1_0_100%]">
@@ -542,12 +547,10 @@ const CveRow = memo(function CveRow({
         </td>
         <td data-label="Hosts">
           <HostCounts c={c} />
+          <HostChips c={c} ids={hostIds} />
         </td>
         <td className="max-wide:hidden">
           <PackagesCell c={c} />
-        </td>
-        <td className="max-wide:hidden">
-          <HostChips c={c} />
         </td>
         <td className="mono max-wide:hidden" title={c.priority ?? undefined}>{c.level ? `${c.level}/10` : "–"}</td>
         <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
@@ -570,7 +573,7 @@ function Distros({ c }: { c: CveListItem }) {
   const [more, setMore] = useState(false);
   if (c.distros.length === 0 && c.hidden_releases === 0) return <span className="text-fg3">keine Quellendaten</span>;
   return (
-    <div className="flex flex-col items-start gap-1 max-md:flex-row max-md:flex-wrap wide:flex-row wide:flex-wrap">
+    <div className="flex flex-col items-start gap-1 max-md:flex-row max-md:flex-wrap">
       {c.distros.length === 0 ? <span className="text-fg3">Kein Release auf deinen Hosts</span> : null}
       {c.distros.map((d) => (
         <DistroChip key={`${d.source}/${d.release}`} d={d} />
@@ -607,19 +610,58 @@ function PackagesCell({ c }: { c: CveListItem }) {
   return <span className="mono text-xs" title={pk.join(", ")}>{pk.slice(0, 2).join(", ")}{pk.length > 2 ? ` +${pk.length - 2}` : ""}</span>;
 }
 
-/** Betroffene Hosts namentlich als kleine Chips (höchstens 4), der Rest als „+N“. */
-function HostChips({ c }: { c: CveListItem }) {
-  const { names, more } = hostChips(c, 4);
-  if (names.length === 0 && more === 0) return <span className="text-fg3">–</span>;
+/**
+ * Betroffene Hosts als Chips, die zur Host-Seite führen (höchstens 3 sichtbar). Der Rest steht hinter „+N“, das alle
+ * bekannten Hosts als Links auflistet. Die Liste der Namen kommt aus der CVE-Liste, die Adresse aus der Hostliste.
+ */
+function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number> }) {
+  const { names, more } = hostChips(c, 3);
+  const all = c.affected_hosts ?? [];
+  const [open, setOpen] = useState(false);
+  const panel = useId();
+  if (names.length === 0 && more === 0) return null;
+  const chip = "inline-flex h-(--chip-h) max-w-32 items-center truncate rounded-xs border border-line bg-sunk px-1.5 text-xs no-underline hover:border-accent hover:text-accent max-md:min-h-11 max-md:px-3";
+  const hostLink = (n: string, cls: string) => {
+    const id = ids.get(n);
+    return id === undefined ? (
+      <span className={cls}>{n}</span>
+    ) : (
+      <Link href={`/hosts/${id}`} className={cls} title={`Zu ${n} wechseln`} aria-label={`Zu ${n} wechseln`}>
+        {n}
+      </Link>
+    );
+  };
   return (
-    <ul className="m-0 flex list-none flex-wrap gap-1 p-0" aria-label="Betroffene Hosts">
-      {names.map((n) => (
-        <li key={n} className="inline-flex h-(--chip-h) max-w-32 items-center truncate rounded-xs border border-line bg-sunk px-1.5 text-xs">
-          {n}
-        </li>
-      ))}
-      {more > 0 ? <li className="inline-flex h-(--chip-h) items-center px-1 text-xs text-fg2" title={`${more} weitere Hosts`}>+{more}</li> : null}
-    </ul>
+    <div className="mt-1 max-md:mt-0 max-md:basis-full">
+      <ul className="m-0 flex list-none items-center gap-1 p-0 max-md:flex-wrap" aria-label="Betroffene Hosts">
+        {names.map((n) => (
+          <li key={n}>{hostLink(n, chip)}</li>
+        ))}
+        {all.length > names.length || more > 0 ? (
+          <li>
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={panel}
+              title={open ? "Weitere Hosts ausblenden" : `${more} weitere Hosts anzeigen`}
+              onClick={() => setOpen(!open)}
+              className="inline-flex h-(--chip-h) items-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:px-3"
+            >
+              +{more}
+              <span className="sr-only"> weitere Hosts</span>
+            </button>
+          </li>
+        ) : null}
+      </ul>
+      {open ? (
+        <ul id={panel} className="m-0 mt-1 flex list-none flex-col gap-1 rounded-xs border border-line bg-sunk p-1.5 text-xs" aria-label={`Alle betroffenen Hosts von ${c.id}`}>
+          {all.map((n) => (
+            <li key={n}>{hostLink(n, "inline-flex min-h-6 items-center max-md:min-h-11")}</li>
+          ))}
+          {affectedHosts(c) > all.length ? <li className="text-fg3">und {affectedHosts(c) - all.length} weitere (siehe Host-Liste)</li> : null}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
