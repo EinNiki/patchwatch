@@ -10,7 +10,7 @@ const axeSrc = readFileSync(process.env.AXE_JS, "utf8");
 const base = process.env.PW_BASE ?? "http://127.0.0.1:3100";
 const shots = process.env.PW_SHOTS;
 const ok = (c, m) => { console.log(c ? "OK  " : "FAIL", m); if (!c) process.exitCode = 1; };
-const OLD = /\bReports?\b|Check-?in|Jetzt aktualisieren|Alle aktualisieren|jetzt aktualisieren/i;
+const OLD = /Daten zuletzt|Agent zuletzt aktiv|\bReports?\b|Check-?in|Jetzt aktualisieren|Alle aktualisieren|jetzt aktualisieren/i;
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });
 try {
@@ -44,14 +44,14 @@ try {
       // Lange Fließtexte sind CVE-Beschreibungen aus den Datenquellen (fremder Text) und gelten nicht als Oberflächentext.
       const hit = text.split("\n").filter((l) => l.length < 160 && OLD.test(l));
       ok(hit.length === 0, `${L}: alte Begriffe nicht sichtbar (${hit[0] ?? "keine"})`);
-      if (name === "Hostliste") ok(/Daten zuletzt|Daten/.test(text), `${L}: neue Beschriftung`);
+      if (name === "Hostliste") ok(/Zuletzt gemeldet/.test(text), `${L}: neue Beschriftung`);
       if (name === "Agents") {
-        ok(w < 768 || /Daten zuletzt/.test(text) && /Agent zuletzt aktiv/.test(text), `${L}: Spalten "Daten zuletzt" und "Agent zuletzt aktiv"`);
+        ok(w < 768 || /Zuletzt gemeldet/.test(text) && /Zuletzt erreichbar/.test(text), `${L}: Spalten "Zuletzt gemeldet" und "Zuletzt erreichbar"`);
         ok((await page.getByRole("button", { name: /Daten jetzt abrufen/ }).count()) >= 1 && (await page.getByRole("button", { name: "Alle Daten abrufen" }).count()) === 1, `${L}: Aktion "Daten jetzt abrufen" / "Alle Daten abrufen"`);
       }
       if (name === "Host") {
         const scope = w >= 1280 ? page.locator("aside[aria-labelledby=facts]") : page.locator("details:has(dl)");
-        for (const [label, frag, title] of [["Daten zuletzt", "vollständige Daten gemeldet", "Daten zuletzt"], ["Agent zuletzt aktiv", "keine Daten", "Agent zuletzt aktiv"]]) {
+        for (const [label, frag, title] of [["Zuletzt gemeldet", "vollständige Daten geschickt", "Zuletzt gemeldet"], ["Zuletzt erreichbar", "keine Daten übertragen", "Zuletzt erreichbar"]]) {
           const btn = scope.getByRole("button", { name: `Erklärung zu „${label}“` });
           ok((await btn.count()) === 1, `${L}: Info-Symbol zu "${label}" mit Aria-Label`);
           ok(((await btn.getAttribute("title")) ?? "").includes(frag), `${L}: Tooltip zu "${label}"`);

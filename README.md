@@ -61,8 +61,8 @@ Konfiguration: `/etc/patchwatch/agent.toml`, Beispiel in `agent/dist/agent.toml.
 
 ### Kurzer Kontakt (Check-in) und „Daten jetzt abrufen“
 
-**Begriffe in der Oberfläche:** „Daten zuletzt“ ist der Zeitpunkt der letzten vollständigen Meldung des Agents (intern „Report“:
-Kernel, Pakete, Updates; täglich und auf Anforderung). „Agent zuletzt aktiv“ ist der Zeitpunkt des letzten kurzen Kontakts
+**Begriffe in der Oberfläche:** „Zuletzt gemeldet“ ist der Zeitpunkt der letzten vollständigen Meldung des Agents (intern „Report“:
+Kernel, Pakete, Updates; täglich und auf Anforderung). „Zuletzt erreichbar“ ist der Zeitpunkt des letzten kurzen Kontakts
 (intern „Check-in“: der Agent fragt nur, ob neue Daten gewünscht sind, und überträgt keine Daten; alle paar Minuten).
 „Daten jetzt abrufen“ (früher „Jetzt aktualisieren“) fordert eine Meldung an. API, Felder, Routen und Logs behalten die
 Wörter „report“ und „checkin“; nur die sichtbaren Texte ändern sich. Auf Touchgeräten steht die Erklärung hinter dem
@@ -395,7 +395,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
   Ist die zuständige Quelle eingeschränkt, steht über der Liste ein Hinweis (z. B. „Ubuntu: Offene Fälle nicht vollständig
   geladen (API überlastet, seit 22:08) …“), die Kachel „Offen“ trägt ein Warnsymbol und „kann unvollständig sein“; nie
   „alles gut“. Proxmox-Hosts bleiben „unbekannt, manuell prüfen“ (nie grün).
-- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, „Daten zuletzt“ und „Agent zuletzt aktiv“; „Daten jetzt abrufen“,
+- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, „Zuletzt gemeldet“ und „Zuletzt erreichbar“; „Daten jetzt abrufen“,
   „Token erneuern“, Löschen mit Bestätigung. „Agent hinzufügen“ zeigt den Token einmalig und einen Installationsbefehl
   **ohne** Token (`install.sh` fragt ihn ohne Echo ab).
 - **Benachrichtigungen**: ntfy, Matrix, Gotify, Discord und „Live im Browser“, je mit Zugangsdaten (write-only),

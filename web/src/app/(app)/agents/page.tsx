@@ -1,6 +1,6 @@
 "use client";
 
-import { ACTIVE_LABEL, DATA_LABEL, FETCH_ACTION, FETCH_ALL_ACTION } from "@/lib/terms";
+import { ACTIVE_LABEL, ACTIVE_TIP, DATA_LABEL, DATA_TIP, FETCH_ACTION, FETCH_ALL_ACTION } from "@/lib/terms";
 import { useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
@@ -286,8 +286,8 @@ export default function AgentsPage() {
                 <th scope="col"><span className="th-pad">Hostname laut Agent</span></th>
                 <th scope="col"><span className="th-pad">Distribution</span></th>
                 <th scope="col"><span className="th-pad">Agent-Version</span></th>
-                <th scope="col"><span className="th-pad">{DATA_LABEL}</span></th>
-                <th scope="col"><span className="th-pad">{ACTIVE_LABEL}</span></th>
+                <th scope="col"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
+                <th scope="col"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
                 <th scope="col"><span className="th-pad">Aktualisierung</span></th>
                 <th scope="col"><span className="th-pad">Aktionen</span></th>
               </tr>

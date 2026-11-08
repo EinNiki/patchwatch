@@ -50,7 +50,7 @@ await row.getByText("wartet auf Agent").waitFor({ state: "detached", timeout: 80
 ok(true, "Anzeige „wartet“ verschwindet live (ohne Neuladen)");
 ok(reports() === base + 1, `genau ein weiterer Report (${reports()} statt ${base + 1})`);
 ok(await page.evaluate(() => window.__noReload === true), "Seite wurde nicht neu geladen");
-ok(/gerade eben/.test(await row.textContent()), "Daten zuletzt: gerade eben");
+ok(/gerade eben/.test(await row.textContent()), "Zuletzt gemeldet: gerade eben");
 
 // Zweiter Check-in: keine Anforderung mehr → kein Report.
 execFileSync("rm", ["-f", `${STATE}/last-checkin`]);

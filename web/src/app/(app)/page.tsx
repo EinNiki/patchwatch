@@ -1,6 +1,6 @@
 "use client";
 
-import { DATA_LABEL } from "@/lib/terms";
+import { DATA_LABEL, DATA_TIP } from "@/lib/terms";
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -25,10 +25,10 @@ import { feedSummary } from "@/components/FeedStatus";
 type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 
 /** `cls`: Sichtbarkeit je Breite. Der letzte Report rutscht zwischen 768 und 1439 px unter den Hostnamen, Agent und Uptime kommen ab 1600 px dazu. */
-const COLUMNS: { key: SortKey; label: string; num?: boolean; cls?: string }[] = [
+const COLUMNS: { key: SortKey; label: string; num?: boolean; cls?: string; tip?: string }[] = [
   { key: "name", label: "Host" },
   { key: "kernel", label: "Distribution / Kernel" },
-  { key: "report", label: DATA_LABEL, cls: "md:max-xl:hidden" },
+  { key: "report", label: DATA_LABEL, cls: "md:max-xl:hidden", tip: DATA_TIP },
   { key: "updates", label: "Updates", num: true },
   { key: "cve", label: "CVE" },
   { key: "status", label: "Status" },
@@ -173,7 +173,7 @@ function HostsView() {
               <span className="mono text-sm font-semibold leading-[1.25rem]">
                 <RelTime iso={lastReport} />
               </span>
-              <span className="text-xs text-fg2">zuletzt gemeldet</span>
+              <span className="text-xs text-fg2" title={DATA_TIP}>{DATA_LABEL}</span>
             </div>
           </section>
 
@@ -257,6 +257,7 @@ function HostsView() {
                         label={c.label}
                         num={c.num}
                         className={c.cls}
+                        tip={c.tip}
                         active={sort === c.key}
                         dir={dir}
                         onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
@@ -296,7 +297,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         {h.is_proxmox ? <span className="mt-1 flex xl:ml-2 xl:mt-0 xl:inline-flex xl:align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
         {h.hostname && h.hostname !== h.name ? <div className="text-xs text-fg3">{h.hostname}</div> : null}
         <div className="hidden text-xs text-fg3 md:max-xl:block">
-          Daten <RelTime iso={h.last_report_at} />
+          {DATA_LABEL} <RelTime iso={h.last_report_at} />
         </div>
       </td>
       <td>
