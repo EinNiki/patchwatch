@@ -45,7 +45,10 @@ try {
       ok((await page.getByText("Umfang").count()) === 0, `${L} ${url}: kein Text "Umfang"`);
       ok((await page.getByRole("combobox", { name: /Umfang/ }).count()) === 0 && (await page.locator("option", { hasText: /Releases/ }).count()) === 0, `${L} ${url}: kein Auswahlfeld für Releases`);
       ok((await page.getByText("Alle Releases").count()) === 0, `${L} ${url}: kein "Alle Releases"`);
-      ok((await page.getByText("Filter berücksichtigen nur Releases deiner Hosts.").count()) === 1, `${L} ${url}: Legende vorhanden`);
+      ok((await page.getByText("Filter berücksichtigen nur Releases deiner Hosts.").count()) === 0, `${L} ${url}: Legende steht nicht auf der Seite, sondern im Filterfenster`);
+      await page.getByRole("button", { name: /^Filter/ }).click();
+      ok((await page.getByRole("dialog", { name: "Filter" }).getByText("Filter berücksichtigen nur Releases deiner Hosts.").count()) === 1, `${L} ${url}: Legende vorhanden`);
+      await page.keyboard.press("Escape");
       ok(seenQuery.length > 0 && seenQuery.every((q) => !/releases=|scope=|umfang=/.test(q)), `${L} ${url}: Abfrage ohne Umfangsparameter (${seenQuery[0] ?? ""})`);
       ok(errors.length === 0, `${L} ${url}: keine Fehler in der Konsole (${errors[0] ?? "ok"})`);
     }

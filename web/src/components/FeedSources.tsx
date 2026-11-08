@@ -9,7 +9,9 @@ import type { StatusInfo } from "@/lib/status";
 import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
-import { NavIcon } from "@/components/Icons";
+import { Icon, NavIcon } from "@/components/Icons";
+import { RowMenu } from "@/components/RowMenu";
+import { useStoredFlag } from "@/lib/useStoredFlag";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { writeFailure } from "@/lib/apiErrors";
@@ -18,7 +20,7 @@ import { useFeedRuns } from "@/lib/useFeedRuns";
 import { isActive, isFailure, latestBySource, summary, type FeedRun } from "@/lib/feedRuns";
 import { MiniStepper, RunStepper } from "@/components/RunStepper";
 import { StatusBadge } from "@/components/StatusBadge";
-import { VISIBLE_DETAIL_LINES, detailLines, errorChip, errorLine } from "@/lib/feedView";
+import { VISIBLE_DETAIL_LINES, detailLines, errorChip, errorLine, needsAttention } from "@/lib/feedView";
 import { Mono } from "@/components/Version";
 
 export const FEED_STATE: Record<Feed["state"], StatusInfo> = {
@@ -105,6 +107,8 @@ export function FeedSources() {
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [allBusy, setAllBusy] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(new Set());
+  // „Verwalten“: Tabelle von Hand auf- oder zuklappen (bleibt gemerkt); sie öffnet sich außerdem selbst, wenn etwas Aufmerksamkeit braucht.
+  const [manage, setManage] = useStoredFlag("pw-feeds-manage");
   const done = useRef(new Set<number>());
   const labels = useRef(new Map<string, string>());
   useEffect(() => {
@@ -261,25 +265,58 @@ export function FeedSources() {
     }
   }
 
-  
+
+  const anyRunning = runs.runs.some(isActive);
+  const attention = needsAttention(feeds.data, anyRunning) || (feeds.data ?? []).some((f) => expanded(latest.get(f.source)));
+  const tableOpen = manage === true || attention;
+  const newest = (feeds.data ?? []).map((f) => f.last_success_at).filter((x): x is string => !!x).sort().pop() ?? null;
+
   return (
-    <section id="feeds" aria-labelledby="feeds-h" className="mb-6 scroll-mt-4">
-      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 id="feeds-h" className="mr-1 text-lg font-semibold">
-          CVE-Quellen
-        </h2>
-        <Button className={BTN} onClick={() => void refreshAll()} busy={allBusy} disabled={runs.runs.some(isActive)}>
-          Alle abrufen
-        </Button>
-        <Button className={BTN} variant="primary" onClick={() => setAdding(true)} >
-          <NavIcon name="plus" />
-          Quelle hinzufügen
-        </Button>
+    <section id="feeds" aria-labelledby="feeds-h" className="mb-4 scroll-mt-4">
+      <h2 id="feeds-h" className="sr-only">
+        CVE-Quellen
+      </h2>
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" data-testid="sources-bar">
+        <p className="m-0 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-fg2">Quellen:</span>
+          {(feeds.data ?? []).map((f) => (
+            <span key={f.source} className={`inline-flex items-center gap-1 ${f.state === "ok" ? "" : f.state === "disabled" || f.state === "never" ? "text-unknown" : "text-warn"}`} title={`${f.label}: ${FEED_STATE[f.state].label}`}>
+              <Icon name={FEED_STATE[f.state].icon} size={14} />
+              <span className="text-fg">{f.label}</span>
+              <span className="sr-only">: {FEED_STATE[f.state].label}</span>
+            </span>
+          ))}
+          {newest ? (
+            <span className="text-fg3">
+              · <RelTime iso={newest} /> aktualisiert
+            </span>
+          ) : null}
+        </p>
+        <span className="ml-auto flex items-center gap-2">
+          <Button className="min-w-0" onClick={() => void refreshAll()} busy={allBusy} disabled={anyRunning}>
+            Alle abrufen
+          </Button>
+          <Button className="min-w-0" aria-expanded={tableOpen} aria-controls="feeds-table" onClick={() => setManage(!tableOpen)}>
+            Verwalten
+            <span className={`transition-transform duration-(--dur-1) ${tableOpen ? "rotate-180" : ""}`}>
+              <NavIcon name="chevron" size={14} />
+            </span>
+          </Button>
+        </span>
       </div>
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
       {!feeds.data ? null : feeds.data.length === 0 ? (
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>
       ) : (
+        // Auf- und Zuklappen über die Zeilenhöhe (150 ms), damit die Seite darunter nicht springt.
+        <div id="feeds-table" className={`grid transition-[grid-template-rows] duration-(--dur-1) ${tableOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`} inert={!tableOpen}>
+        <div className="min-h-0 overflow-hidden">
+        <div className="mb-2 flex justify-end">
+          <Button className="min-w-0" variant="primary" onClick={() => setAdding(true)}>
+            <NavIcon name="plus" />
+            Quelle hinzufügen
+          </Button>
+        </div>
         <div className="max-lg:overflow-x-auto">
           {/* Feste Spaltenbreiten: Zähler und Laufmeldungen ändern sich im Sekundentakt; bei table-layout: auto würden sie die
               Spalten ständig neu verteilen (gemessen: bis zu 118 px Breitenänderung). Zellen umbrechen, statt zu verbreitern. */}
@@ -336,19 +373,18 @@ export function FeedSources() {
                     <DetailsCell feed={f} open={detailsOpen.has(f.source)} onToggle={() => setDetailsOpen((o) => { const n = new Set(o); if (n.has(f.source)) n.delete(f.source); else n.add(f.source); return n; })} />
                   </td>
                   <td>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
                       <Button className={BTN} onClick={() => void runOne(f)} busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })} disabled={!f.enabled} aria-label={`${f.label} jetzt abrufen`}>
                         Jetzt abrufen
                       </Button>
-                      <Button className={BTN} onClick={() => void toggle(f)} aria-label={`${f.label} ${f.enabled ? "abschalten" : "einschalten"}`}>
-                        {f.enabled ? "Abschalten" : "Einschalten"}
-                      </Button>
-                      <Button className={BTN} onClick={() => setEditing(f)} aria-label={`${f.label} bearbeiten`}>
-                        Bearbeiten
-                      </Button>
-                      <Button className={BTN} variant="danger" onClick={() => setRemoving(f)} aria-label={`${f.label} löschen`}>
-                        Löschen
-                      </Button>
+                      <RowMenu
+                        label={`Weitere Aktionen für ${f.label}`}
+                        items={[
+                          { label: f.enabled ? "Abschalten" : "Einschalten", aria: `${f.label} ${f.enabled ? "abschalten" : "einschalten"}`, run: () => void toggle(f) },
+                          { label: "Bearbeiten", aria: `${f.label} bearbeiten`, run: () => setEditing(f) },
+                          { label: "Löschen", aria: `${f.label} löschen`, run: () => setRemoving(f), danger: true },
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -364,10 +400,12 @@ export function FeedSources() {
             </tbody>
           </table>
         </div>
-      )}
       <p className="mt-2 max-w-[45rem] text-xs text-fg3">
         Das Abruf-Intervall stellst du unter Einstellungen → Zeitpläne ein. Eine abgeschaltete oder ausgefallene Quelle gilt nie als aktuell.
       </p>
+        </div>
+        </div>
+      )}
 
       <AddDialog open={adding} onClose={() => setAdding(false)} onDone={() => { setAdding(false); void feeds.reload(); }} />
       <EditDialog feed={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); void feeds.reload(); }} />

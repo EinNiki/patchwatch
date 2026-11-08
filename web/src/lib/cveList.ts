@@ -67,3 +67,22 @@ export function hostState(c: Pick<CveListItem, "hosts_vulnerable" | "hosts_fix_p
   if (c.hosts_fix_pending > 0) return { icon: "warn", tone: "text-warn", text: "Fix angekündigt, noch nicht installiert" };
   return { icon: "reboot", tone: "text-warn", text: "Fix installiert, Neustart nötig" };
 }
+
+/** Kopfzeile: „5 betreffen deine Hosts · 5.723 insgesamt“ (bzw. „1 betrifft deine Hosts“). */
+export function affectingShort(n: number): string {
+  return n === 1 ? "1 betrifft deine Hosts" : `${n.toLocaleString("de-DE")} betreffen deine Hosts`;
+}
+
+/** Kennzahlen als Textstücke; Werte von 0 entfallen, bei lauter Nullen bleibt die Liste leer. */
+export function statParts(s: { high: number; withFix: number; withoutFix: number }): string[] {
+  const out: string[] = [];
+  if (s.high > 0) out.push(`davon hoch/kritisch ${s.high.toLocaleString("de-DE")}`);
+  if (s.withFix > 0) out.push(`${s.withFix.toLocaleString("de-DE")} mit Fix im Archiv`);
+  if (s.withoutFix > 0) out.push(`${s.withoutFix.toLocaleString("de-DE")} ohne Fix`);
+  return out;
+}
+
+/** Anzahl der Einstellungen im Filterfenster, die vom Standard abweichen (Suche und Watchlist-Stern zählen nicht mit). */
+export function filterDeviations(f: { affectsAll: boolean; distro: string; debianFix: string; ubuntuFix: string }): number {
+  return [f.affectsAll, f.distro !== "", f.debianFix !== "", f.ubuntuFix !== ""].filter(Boolean).length;
+}

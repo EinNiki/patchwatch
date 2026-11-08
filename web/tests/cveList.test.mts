@@ -1,7 +1,7 @@
 // CVE-Liste: URL-Parameter und Zähler. Muss ohne src/lib/cveList.ts fehlschlagen.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { affectedHosts, affectingLabel, hostChips, hostState, listStats, parseAffectsAll, parseSort } from "../src/lib/cveList.ts";
+import { affectedHosts, affectingLabel, affectingShort, filterDeviations, statParts, hostChips, hostState, listStats, parseAffectsAll, parseSort } from "../src/lib/cveList.ts";
 import type { CveListItem } from "../src/lib/types.ts";
 
 test("Standard ist „betroffene Hosts zuerst“, Unsinn fällt darauf zurück", () => {
@@ -63,4 +63,20 @@ test("host state icon comes from the row counters; mixed rows have no single sta
   assert.equal(hostState({ ...z, hosts_reboot: 1 })?.icon, "reboot");
   assert.equal(hostState({ ...z, hosts_vulnerable: 1, hosts_reboot: 1 }), null);
   assert.equal(hostState(z), null);
+});
+
+test("Kurzzähler: Einzahl und Mehrzahl", () => {
+  assert.equal(affectingShort(1), "1 betrifft deine Hosts");
+  assert.equal(affectingShort(5), "5 betreffen deine Hosts");
+  assert.equal(affectingShort(0), "0 betreffen deine Hosts");
+});
+test("Kennzahlenzeile lässt Nullwerte weg, bei lauter Nullen bleibt sie leer", () => {
+  assert.deepEqual(statParts({ high: 0, withFix: 0, withoutFix: 0 }), []);
+  assert.deepEqual(statParts({ high: 2, withFix: 0, withoutFix: 3 }), ["davon hoch/kritisch 2", "3 ohne Fix"]);
+  assert.deepEqual(statParts({ high: 1, withFix: 1234, withoutFix: 1 }), ["davon hoch/kritisch 1", "1.234 mit Fix im Archiv", "1 ohne Fix"]);
+});
+test("Filterzähler zählt nur Abweichungen vom Standard", () => {
+  assert.equal(filterDeviations({ affectsAll: false, distro: "", debianFix: "", ubuntuFix: "" }), 0);
+  assert.equal(filterDeviations({ affectsAll: true, distro: "", debianFix: "fixed", ubuntuFix: "" }), 2);
+  assert.equal(filterDeviations({ affectsAll: true, distro: "debian", debianFix: "open", ubuntuFix: "open" }), 4);
 });

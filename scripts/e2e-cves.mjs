@@ -35,27 +35,29 @@ try {
   await page.getByRole("button", { name: "Anmelden" }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
 
-  // A) Betrifft: Auswahlfeld statt Knöpfe.
+  // A) Betrifft: Radiogruppe im Filterfenster, Zähler als reiner Text im Kopf.
   await page.goto(`${base}/cves`);
-  const sel = page.locator('label:has-text("Betrifft") select');
-  await sel.waitFor();
-  ok((await page.getByRole("button", { name: /^Meine Hosts/ }).count()) === 0 && (await page.getByRole("group", { name: "Betrifft" }).count()) === 0, "keine Knöpfe „Meine Hosts / Alle“ im DOM");
-  ok((await sel.inputValue()) === "mine", "Standard „Meine Hosts“");
+  const fbtn = page.getByRole("button", { name: /^Filter/ });
+  await fbtn.waitFor();
   const text = page.getByTestId("affects-count");
   await text.getByText(/betreff/).waitFor();
-  ok((await text.locator("button, a").count()) === 0, "Satz „N CVEs betreffen deine Hosts“ ist reiner Text");
+  ok((await page.getByRole("button", { name: /^Meine Hosts/ }).count()) === 0, "keine Knöpfe „Meine Hosts / Alle“ auf der Seite (nur im Filterfenster)");
+  ok((await text.locator("button, a").count()) === 0, "Zähler „N betreffen deine Hosts“ ist reiner Text");
   const n = Number((await text.innerText()).replace(/\./g, "").match(/\d+/)?.[0]);
-  await sel.focus();
-  await page.keyboard.press("ArrowDown");
+  await fbtn.click();
+  const grp = page.getByRole("dialog", { name: "Filter" }).getByRole("radiogroup", { name: "Betrifft" });
+  ok((await grp.getByRole("radio", { name: "Meine Hosts" }).getAttribute("aria-checked")) === "true", "Standard „Meine Hosts“");
+  await grp.getByRole("radio", { name: "Alle" }).click();
   await page.waitForURL(/affects=all/);
-  ok((await sel.inputValue()) === "all", "Auswahl per Tastatur (Pfeil runter) stellt „Alle“, URL enthält affects=all");
-  await page.waitForFunction((n0) => Number(document.querySelector('[data-testid="affects-count"]')?.textContent?.replace(/\./g, "").match(/\d+/)?.[0]) >= 0 && document.querySelector('[data-testid="affects-count"]')?.textContent?.includes("betreff"), n);
+  ok((await grp.getByRole("radio", { name: "Alle" }).getAttribute("aria-checked")) === "true", "Auswahl „Alle“, URL enthält affects=all");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector('[data-testid="affects-count"]')?.textContent?.includes("betreff"));
   // Alte URL funktioniert weiter.
   await page.goto(`${base}/cves?affects=all`);
-  await sel.waitFor();
-  ok((await sel.inputValue()) === "all", "alte URL ?affects=all stellt das Feld auf „Alle“");
+  await fbtn.waitFor();
+  ok((await fbtn.innerText()).replace(/\s+/g, " ").trim() === "Filter 1", "alte URL ?affects=all: Filter zählt 1 Abweichung");
   await page.goto(`${base}/cves`);
-  await sel.waitFor();
+  await fbtn.waitFor();
   // Satz stimmt mit der Trefferzahl überein: Zeilen der Liste (bis zum Limit) ≤ Zahl.
   const list = page.locator("table.tbl", { has: page.locator("caption", { hasText: "CVEs mit" }) });
   await list.locator("tbody tr").first().waitFor().catch(() => {});
@@ -77,8 +79,9 @@ try {
     const shown = rows.slice(0, 100);
     const e = expected(shown);
     const txt = (await page.getByTestId("cve-stats").innerText()).replace(/\./g, "");
+    const cnt = (await page.getByTestId("affects-count").innerText()).replace(/\./g, "");
     if (rows.length) {
-      ok(new RegExp(`${e.n} CVEs? betreff`).test(txt) || rows.length > 100, `${label}: Satz zeigt ${e.n}`);
+      ok(new RegExp(`^${e.n} betreff`).test(cnt) || new RegExp(`^1 betrifft`).test(cnt) && e.n === 1 || rows.length > 100, `${label}: Zähler zeigt ${e.n} („${cnt}“)`);
       ok(txt.includes(`hoch/kritisch ${e.high}`) && txt.includes(`${e.withFix} mit Fix im Archiv`) && txt.includes(`${e.withoutFix} ohne Fix`), `${label}: Kennzahlen stimmen mit der Liste überein (${e.high}/${e.withFix}/${e.withoutFix})`);
       ok((await page.getByTestId("cve-stats").locator("button, a").count()) === 0, `${label}: Kennzahlen sind nicht klickbar`);
     }

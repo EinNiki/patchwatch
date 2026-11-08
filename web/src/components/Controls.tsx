@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, Ref, SelectHTMLAttributes } from "react";
 
 // Einheitliche Regeln: 32 px hoch (Touch: 44 px), Mindestbreite 7rem, Zustände hover/active/focus-visible/disabled/busy.
 const base =
@@ -26,9 +26,10 @@ export function Button({
   );
 }
 
-export function TextInput({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
+export function TextInput({ className = "", ref, ...props }: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
   return (
     <input
+      ref={ref}
       className={`min-h-8 rounded-[3px] border border-control bg-sunk px-2 py-1 text-sm text-fg placeholder:text-fg3 max-md:min-h-11 ${className}`}
       {...props}
     />

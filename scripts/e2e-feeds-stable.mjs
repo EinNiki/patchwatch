@@ -67,6 +67,8 @@ const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, a
 try {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  // Die Quellen-Tabelle ist im Ruhezustand eingeklappt („Verwalten“); diese Tests prüfen die Tabelle, also aufgeklappt starten.
+  await page.addInitScript(() => { try { localStorage.setItem("pw-feeds-manage", "1"); } catch {} });
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
