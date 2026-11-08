@@ -19,7 +19,7 @@ export const HOST_STATUS: Record<HostStatus, StatusInfo> = {
   stale: { label: "Meldet sich nicht", tone: "unknown", icon: "clock", rank: 2 },
   reboot_required: { label: "Neustart nötig", tone: "warn", icon: "reboot", rank: 3 },
   updates_pending: { label: "Updates offen", tone: "warn", icon: "warn", rank: 4 },
-  pending: { label: "Noch kein Report", tone: "unknown", icon: "pending", rank: 5 },
+  pending: { label: "Noch keine Daten", tone: "unknown", icon: "pending", rank: 5 },
   ok: { label: "Aktuell", tone: "ok", icon: "ok", rank: 6 },
 };
 

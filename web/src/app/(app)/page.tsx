@@ -1,5 +1,6 @@
 "use client";
 
+import { DATA_LABEL } from "@/lib/terms";
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -27,13 +28,13 @@ type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 const COLUMNS: { key: SortKey; label: string; num?: boolean; cls?: string }[] = [
   { key: "name", label: "Host" },
   { key: "kernel", label: "Distribution / Kernel" },
-  { key: "report", label: "Letzter Report", cls: "md:max-xl:hidden" },
+  { key: "report", label: DATA_LABEL, cls: "md:max-xl:hidden" },
   { key: "updates", label: "Updates", num: true },
   { key: "cve", label: "CVE" },
   { key: "status", label: "Status" },
 ];
 
-const SORT_LABEL: Record<SortKey, string> = { name: "Host", kernel: "Kernel", report: "Letzter Report", updates: "Updates", cve: "CVE", status: "Status" };
+const SORT_LABEL: Record<SortKey, string> = { name: "Host", kernel: "Kernel", report: DATA_LABEL, updates: "Updates", cve: "CVE", status: "Status" };
 
 /** Rein clientseitige Kennzahlen aus /hosts; jede ist zugleich ein Filter (URL-Parameter). */
 type Kpi = { id: string; label: string; icon: "crit" | "warn" | "reboot" | "unknown" | "clock"; tone: string; count: number; param: Record<string, string> };
@@ -139,7 +140,7 @@ function HostsView() {
 
       {all.length === 0 ? (
         <Empty title="Noch keine Hosts">
-          Lege unter <Link href="/agents">Agents</Link> einen Agent an. Nach dem ersten Report erscheint der Host hier.
+          Lege unter <Link href="/agents">Agents</Link> einen Agent an. Sobald der Agent erstmals Daten gemeldet hat, erscheint der Host hier.
         </Empty>
       ) : (
         <>
@@ -247,7 +248,7 @@ function HostsView() {
           ) : (
             <div className="max-lg:overflow-x-auto">
               <table className="tbl stack">
-                <caption>Hosts mit Distribution, Kernel, letztem Report, offenen Updates, CVE-Lage und Status</caption>
+                <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
                     {COLUMNS.map((c) => (
@@ -295,7 +296,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         {h.is_proxmox ? <span className="mt-1 flex xl:ml-2 xl:mt-0 xl:inline-flex xl:align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
         {h.hostname && h.hostname !== h.name ? <div className="text-xs text-fg3">{h.hostname}</div> : null}
         <div className="hidden text-xs text-fg3 md:max-xl:block">
-          zuletzt <RelTime iso={h.last_report_at} />
+          Daten <RelTime iso={h.last_report_at} />
         </div>
       </td>
       <td>
@@ -311,7 +312,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           ) : null}
         </span>
       </td>
-      <td data-label="Report" className={`md:max-xl:hidden ${stale ? "text-warn" : ""}`}>
+      <td data-label={DATA_LABEL} className={`md:max-xl:hidden ${stale ? "text-warn" : ""}`}>
         <span className="inline-flex items-center gap-1">
           {stale ? <Icon name="clock" /> : null}
           <RelTime iso={h.last_report_at} />

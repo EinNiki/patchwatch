@@ -103,7 +103,7 @@ function Schedules() {
       if (edit.stale !== undefined) body.stale_after_hours = int("Meldet sich nicht", edit.stale, d.stale_after_min_hours, d.stale_after_max_hours);
       if (edit.retention !== undefined) body.report_retention_days = int("Aufbewahrung", edit.retention, d.report_retention_min_days, d.report_retention_max_days);
       if (["mode", "every", "at", "tz"].some((k) => edit[k] !== undefined)) {
-        if (mode === "interval") body.report_schedule = { mode, every_hours: int("Report-Intervall", val("every", rs.mode === "interval" ? rs.every_hours : 24), d.report_every_hours_min, d.report_every_hours_max) };
+        if (mode === "interval") body.report_schedule = { mode, every_hours: int("Abruf-Intervall", val("every", rs.mode === "interval" ? rs.every_hours : 24), d.report_every_hours_min, d.report_every_hours_max) };
         else if (mode === "daily") body.report_schedule = { mode, at: val("at", rs.mode === "daily" ? rs.at : "04:00"), tz: val("tz", rs.mode === "daily" ? rs.tz : Intl.DateTimeFormat().resolvedOptions().timeZone) };
         else body.report_schedule = { mode: "off" };
       }
@@ -144,7 +144,7 @@ function Schedules() {
       </fieldset>
 
       <fieldset className="flex flex-col gap-3">
-        <legend className="mb-1 font-semibold">Reports anfordern</legend>
+        <legend className="mb-1 font-semibold">Daten bei den Hosts abrufen</legend>
         <div className="flex flex-wrap items-end gap-3">
           <Field label="Zeitplan">
             <Select value={mode} onChange={set("mode")}>
@@ -170,7 +170,7 @@ function Schedules() {
           ) : null}
         </div>
         <p className="text-xs text-fg3">
-          Zur fälligen Zeit fordert der Server bei allen Hosts einen Report an; die Agents melden dann sofort. Der tägliche Timer im Agent bleibt als Rückfall bestehen.
+          Zur fälligen Zeit fordert der Server bei allen Hosts neue Daten an; die Agents melden sie dann sofort. Der tägliche Timer im Agent bleibt als Rückfall bestehen.
           {rs.last_run ? <> Letzte Anforderung: <RelTime iso={rs.last_run} />.</> : null}
         </p>
         <p className="text-xs text-fg3">{d.checkin_interval_hint}</p>
@@ -182,7 +182,7 @@ function Schedules() {
           <Field label="„Meldet sich nicht“ nach (Stunden)">
             <TextInput type="number" inputMode="numeric" min={d.stale_after_min_hours} max={d.stale_after_max_hours} value={val("stale", d.stale_after_hours)} onChange={set("stale")} className={num} />
           </Field>
-          <Field label="Report-Historie aufbewahren (Tage)">
+          <Field label="Verlauf der Datenmeldungen aufbewahren (Tage)">
             <TextInput type="number" inputMode="numeric" min={d.report_retention_min_days} max={d.report_retention_max_days} value={val("retention", d.report_retention_days)} onChange={set("retention")} className={num} />
           </Field>
         </div>
@@ -331,7 +331,7 @@ export default function SettingsPage() {
         <OidcForm />
       </SettingsSection>
 
-      <SettingsSection id="sched-h" title="Zeitpläne" description="Abruf der CVE-Feeds, Report-Anforderung und Schwellen. Änderungen gelten ohne Neustart.">
+      <SettingsSection id="sched-h" title="Zeitpläne" description="Abruf der CVE-Feeds, Datenabruf bei den Hosts und Schwellen. Änderungen gelten ohne Neustart.">
         <Schedules />
       </SettingsSection>
     </>

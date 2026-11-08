@@ -79,11 +79,11 @@ export default function HostDetailPage() {
         </h2>
         {history.error && !history.data ? <ErrorNote message={history.error} /> : null}
         {!history.data ? null : history.data.length === 0 ? (
-          <Empty title="Noch keine Reports">Der Verlauf füllt sich mit dem ersten Report des Agents (täglich um 12:00).</Empty>
+          <Empty title="Noch keine Daten gemeldet">Der Verlauf füllt sich, sobald der Agent Daten gemeldet hat (täglich um 12:00).</Empty>
         ) : (
           <div className="max-lg:overflow-x-auto">
             <table className="tbl stack">
-              <caption>Verlauf der letzten Reports</caption>
+              <caption>Verlauf der letzten Datenmeldungen</caption>
               <thead>
                 <tr>
                   <th scope="col"><span className="th-pad">Zeitpunkt</span></th>
@@ -143,9 +143,9 @@ function UpdatesSection({ hostId, pending }: { hostId: number; pending: number }
       {updates.error && !updates.data ? <ErrorNote message={updates.error} /> : null}
       {updates.loading ? <Loading what="Updates" /> : null}
       {items === undefined ? null : items === null ? (
-        <Empty title="Liste nicht verfügbar">Dieser Agent schickt noch keine Paketliste. Mit dem neuesten Agent (erneut install.sh ausführen) erscheint sie nach dem nächsten Report.</Empty>
+        <Empty title="Liste nicht verfügbar">Dieser Agent schickt noch keine Paketliste. Mit dem neuesten Agent (erneut install.sh ausführen) erscheint sie nach der nächsten Datenmeldung.</Empty>
       ) : items.length === 0 ? (
-        <Empty title="Keine offenen Updates">Der letzte Report meldet keine Paket-Updates.</Empty>
+        <Empty title="Keine offenen Updates">Die zuletzt gemeldeten Daten enthalten keine Paket-Updates.</Empty>
       ) : (
         <div className="max-lg:overflow-x-auto">
           <table className="tbl">

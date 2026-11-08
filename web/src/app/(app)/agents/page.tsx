@@ -1,5 +1,6 @@
 "use client";
 
+import { ACTIVE_LABEL, DATA_LABEL, FETCH_ACTION, FETCH_ALL_ACTION } from "@/lib/terms";
 import { useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
@@ -46,7 +47,7 @@ function TokenStep({ name, token, rotated, onDone }: { name: string; token: stri
       {rotated ? (
         <p className="mb-4 text-xs text-fg2">
           Der Befehl fragt den neuen Token ohne Anzeige ab (<Mono>--stdin</Mono> oder <Mono>--token-file /pfad</Mono> gehen auch), prüft ihn mit
-          einem Test-Report und schreibt ihn atomar nach <Mono>/etc/patchwatch/token</Mono> (root, 0600). Danach:{" "}
+          einer Testmeldung und schreibt ihn atomar nach <Mono>/etc/patchwatch/token</Mono> (root, 0600). Danach:{" "}
           <Mono>sudo systemctl start patchwatch-agent</Mono>.
         </p>
       ) : (
@@ -129,7 +130,7 @@ function RequestState({ h, now, schedule }: { h: Host; now: number; schedule: Se
       <span className="inline-flex items-start gap-1.5 text-warn">
         <Icon name="warn" />
         <span>
-          Keine Antwort seit <RelTime iso={h.report_requested_at} />. Läuft der Check-in-Timer?
+          Keine Antwort seit <RelTime iso={h.report_requested_at} />. Läuft der Timer des Agents?
         </span>
       </span>
     );
@@ -187,14 +188,14 @@ export default function AgentsPage() {
     try {
       await api.post(`/hosts/${h.id}/request-report`, undefined, { silent: true });
       setLimited((l) => ({ ...l, [h.id]: 0 }));
-      toast.success(`${h.name}: Aktualisierung angefordert. Der Report trifft beim nächsten Check-in ein.`);
+      toast.success(`${h.name}: Daten angefordert. Sie treffen innerhalb weniger Minuten ein.`);
       await hosts.reload();
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
         setLimited((l) => ({ ...l, [h.id]: Date.now() + (e.retryAfter ?? 60) * 1000 }));
-        toast.warning(`Für ${h.name} wurde gerade erst aktualisiert. Erneut möglich in ${e.retryAfter ?? 60} Sek.`);
+        toast.warning(`Für ${h.name} wurden gerade erst abgerufen. Erneut möglich in ${e.retryAfter ?? 60} Sek.`);
       } else if (e instanceof ApiError) {
-        toast.error(writeFailure(`Aktualisierung von ${h.name} konnte nicht angefordert werden`, e.status, e.message, e.retryAfter));
+        toast.error(writeFailure(`Daten von ${h.name} konnten nicht angefordert werden`, e.status, e.message, e.retryAfter));
       }
     }
   }
@@ -202,9 +203,9 @@ export default function AgentsPage() {
   async function requestAll() {
     setBusyAll(true);
     try {
-      const r = await api.post<{ requested: number; skipped: number }>("/hosts/request-report", undefined, { what: "Aktualisierung konnte nicht angefordert werden" });
+      const r = await api.post<{ requested: number; skipped: number }>("/hosts/request-report", undefined, { what: "Daten konnten nicht angefordert werden" });
       if (r.requested === 0) toast.info("Kein Agent angefragt: alle wurden in der letzten Minute schon angefragt.");
-      else toast.success(`${r.requested} ${r.requested === 1 ? "Agent" : "Agents"} angefragt${r.skipped > 0 ? `, ${r.skipped} übersprungen (Wartezeit 1 Min.)` : ""}. Die Reports treffen beim nächsten Check-in ein.`);
+      else toast.success(`${r.requested} ${r.requested === 1 ? "Agent" : "Agents"} angefragt${r.skipped > 0 ? `, ${r.skipped} übersprungen (Wartezeit 1 Min.)` : ""}. Die Daten treffen innerhalb weniger Minuten ein.`);
       await hosts.reload();
     } catch {
       /* Der API-Client hat den Fehler als Toast gemeldet. */
@@ -237,7 +238,7 @@ export default function AgentsPage() {
       <PageHeader title="Agents" count={list ? `${list.length} ${list.length === 1 ? "Agent" : "Agents"}` : undefined}>
         <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0}>
           <NavIcon name="refresh" />
-          Alle aktualisieren
+          {FETCH_ALL_ACTION}
         </Button>
         <Button variant="primary" onClick={() => setAdding(true)}>
           <NavIcon name="plus" />
@@ -278,15 +279,15 @@ export default function AgentsPage() {
       ) : (
         <div className="max-xl:overflow-x-auto">
           <table className="tbl stack">
-            <caption>Agents mit Version, letztem Report und Check-in</caption>
+            <caption>Agents mit Version, Zeitpunkt der letzten Daten und letzter Aktivität</caption>
             <thead>
               <tr>
                 <th scope="col"><span className="th-pad">Name</span></th>
                 <th scope="col"><span className="th-pad">Hostname laut Agent</span></th>
                 <th scope="col"><span className="th-pad">Distribution</span></th>
                 <th scope="col"><span className="th-pad">Agent-Version</span></th>
-                <th scope="col"><span className="th-pad">Letzter Report</span></th>
-                <th scope="col"><span className="th-pad">Letzter Check-in</span></th>
+                <th scope="col"><span className="th-pad">{DATA_LABEL}</span></th>
+                <th scope="col"><span className="th-pad">{ACTIVE_LABEL}</span></th>
                 <th scope="col"><span className="th-pad">Aktualisierung</span></th>
                 <th scope="col"><span className="th-pad">Aktionen</span></th>
               </tr>
@@ -302,16 +303,16 @@ export default function AgentsPage() {
                         {h.name}
                       </Link>
                     </td>
-                    <td data-label="Hostname">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch kein Report</span>}</td>
+                    <td data-label="Hostname">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch keine Daten</span>}</td>
                     <td data-label="Distribution">{h.pretty_name ?? <span className="text-fg3">–</span>}</td>
                     <td data-label="Agent-Version">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
-                    <td data-label="Letzter Report"><RelTime iso={h.last_report_at} /></td>
-                    <td data-label="Letzter Check-in"><RelTime iso={h.last_checkin_at} /></td>
+                    <td data-label={DATA_LABEL}><RelTime iso={h.last_report_at} /></td>
+                    <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
                     <td data-label="Aktualisierung" className="max-w-[18rem]"><RequestState h={h} now={now} schedule={settings.data?.report_schedule} /></td>
                     <td data-label="Aktionen">
                       <div className="flex flex-wrap gap-2">
-                        <Button onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name} jetzt aktualisieren`}>
-                          Jetzt aktualisieren
+                        <Button onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
+                          {FETCH_ACTION}
                         </Button>
                         <Button onClick={() => setConfirm({ kind: "rotate", host: h })} aria-label={`Token erneuern für ${h.name}`}>
                           Token erneuern
@@ -329,8 +330,8 @@ export default function AgentsPage() {
         </div>
       )}
       <p className="mt-4 max-w-prose text-xs text-fg3">
-        „Jetzt aktualisieren“ bittet den Agent, beim nächsten Check-in (standardmäßig alle 5 Minuten) einen Report zu senden. Der Server startet nichts
-        auf dem Host: Der Agent fragt nur an und bekommt „Report senden: ja/nein“ zurück.
+        „Daten jetzt abrufen“ bittet den Agent, beim nächsten Kontakt (standardmäßig alle 5 Minuten) neue Daten zu senden. Der Server startet nichts
+        auf dem Host: Der Agent fragt nur an und bekommt „Daten senden: ja/nein“ zurück.
       </p>
 
       <AddDialog open={adding} onClose={() => setAdding(false)} onCreated={() => void hosts.reload()} />

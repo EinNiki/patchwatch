@@ -31,7 +31,7 @@ try {
 
   // 1) Fehler: bleibt stehen (kein Ablauf), Rolle alert, Zusammenfassen ×3 innerhalb von 5 s.
   await page.route("**/api/v1/hosts/request-report", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"error":"interner Detailtext"}' }));
-  const all = page.getByRole("button", { name: "Alle aktualisieren" });
+  const all = page.getByRole("button", { name: "Alle Daten abrufen" });
   for (let i = 0; i < 3; i++) { await all.click(); await sleep(150); }
   const err = region.getByRole("alert");
   ok((await err.count()) === 1, "gleiche Fehlermeldung wird zusammengefasst (1 Toast)");
@@ -48,7 +48,7 @@ try {
 
   // 4) Höchstens 4 sichtbar, der Rest wartet.
   await page.route("**/api/v1/hosts/*/request-report", (r) => r.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
-  const per = page.getByRole("button", { name: /jetzt aktualisieren$/ }).and(page.locator(":enabled"));
+  const per = page.getByRole("button", { name: /Daten jetzt abrufen$/ }).and(page.locator(":enabled"));
   const n = await per.count();
   for (let i = 0; i < n; i++) { await per.nth(i).click(); await sleep(120); }
   const shown = await region.locator("li").count();
@@ -80,7 +80,7 @@ try {
   const rm = await open(browser, { reducedMotion: "reduce" });
   await rm.goto(`${base}/agents`);
   await rm.route("**/api/v1/hosts/request-report", (r) => r.fulfill({ status: 500, body: "{}" }));
-  await rm.getByRole("button", { name: "Alle aktualisieren" }).click();
+  await rm.getByRole("button", { name: "Alle Daten abrufen" }).click();
   const dur = await rm.locator("li.toast").first().evaluate((e) => getComputedStyle(e).transitionDuration);
   ok(dur.split(",").every((d) => parseFloat(d) <= 0.001), `reduzierte Bewegung: transition-duration ${dur}`);
   await rm.context().close();

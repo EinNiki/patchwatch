@@ -59,13 +59,20 @@ Tests: `sh agent/tests/install_test.sh` (läuft in der CI; ohne Root und Netz, m
 systemd-`LoadCredential` an den Dienst `patchwatch` (kein `DynamicUser`) gereicht.
 Konfiguration: `/etc/patchwatch/agent.toml`, Beispiel in `agent/dist/agent.toml.example`.
 
-### Check-in und „Jetzt aktualisieren“
+### Kurzer Kontakt (Check-in) und „Daten jetzt abrufen“
+
+**Begriffe in der Oberfläche:** „Daten zuletzt“ ist der Zeitpunkt der letzten vollständigen Meldung des Agents (intern „Report“:
+Kernel, Pakete, Updates; täglich und auf Anforderung). „Agent zuletzt aktiv“ ist der Zeitpunkt des letzten kurzen Kontakts
+(intern „Check-in“: der Agent fragt nur, ob neue Daten gewünscht sind, und überträgt keine Daten; alle paar Minuten).
+„Daten jetzt abrufen“ (früher „Jetzt aktualisieren“) fordert eine Meldung an. API, Felder, Routen und Logs behalten die
+Wörter „report“ und „checkin“; nur die sichtbaren Texte ändern sich. Auf Touchgeräten steht die Erklärung hinter dem
+Info-Symbol neben der Beschriftung (aufklappbar, auch per Tastatur).
 
 Ein zweiter systemd-Timer (`patchwatch-agent-checkin.timer`, minütlich) startet `patchwatch-agent checkin`. Der Agent
-wartet per Long-Poll (`checkin_wait_secs`, Standard 40): „Jetzt aktualisieren“ erreicht den Agent so binnen Sekunden. Mit `checkin_wait_secs = 0` gilt stattdessen das Intervall aus `agent.toml` (`checkin_interval_secs`, Standard 300, 60–86400; `checkin_enabled = false`
+wartet per Long-Poll (`checkin_wait_secs`, Standard 40): „Daten jetzt abrufen“ erreicht den Agent so binnen Sekunden. Mit `checkin_wait_secs = 0` gilt stattdessen das Intervall aus `agent.toml` (`checkin_interval_secs`, Standard 300, 60–86400; `checkin_enabled = false`
 schaltet ihn ab) und fragt `POST /api/v1/agent/checkin`. Die Antwort ist ausschließlich `{"report_requested": true|false}`:
 **keine Befehle, Pfade oder Skripte vom Server, kein offener Port am Host.** Nur bei `true` sendet der Agent einen Report.
-In der UI (Seite „Agents“) fordert „Jetzt aktualisieren“ bzw. „Alle aktualisieren“ einen Report an; ein „Ja“ wird pro
+In der UI (Seite „Agents“) fordert „Daten jetzt abrufen“ bzw. „Alle Daten abrufen“ vollständige Daten an; ein „Ja“ wird pro
 Anforderung genau einmal ausgegeben (Wiederholung nach 10 Minuten ohne Report), pro Host höchstens eine Anforderung je Minute.
 
 Exit-Codes: `1` Konfiguration, `2` Erfassung, `3` Server nicht erreichbar, `4` Server lehnt ab.
@@ -134,7 +141,7 @@ Umgebungsvariablen `PATCHWATCH_*` (siehe `docker-compose.yml`). Wichtige Werte:
 
 Verhalten: Ein Host gilt als **stale**, wenn er sich länger als 26 h nicht gemeldet hat. Jeder
 Statuswechsel erzeugt ein Event und (bei konfiguriertem ntfy) sofort eine Benachrichtigung; zusätzlich
-gibt es eine Tageszusammenfassung zur konfigurierten Uhrzeit. Die Report-Historie wird nach
+gibt es eine Tageszusammenfassung zur konfigurierten Uhrzeit. Der Verlauf der Datenmeldungen wird nach
 `report_retention_days` per täglichem Cleanup-Job gelöscht.
 
 ### Warum kein Redis?
@@ -388,12 +395,12 @@ Feed-Zustand je Quelle („veraltet seit …“).
   Ist die zuständige Quelle eingeschränkt, steht über der Liste ein Hinweis (z. B. „Ubuntu: Offene Fälle nicht vollständig
   geladen (API überlastet, seit 22:08) …“), die Kachel „Offen“ trägt ein Warnsymbol und „kann unvollständig sein“; nie
   „alles gut“. Proxmox-Hosts bleiben „unbekannt, manuell prüfen“ (nie grün).
-- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, letztem Report und Check-in; „Jetzt aktualisieren“,
+- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, „Daten zuletzt“ und „Agent zuletzt aktiv“; „Daten jetzt abrufen“,
   „Token erneuern“, Löschen mit Bestätigung. „Agent hinzufügen“ zeigt den Token einmalig und einen Installationsbefehl
   **ohne** Token (`install.sh` fragt ihn ohne Echo ab).
 - **Benachrichtigungen**: ntfy, Matrix, Gotify, Discord und „Live im Browser“, je mit Zugangsdaten (write-only),
   Ereignisauswahl und Testnachricht.
-- **Einstellungen**: Passwort ändern, Farbschema, Aufbewahrung der Report-Historie (7–3650 Tage).
+- **Einstellungen**: Passwort ändern, Farbschema, Aufbewahrung des Verlaufs der Datenmeldungen (7–3650 Tage).
 - Änderungen erscheinen live (WebSocket, siehe oben) ohne Neuladen; Meldungen des Browser-Kanals und Ergebnisse von Aktionen als Toast (oben rechts).
 
 Die Matrix über Hosts und CVEs kommt später als Umschalter „Liste | Matrix“ auf der CVE-Seite.

@@ -28,7 +28,7 @@ const pages = (process.env.PW_PAGES ?? DEFAULT_PAGES).split(",").map((p) => p.sp
 const ACTIONS = {
   "agents-waiting": async (page) => {
     // Ein früherer Durchlauf kann die Anforderung schon gesetzt haben (Button dann gesperrt).
-    const btn = page.getByRole("button", { name: "web-01 jetzt aktualisieren" });
+    const btn = page.getByRole("button", { name: "web-01: Daten jetzt abrufen" });
     if (await btn.isEnabled()) await btn.click();
     await page.getByText(/wartet auf Agent|Keine Antwort seit/).first().waitFor();
   },

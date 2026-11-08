@@ -30,7 +30,7 @@ impl HostStatus {
 
     pub fn label_de(s: &str) -> &'static str {
         match s {
-            "pending" => "noch kein Report",
+            "pending" => "noch keine Daten",
             "stale" => "meldet sich nicht mehr",
             "cve_vulnerable" => "verwundbar (CVE)",
             "security_updates" => "Sicherheitsupdates offen",

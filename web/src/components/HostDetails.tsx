@@ -1,5 +1,7 @@
 "use client";
 
+import { InfoTip } from "@/components/InfoTip";
+import { ACTIVE_LABEL, ACTIVE_TIP, DATA_LABEL, DATA_TIP } from "@/lib/terms";
 import { absTime, kernelBase } from "@/lib/format";
 import type { Feed, Host } from "@/lib/types";
 import type { FeedNotice } from "@/lib/hostCves";
@@ -10,10 +12,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { FEED_STATE } from "@/components/FeedSources";
 import { Icon } from "@/components/Icons";
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Fact({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <>
-      <dt className="text-xs text-fg3 @sm:text-sm">{label}</dt>
+      <dt className="text-xs text-fg3 @sm:text-sm">
+        {label}
+        {hint ? <InfoTip label={label} text={hint} /> : null}
+      </dt>
       <dd className="m-0 mb-1.5 min-w-0 [overflow-wrap:anywhere] @sm:mb-0">{children}</dd>
     </>
   );
@@ -74,10 +79,10 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
       <Fact label="Uptime">
         <Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} withBoot />
       </Fact>
-      <Fact label="Letzter Report">
+      <Fact label={DATA_LABEL} hint={DATA_TIP}>
         <RelTime iso={h.last_report_at} /> <span className="text-fg3">· {absTime(h.last_report_at)}</span>
       </Fact>
-      <Fact label="Letzter Check-in">
+      <Fact label={ACTIVE_LABEL} hint={ACTIVE_TIP}>
         {h.last_checkin_at ? (
           <>
             <RelTime iso={h.last_checkin_at} /> <span className="text-fg3">· {absTime(h.last_checkin_at)}</span>

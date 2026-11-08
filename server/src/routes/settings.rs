@@ -67,7 +67,7 @@ pub async fn get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>>
         "report_every_hours_min": schedule::REPORT_EVERY_HOURS_RANGE.start(),
         "report_every_hours_max": schedule::REPORT_EVERY_HOURS_RANGE.end(),
         // Das Check-in-Intervall steht in der agent.toml und wird dort geändert; hier nur zur Anzeige.
-        "checkin_interval_hint": "Das Check-in-Intervall der Agents steht in deren agent.toml (Standard: alle 15 Minuten).",
+        "checkin_interval_hint": "Wie oft sich der Agent meldet, steht in dessen agent.toml (Standard: alle 15 Minuten).",
     })))
 }
 

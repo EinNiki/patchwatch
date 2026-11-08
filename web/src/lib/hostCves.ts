@@ -119,7 +119,7 @@ export function announcedText(info: FixInfo, updates: readonly UpdateItem[] | nu
   const lines = [`${who} führt die CVE noch als „Fix in Arbeit“${v ? ` (voraussichtlich in ${v})` : ""}.`];
   const apt = aptCandidate(updates, v);
   if (apt) lines.push(`Auf diesem Host ist ${v} laut apt verfügbar (${apt.origin}).`);
-  else if (v && updates) lines.push(`Laut letztem Report bietet apt auf diesem Host ${v} noch nicht an.`);
+  else if (v && updates) lines.push(`Laut den zuletzt gemeldeten Daten bietet apt auf diesem Host ${v} noch nicht an.`);
   lines.push("Beide Angaben können zeitversetzt sein. Als bestätigt gilt der Fix erst, wenn der Tracker ihn als veröffentlicht führt.");
   return { lines, aptAvailable: apt !== null };
 }

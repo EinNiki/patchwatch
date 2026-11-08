@@ -38,7 +38,7 @@ impl ReportSchedule {
                 Ok(())
             }
             Self::Interval { .. } => Err(format!(
-                "Report-Intervall: {} bis {} Stunden",
+                "Abruf-Intervall: {} bis {} Stunden",
                 REPORT_EVERY_HOURS_RANGE.start(),
                 REPORT_EVERY_HOURS_RANGE.end()
             )),

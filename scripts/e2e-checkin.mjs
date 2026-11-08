@@ -37,10 +37,10 @@ ok(/Agent-Version|0\./.test(await row.textContent()), "Zeile zeigt Agent-Version
 // Check-in ohne Anforderung: nichts passiert.
 agent("checkin");
 ok(reports() === base, "Check-in ohne Anforderung sendet keinen Report");
-await row.getByRole("button", { name: "e2e-agent jetzt aktualisieren" }).click();
+await row.getByRole("button", { name: "e2e-agent: Daten jetzt abrufen" }).click();
 await row.getByText("wartet auf Agent").waitFor({ timeout: 5000 });
 ok(true, 'UI zeigt „wartet auf Agent …“');
-ok(await row.getByRole("button", { name: "e2e-agent jetzt aktualisieren" }).isDisabled(), "Button ist während des Wartens gesperrt");
+ok(await row.getByRole("button", { name: "e2e-agent: Daten jetzt abrufen" }).isDisabled(), "Button ist während des Wartens gesperrt");
 
 // Check-in-Intervall zurücksetzen und Agent fragen lassen.
 execFileSync("rm", ["-f", `${STATE}/last-checkin`]);
@@ -50,7 +50,7 @@ await row.getByText("wartet auf Agent").waitFor({ state: "detached", timeout: 80
 ok(true, "Anzeige „wartet“ verschwindet live (ohne Neuladen)");
 ok(reports() === base + 1, `genau ein weiterer Report (${reports()} statt ${base + 1})`);
 ok(await page.evaluate(() => window.__noReload === true), "Seite wurde nicht neu geladen");
-ok(/gerade eben/.test(await row.textContent()), "Letzter Report: gerade eben");
+ok(/gerade eben/.test(await row.textContent()), "Daten zuletzt: gerade eben");
 
 // Zweiter Check-in: keine Anforderung mehr → kein Report.
 execFileSync("rm", ["-f", `${STATE}/last-checkin`]);
@@ -58,7 +58,7 @@ agent("checkin");
 ok(reports() === base + 1, "weiterer Check-in sendet nichts");
 
 // Rate-Limit: sofort erneut anfordern → 429 → Hinweis.
-await row.getByRole("button", { name: "e2e-agent jetzt aktualisieren" }).click();
+await row.getByRole("button", { name: "e2e-agent: Daten jetzt abrufen" }).click();
 await page.getByText(/Erneut möglich in \d+ Sek/).waitFor({ timeout: 5000 });
 ok(true, "Zweite Anforderung innerhalb von 60 s wird abgelehnt und erklärt");
 await b.close();
