@@ -80,7 +80,8 @@ try {
   // Agents.
   await page.goto(`${base}/agents`);
   await page.locator("table.tbl tbody tr").first().waitFor();
-  await gaps("Agents", "table.tbl");
+  // Agents: Name, Hostname und Distribution nehmen den freien Platz auf (kein gleicher Abstand dort); geprüft in e2e-agents.mjs.
+  await gaps("Agents", "table.tbl", { assertGaps: false });
 
   // CVE-Seite mit Mock: Hostnamen als Links.
   const hostsMock = [...realHosts, ...["web-02", "db-01", "db-02", "app-01"].map((name, i) => ({ ...real, id: 9001 + i, name }))];

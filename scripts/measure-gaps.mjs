@@ -1,6 +1,7 @@
 // Misst den sichtbaren Abstand zwischen dem Inhalt benachbarter Spalten (rechter Rand des gefüllten Inhalts der Spalte bis
 // linker Rand des Inhalts der nächsten) je Zeile; Ergebnis: Median je Spaltenpaar. Nur Lesezugriffe.
 //   node scripts/measure-gaps.mjs [Pfad=/] [Breiten=1440,1920]
+//   PW_SCHEDULE=1: /settings wird mit einem Server-Zeitplan gemockt (lange „Aktualisierung“-Zelle auf /agents).
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { measure } from "./lib/gaps.mjs";
@@ -21,6 +22,11 @@ try {
   await page.getByLabel("Passwort").fill(pw);
   await page.getByRole("button", { name: "Anmelden" }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+  if (process.env.PW_SCHEDULE) {
+    const st = await page.evaluate(() => fetch("/api/v1/settings").then((r) => r.json()));
+    const sched = { ...st.report_schedule, mode: "interval", every_hours: 6, next_run: new Date(Date.now() + 3 * 3600e3).toISOString() };
+    await page.route(/\/api\/v1\/settings$/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...st, report_schedule: sched }) }));
+  }
   for (const w of widths) {
     await page.setViewportSize({ width: w, height: 900 });
     await page.goto(`${base}${path}`);

@@ -1,7 +1,7 @@
 "use client";
 
 import { ACTIVE_LABEL, ACTIVE_TIP, DATA_LABEL, DATA_TIP, FETCH_ACTION, FETCH_ALL_ACTION } from "@/lib/terms";
-import { useState } from "react";
+import { useState, useId } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
@@ -18,6 +18,8 @@ import { writeFailure } from "@/lib/apiErrors";
 import { toast } from "@/lib/toastStore";
 import { Icon, NavIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
+import { Popover } from "@/components/Popover";
+import { RowMenu } from "@/components/RowMenu";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { Mono } from "@/components/Version";
@@ -121,56 +123,83 @@ function AddDialog({ open, onClose, onCreated }: { open: boolean; onClose: () =>
   );
 }
 
-/** „wartet auf Agent …“ solange die Anforderung offen ist; nach 10 Min. ein Hinweis statt endlosem Warten. */
-function RequestState({ h, now, schedule }: { h: Host; now: number; schedule: Settings["report_schedule"] | undefined }) {
-  if (!h.report_requested_at) return <NextUpdate schedule={schedule} now={now} />;
+/** Zustand einer offenen Anforderung unter „Zuletzt gemeldet“: „wartet auf Agent …“, nach 10 Min. ein Hinweis statt endlosem Warten. */
+function WaitState({ h, now }: { h: Host; now: number }) {
+  if (!h.report_requested_at) return null;
   const waitedMs = now - new Date(h.report_requested_at).getTime();
   if (waitedMs > NO_ANSWER_MS) {
     return (
-      <span className="inline-flex items-start gap-1.5 text-warn">
+      <span className="flex items-center gap-1 text-xs text-warn" title="Läuft der Timer des Agents?">
         <Icon name="warn" />
-        <span>
-          Keine Antwort seit <RelTime iso={h.report_requested_at} />. Läuft der Timer des Agents?
-        </span>
+        Keine Antwort seit <RelTime iso={h.report_requested_at} />
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 text-fg2" role="status">
+    <span className="flex items-center gap-1 text-xs text-fg2" role="status">
       <Icon name="clock" />
-      wartet auf Agent …<span className="text-fg3"> seit <RelTime iso={h.report_requested_at} /></span>
+      wartet auf Agent …
     </span>
   );
 }
 
-/** Wann kommt der nächste planmäßige Report? Zeitplan des Servers, sonst der tägliche Timer des Agents. */
-function NextUpdate({ schedule, now }: { schedule: Settings["report_schedule"] | undefined; now: number }) {
-  if (!schedule) return <span className="text-fg3">–</span>;
+/** Eine ruhige Zeile über der Tabelle: wann melden sich die Agents? Server-Zeitplan, sonst der tägliche Timer des Agents. */
+function ScheduleLine({ schedule, now }: { schedule: Settings["report_schedule"] | undefined; now: number }) {
+  const link = (
+    <Link href="/settings#sched-h" className="underline">
+      Einstellungen → Zeitpläne
+    </Link>
+  );
+  if (!schedule) return null;
   if (schedule.mode === "off") {
     return (
-      <span className="text-fg2">
-        Agent-Timer: täglich ca. 12:00 <span className="text-fg3">(Uhrzeit des Hosts)</span>
-        <span className="block text-xs text-fg3">Kein Server-Zeitplan; unter Einstellungen → Zeitpläne einstellbar.</span>
-      </span>
+      <p className="m-0 mb-2 text-sm text-fg2" data-testid="schedule-line">
+        Der Agent meldet täglich um ca. 12:00 (Uhrzeit des Hosts). Der Server-Zeitplan ist unter {link} einstellbar.
+      </p>
     );
   }
   const plan = schedule.mode === "interval" ? `alle ${schedule.every_hours} Std.` : `täglich ${schedule.at} (${schedule.tz})`;
-  if (!schedule.next_run) {
-    return (
-      <span className="text-fg2">
-        Zeitplan: {plan}
-        <span className="block text-xs text-fg3">Der erste Lauf folgt nach dem nächsten Zeitplan-Durchlauf.</span>
-      </span>
-    );
-  }
-  const soon = new Date(schedule.next_run).getTime() <= now + 60_000;
+  const next = schedule.next_run ? (new Date(schedule.next_run).getTime() <= now + 60_000 ? ", nächster Lauf gleich" : `, nächster Lauf ${relTime(schedule.next_run, now)}`) : "";
   return (
-    <span className="text-fg2">
-      {soon ? "gleich" : <>nächste <time dateTime={schedule.next_run} title={absTime(schedule.next_run)}>{relTime(schedule.next_run, now)}</time></>}
-      <span className="block text-xs text-fg3">
-        {absTime(schedule.next_run)} · Zeitplan {plan}
-      </span>
-    </span>
+    <p className="m-0 mb-2 text-sm text-fg2" data-testid="schedule-line">
+      Server-Zeitplan: {plan}
+      {schedule.next_run ? <time dateTime={schedule.next_run} title={absTime(schedule.next_run)}>{next}</time> : null}. Zusätzlich meldet der Agent täglich um ca. 12:00 (Uhrzeit des Hosts). Einstellbar unter {link}.
+    </p>
+  );
+}
+
+/** Info-Symbol neben den Abruf-Knöpfen: die frühere Erklärung unter der Tabelle, jetzt bei Bedarf (Maus, Tastatur, Touch). */
+function FetchInfo() {
+  return (
+    <Popover
+      label="Erklärung zu „Daten jetzt abrufen“"
+      width={320}
+      align="end"
+      sheet={false}
+      trigger={(t) => (
+        <button
+          type="button"
+          ref={t.ref}
+          aria-haspopup={t["aria-haspopup"]}
+          aria-expanded={t["aria-expanded"]}
+          aria-controls={t["aria-controls"]}
+          aria-label="Erklärung zu „Daten jetzt abrufen“"
+          title="„Daten jetzt abrufen“ bittet den Agent, beim nächsten Kontakt neue Daten zu senden."
+          onClick={t.toggle}
+          className="inline-flex size-8 items-center justify-center rounded-full text-fg3 hover:text-fg max-md:size-11"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="8" cy="8" r="6.2" />
+            <path d="M8 7.2v4M8 4.8v.1" />
+          </svg>
+        </button>
+      )}
+    >
+      <p className="m-0 text-xs text-fg2">
+        „Daten jetzt abrufen“ bittet den Agent, beim nächsten Kontakt (standardmäßig alle 5 Minuten) neue Daten zu senden. Der Server startet nichts auf dem Host:
+        Der Agent fragt nur an und bekommt „Daten senden: ja/nein“ zurück.
+      </p>
+    </Popover>
   );
 }
 
@@ -183,6 +212,8 @@ export default function AgentsPage() {
   const [confirm, setConfirm] = useState<{ kind: "rotate" | "delete"; host: Host } | null>(null);
   const [limited, setLimited] = useState<Record<number, number>>({});
   const [busyAll, setBusyAll] = useState(false);
+  const [more, setMore] = useState(false);
+  const moreId = useId();
 
   async function request(h: Host) {
     try {
@@ -240,6 +271,7 @@ export default function AgentsPage() {
           <NavIcon name="refresh" />
           {FETCH_ALL_ACTION}
         </Button>
+        <FetchInfo />
         <Button variant="primary" onClick={() => setAdding(true)}>
           <NavIcon name="plus" />
           Agent hinzufügen
@@ -247,13 +279,20 @@ export default function AgentsPage() {
       </PageHeader>
 
       <section aria-labelledby="agent-update" className="mb-3">
-        <h2 id="agent-update" className="font-semibold text-fg2">Agent aktualisieren</h2>
-        <p className="mt-2 text-fg2">
-          Auf dem Host ausführen (Server-URL und Token bleiben erhalten):
+        <h2 id="agent-update" className="sr-only">Agent aktualisieren</h2>
+        <ScheduleLine schedule={settings.data?.report_schedule} now={now} />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-fg2">
+          <span>Agent aktualisieren:</span>
+          <CodeField inline text="sudo patchwatch-agent-update" label="Befehl kopieren" />
+        </div>
+        <p className="m-0 mt-1 flex flex-wrap items-center gap-x-2 text-sm text-fg3">
+          <span>Ältere Agents aktualisierst du einmalig mit dem Installationsbefehl aus „Agent hinzufügen“.</span>
+          <button type="button" aria-expanded={more} aria-controls={moreId} onClick={() => setMore(!more)} className="inline-flex min-h-6 items-center px-1 text-accent underline max-md:min-h-11">
+            {more ? "Weniger" : "Mehr"}
+          </button>
         </p>
-        <CodeField className="mt-1" inline text="sudo patchwatch-agent-update" label="Befehl kopieren" />
-        <p className="mt-2 text-fg3">
-          Agents, die vor diesem Befehl installiert wurden, aktualisierst du einmalig mit dem Installationsbefehl aus „Agent hinzufügen“ (ohne neuen Token; vorhandene Einstellungen bleiben). Mit <code className="mono">--auto-update</code> prüft der Host danach wöchentlich selbst.
+        <p id={moreId} hidden={!more} className="m-0 mt-1 max-w-prose text-xs text-fg3">
+          Der Befehl läuft ohne neuen Token; vorhandene Einstellungen bleiben erhalten. Mit <code className="mono">--auto-update</code> prüft der Host danach wöchentlich selbst, ob eine neue Version vorliegt. Server-URL und Token bleiben beim Befehl <code className="mono">sudo patchwatch-agent-update</code> erhalten.
         </p>
       </section>
 
@@ -282,15 +321,13 @@ export default function AgentsPage() {
             <caption>Agents mit Version, Zeitpunkt der letzten Daten und letzter Aktivität</caption>
             <thead>
               <tr>
-                <th scope="col"><span className="th-pad">Name</span></th>
-                <th scope="col"><span className="th-pad">Hostname laut Agent</span></th>
-                <th scope="col"><span className="th-pad">Distribution</span></th>
+                <th scope="col" className="share"><span className="th-pad">Name</span></th>
+                <th scope="col" className="share"><span className="th-pad">Hostname laut Agent</span></th>
+                <th scope="col" className="share"><span className="th-pad">Distribution</span></th>
                 <th scope="col"><span className="th-pad">Agent-Version</span></th>
                 <th scope="col"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
                 <th scope="col"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
-                <th scope="col"><span className="th-pad">Aktualisierung</span></th>
-                <th scope="col"><span className="th-pad">Aktionen</span></th>
-                <th scope="col" className="fill" aria-hidden="true" />
+                <th scope="col"><span className="th-pad justify-end">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -299,31 +336,33 @@ export default function AgentsPage() {
                 const coolingDown = (limited[h.id] ?? 0) > now;
                 return (
                   <tr key={h.id}>
-                    <td className="cell-primary">
+                    <td className="cell-primary share">
                       <Link href={`/hosts/${h.id}`} className="whitespace-nowrap font-semibold">
                         {h.name}
                       </Link>
                     </td>
-                    <td data-label="Hostname">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch keine Daten</span>}</td>
-                    <td data-label="Distribution">{h.pretty_name ?? <span className="text-fg3">–</span>}</td>
+                    <td data-label="Hostname" className="share">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch keine Daten</span>}</td>
+                    <td data-label="Distribution" className="share">{h.pretty_name ?? <span className="text-fg3">–</span>}</td>
                     <td data-label="Agent-Version">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
-                    <td data-label={DATA_LABEL}><RelTime iso={h.last_report_at} /></td>
+                    <td data-label={DATA_LABEL}>
+                      <RelTime iso={h.last_report_at} />
+                      <WaitState h={h} now={now} />
+                    </td>
                     <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
-                    <td data-label="Aktualisierung" className="wrap w-[18rem] max-w-[18rem]"><RequestState h={h} now={now} schedule={settings.data?.report_schedule} /></td>
                     <td data-label="Aktionen">
-                      <div className="flex flex-wrap gap-2">
-                        <Button onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
+                      <div className="flex items-center justify-end gap-2 max-md:justify-start">
+                        <Button className="min-w-0" onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
                           {FETCH_ACTION}
                         </Button>
-                        <Button onClick={() => setConfirm({ kind: "rotate", host: h })} aria-label={`Token erneuern für ${h.name}`}>
-                          Token erneuern
-                        </Button>
-                        <Button variant="danger" onClick={() => setConfirm({ kind: "delete", host: h })} aria-label={`Agent ${h.name} löschen`}>
-                          Löschen
-                        </Button>
+                        <RowMenu
+                          label={`Weitere Aktionen für ${h.name}`}
+                          items={[
+                            { label: "Token erneuern", aria: `Token erneuern für ${h.name}`, run: () => setConfirm({ kind: "rotate", host: h }) },
+                            { label: "Löschen", aria: `Agent ${h.name} löschen`, run: () => setConfirm({ kind: "delete", host: h }), danger: true },
+                          ]}
+                        />
                       </div>
                     </td>
-                    <td className="fill" aria-hidden="true" />
                   </tr>
                 );
               })}
@@ -331,11 +370,6 @@ export default function AgentsPage() {
           </table>
         </div>
       )}
-      <p className="mt-4 max-w-prose text-xs text-fg3">
-        „Daten jetzt abrufen“ bittet den Agent, beim nächsten Kontakt (standardmäßig alle 5 Minuten) neue Daten zu senden. Der Server startet nichts
-        auf dem Host: Der Agent fragt nur an und bekommt „Daten senden: ja/nein“ zurück.
-      </p>
-
       <AddDialog open={adding} onClose={() => setAdding(false)} onCreated={() => void hosts.reload()} />
       <Dialog open={shown !== null} title={`Neuer Token für ${shown?.name ?? ""}`} onClose={() => setShown(null)} dismissible={false}>
         {shown ? <TokenStep name={shown.name} token={shown.token} rotated onDone={() => setShown(null)} /> : null}
