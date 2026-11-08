@@ -84,9 +84,12 @@ for (const scheme of schemes) {
           const t = document.querySelector("table.tbl");
           if (!t) return null;
           const r = t.getBoundingClientRect();
-          return { top: r.top + window.scrollY, h: r.height, page: document.documentElement.scrollHeight };
+          // Liegt die Tabelle in einem horizontalen Scrollbehälter (schmale Fenster), kann der Kopf dort konstruktionsbedingt nicht fest sein.
+          const wrapped = [...(function* () { for (let e = t.parentElement; e && e !== document.body; e = e.parentElement) yield e; })()].some((e) => /auto|scroll/.test(getComputedStyle(e).overflowX));
+          return { top: r.top + window.scrollY, h: r.height, page: document.documentElement.scrollHeight, wrapped };
         });
-        if (info && info.h > 700) {
+        // Nur prüfen, wenn die Seite so weit scrollen kann; sonst klemmt der Browser das Scrollen und der Kopf steht legitim tiefer.
+        if (info && !info.wrapped && info.h > 700 && info.page - 900 >= info.top + 300) {
           await page.evaluate((y) => window.scrollTo(0, y + 300), info.top);
           await page.waitForTimeout(150);
           const th = await page.evaluate(() => Math.round(document.querySelector("table.tbl th")?.getBoundingClientRect().top ?? -999));
