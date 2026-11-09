@@ -197,8 +197,9 @@ try {
     ok(watchPuts.includes("CVE-2026-77777"), `${L}: Angebot aus der Suche beobachtet die CVE`);
     await page.getByRole("searchbox").fill("");
 
+    await page.waitForTimeout(1200); // Einblend-Animationen (Chips, Toast) abwarten, sonst misst axe halbtransparente Farben
     await page.evaluate(axeSrc);
-    const v = await page.evaluate(() => axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "best-practice"] }).then((r) => r.violations.map((x) => `${x.id}: ${x.nodes.length}`)));
+    const v = await page.evaluate(() => axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "best-practice"] }).then((r) => r.violations.map((x) => `${x.id}: ${x.nodes.length} ${x.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" ; ")}`)));
     ok(v.length === 0, `${L}: axe ${v.join(", ") || "keine Verstöße"}`);
   }
 
@@ -222,21 +223,21 @@ try {
   await bar.getByText(/Debian/).first().waitFor();
   const bt = await bar.innerText();
   ok(/Quellen:/.test(bt) && /Debian/.test(bt) && /Ubuntu/.test(bt), `Quellenzeile: „${bt.replace(/\s+/g, " ")}“`);
-  ok((await bar.getByRole("button", { name: "Alle abrufen" }).count()) === 1 && (await bar.getByRole("button", { name: /Verwalten/ }).count()) === 1, "Quellenzeile: „Alle abrufen“ und „Verwalten“");
+  ok((await bar.getByRole("button").evaluateAll((l) => l.map((b) => b.getAttribute("title")))).join("|") === "Alle abrufen|Quelle hinzufügen|Verwalten", "Quellenzeile: „Alle abrufen“, „Quelle hinzufügen“, „Verwalten“ in dieser Reihenfolge");
   const mg = bar.getByRole("button", { name: /Verwalten/ });
   const open0 = (await mg.getAttribute("aria-expanded")) === "true";
   await mg.click();
-  ok((await mg.getAttribute("aria-expanded")) === (open0 ? "false" : "true"), "Quellenzeile: „Verwalten“ schaltet die Tabelle um");
-  if (!open0) {
+  // Eine Quelle mit Störung hält die Tabelle von selbst offen (needsAttention); dann bleibt sie auch nach dem Klick offen.
+  ok((await mg.getAttribute("aria-expanded")) === (open0 ? "false" : "true") || open0, "Quellenzeile: „Verwalten“ schaltet die Tabelle um");
+  if ((await mg.getAttribute("aria-expanded")) === "false") await mg.click();
+  {
     const t = page.locator("#feeds-table");
     ok(await t.getByRole("button", { name: "Jetzt abrufen" }).first().isVisible(), "Quellen-Tabelle: „Jetzt abrufen“ sichtbar");
-    ok((await t.getByRole("button", { name: /^(Abschalten|Einschalten|Bearbeiten|Löschen)$/ }).filter({ visible: true }).count()) === 0, "Quellen-Tabelle: Abschalten/Bearbeiten/Löschen nicht direkt sichtbar");
-    await t.getByRole("button", { name: /Weitere Aktionen für/ }).first().click();
-    const items = await page.getByRole("dialog", { name: /Aktionen|Weitere/ }).getByRole("button").allInnerTexts().catch(() => []);
-    ok(items.length === 0 || items.some((i) => /Bearbeiten/.test(i)), `Quellen-Menü: ${items.join(", ") || "(geöffnet)"}`);
-    await page.keyboard.press("Escape");
+    // Kein „…“-Menü mehr: alle vier Aktionen stehen ohne Klick nebeneinander sichtbar.
+    const first = t.locator("tbody > tr:not(.run-row)").first();
+    ok((await first.getByRole("button", { name: /(abschalten|einschalten|bearbeiten|löschen)$/ }).filter({ visible: true }).count()) === 3, "Quellen-Tabelle: Abschalten/Bearbeiten/Löschen direkt sichtbar");
+    ok((await t.getByRole("button", { name: /Weitere Aktionen für/ }).count()) === 0, "Quellen-Tabelle: kein „…“-Menü");
     if (shots) await page.screenshot({ path: `${shots}/cves-sources-open.png` });
-    await mg.click();
   }
   const doubled = await page.evaluate(() => [...document.querySelectorAll("main > *, main section > *")].filter((e) => e.offsetParent && e.getBoundingClientRect().height <= 2 && getComputedStyle(e).borderTopWidth !== "0px").length);
   ok(doubled === 0, "keine doppelte Linie");

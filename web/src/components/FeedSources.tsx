@@ -10,7 +10,6 @@ import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
 import { Icon, NavIcon } from "@/components/Icons";
-import { RowMenu } from "@/components/RowMenu";
 import { useStoredFlag } from "@/lib/useStoredFlag";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
@@ -77,7 +76,7 @@ function DetailsCell({ feed, open, onToggle }: { feed: Feed; open: boolean; onTo
         ))}
       </div>
       {lines.length > VISIBLE_DETAIL_LINES ? (
-        <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} aria-label={`${feed.label}: Details ${open ? "ausblenden" : "anzeigen"}`} className="inline-flex min-h-6 items-center self-start text-accent underline-offset-2 hover:underline max-md:min-h-11">
+        <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} aria-label={`${feed.label}: Details ${open ? "ausblenden" : "anzeigen"}`} className="inline-flex min-h-6 items-center self-start text-accent underline-offset-2 hover:underline max-lg:min-h-11">
           {open ? "Details ausblenden" : "Details anzeigen"}
         </button>
       ) : null}
@@ -240,10 +239,11 @@ export function FeedSources() {
     }
   }
 
-  async function toggle(f: Feed) {
+  /** Schaltet eine Quelle ein oder aus (ohne Rückfrage); der Toast bietet „Rückgängig“ an. */
+  async function setEnabled(f: Feed, enabled: boolean, undo = true) {
     try {
-      await api.put(`/feeds/${f.source}`, { enabled: !f.enabled }, { what: `${f.label} konnte nicht geändert werden` });
-      toast.success(`${f.label} ${f.enabled ? "deaktiviert" : "aktiviert"}.`);
+      await api.put(`/feeds/${f.source}`, { enabled }, { what: `${f.label} konnte nicht geändert werden` });
+      toast.success(`${f.label} ${enabled ? "aktiviert" : "deaktiviert"}.`, undo ? { action: { label: "Rückgängig", onClick: () => void setEnabled(f, !enabled, false) } } : undefined);
       await feeds.reload();
     } catch {
       /* Der API-Client hat den Fehler als Toast gemeldet. */
@@ -276,8 +276,8 @@ export function FeedSources() {
       <h2 id="feeds-h" className="sr-only">
         CVE-Quellen
       </h2>
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" data-testid="sources-bar">
-        <p className="m-0 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="mb-2 flex items-center gap-x-4 gap-y-2 text-sm max-[640px]:flex-wrap" data-testid="sources-bar">
+        <p className="m-0 flex min-w-0 flex-1 flex-wrap max-[640px]:basis-full items-center gap-x-3 gap-y-1">
           <span className="text-fg2">Quellen:</span>
           {(feeds.data ?? []).map((f) => (
             <span key={f.source} className={`inline-flex items-center gap-1 ${f.state === "ok" ? "" : f.state === "disabled" || f.state === "never" ? "text-unknown" : "text-warn"}`} title={`${f.label}: ${FEED_STATE[f.state].label}`}>
@@ -292,16 +292,22 @@ export function FeedSources() {
             </span>
           ) : null}
         </p>
-        <span className="ml-auto flex items-center gap-2">
-          <Button className="min-w-0" onClick={() => void refreshAll()} busy={allBusy} disabled={anyRunning}>
-            Alle abrufen
-          </Button>
-          <Button className="min-w-0" aria-expanded={tableOpen} aria-controls="feeds-table" onClick={() => setManage(!tableOpen)}>
-            Verwalten
+        {/* Knopfreihe: rechts neben dem Text; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eine eigene Zeile, gleich breit. */}
+        <span className="src-actions ml-auto flex shrink-0 items-center gap-2">
+          <button type="button" className="sbtn" title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning || allBusy} aria-busy={allBusy || undefined}>
+            <NavIcon name="refresh" />
+            <span className="sbtn-t">Alle abrufen</span>
+          </button>
+          <button type="button" className="sbtn sbtn-primary" title="Quelle hinzufügen" onClick={() => setAdding(true)}>
+            <NavIcon name="plus" />
+            <span className="sbtn-t">Quelle hinzufügen</span>
+          </button>
+          <button type="button" className="sbtn" title="Verwalten" aria-expanded={tableOpen} aria-controls="feeds-table" onClick={() => setManage(!tableOpen)}>
             <span className={`transition-transform duration-(--dur-1) ${tableOpen ? "rotate-180" : ""}`}>
               <NavIcon name="chevron" size={14} />
             </span>
-          </Button>
+            <span className="sbtn-t">Verwalten</span>
+          </button>
         </span>
       </div>
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
@@ -311,31 +317,20 @@ export function FeedSources() {
         // Auf- und Zuklappen über die Zeilenhöhe (150 ms), damit die Seite darunter nicht springt.
         <div id="feeds-table" className={`grid transition-[grid-template-rows] duration-(--dur-1) ${tableOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`} inert={!tableOpen}>
         <div className="min-h-0 overflow-hidden">
-        <div className="mb-2 flex justify-end">
-          <Button className="min-w-0" variant="primary" onClick={() => setAdding(true)}>
-            <NavIcon name="plus" />
-            Quelle hinzufügen
-          </Button>
-        </div>
-        <div className="max-lg:overflow-x-auto">
-          {/* Feste Spaltenbreiten: Zähler und Laufmeldungen ändern sich im Sekundentakt; bei table-layout: auto würden sie die
-              Spalten ständig neu verteilen (gemessen: bis zu 118 px Breitenänderung). Zellen umbrechen, statt zu verbreitern. */}
-          <table data-t="feeds" className="tbl stack md:min-w-[48rem] md:table-fixed md:[&_td]:[overflow-wrap:anywhere]">
+        <div>
+          {/* Spalten nach Anteilen bei fester Breite (siehe .dist1024): Zähler und Laufmeldungen ändern sich im Sekundentakt und dürfen die
+              Spalten nicht verschieben. Unter 1024 px erscheint jede Quelle als Karte. */}
+          <table data-t="feeds" className="tbl stack-lg dist1024 lg:[--tbl-min:46rem] hd:[table-layout:fixed] hd:[--tbl-min:59.5rem]">
             <caption>Zustand der CVE-Quellen</caption>
-            <colgroup>
-              {["md:w-[12%]", "md:w-[13%]", "md:w-[13%]", "md:w-[8%]", "md:w-[10%]", "md:w-[24%]", "md:w-[20%]"].map((c) => (
-                <col key={c} className={c} />
-              ))}
-            </colgroup>
             <thead>
               <tr>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Quelle</span></th>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Zustand</span></th>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Intervall</span></th>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Nächster Versuch</span></th>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Details</span></th>
-                <th scope="col" className="md:whitespace-normal md:[overflow-wrap:anywhere]"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="w-[12%] min-w-26"><span className="th-pad">Quelle</span></th>
+                <th scope="col" className="w-[17%] min-w-30 hd:min-w-32"><span className="th-pad">Zustand</span></th>
+                <th scope="col" className="w-[12%] min-w-32"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
+                <th scope="col" className="w-[9%] min-w-24 lg:max-hd:hidden"><span className="th-pad">Intervall</span></th>
+                <th scope="col" className="w-[9%] min-w-26 lg:max-hd:hidden"><span className="th-pad">Nächster Versuch</span></th>
+                <th scope="col" className="w-[14%] xl:w-[18%] min-w-26 hd:min-w-28"><span className="th-pad">Details</span></th>
+                <th scope="col" className="num w-[27%] xl:w-[23%] min-w-70"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -352,39 +347,45 @@ export function FeedSources() {
                       {f.secret_set ? " · Schlüssel gesetzt" : ""}
                     </div>
                   </td>
-                  <td className="cell-status lead max-md:flex-[1_0_100%]!">
-                    <StatusBadge info={FEED_STATE[f.state]} label={(f.state === "stale" || f.state === "incomplete") && f.stale_since ? `${f.state === "stale" ? "Veraltet" : "Unvollständig"} seit ${absTime(f.stale_since)}` : undefined} />
+                  <td className="cell-status lead max-lg:flex-[1_0_100%]!">
+                    <StatusBadge info={FEED_STATE[f.state]} />
+                    {(f.state === "stale" || f.state === "incomplete") && f.stale_since ? <span className="block w-full text-xs text-fg3">seit {absTime(f.stale_since)}</span> : null}
                     {errorChip(f) ? <StatusBadge info={errorChip(f)!} /> : null}
                     {errorLine(f) ? <p className="w-full max-w-[28rem] text-xs text-warn">{errorLine(f)}</p> : null}
                     {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}
                   </td>
-                  <td data-label="Letzter Erfolg" className="max-md:shrink-0 max-md:grow-0 max-md:basis-[calc(50%-6px)]">
+                  <td data-label="Letzter Erfolg" className="max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)]">
                     <RelTime iso={f.last_success_at} />
                     {f.last_success_at ? <div className="text-xs text-fg3 max-xl:hidden">{absTime(f.last_success_at)}</div> : null}
                   </td>
-                  <td data-label="Intervall" className="max-md:shrink-0 max-md:grow-0 max-md:basis-[calc(50%-6px)]">
+                  <td data-label="Intervall" className="lg:max-hd:hidden max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)]">
                     <span className="xl:hidden">{f.interval_minutes} Min.</span>
                     <span className="max-xl:hidden">alle {f.interval_minutes} Min.</span>
                   </td>
-                  <td data-label="Nächster Versuch" className={`max-md:shrink-0 max-md:grow-0 max-md:basis-[calc(50%-6px)] ${f.enabled && f.next_attempt_at ? "" : "max-md:hidden"}`}>
+                  <td data-label="Nächster Versuch" className={`lg:max-hd:hidden max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)] ${f.enabled && f.next_attempt_at ? "" : "max-lg:hidden"}`}>
                     {f.enabled && f.next_attempt_at ? <RelTime iso={f.next_attempt_at} /> : null}
                   </td>
-                  <td className={`max-w-[17rem] max-md:max-w-none xl:max-w-[28rem] ${detailLines(f).length ? "" : "max-md:hidden"}`}>
+                  <td className={`max-w-[17rem] max-lg:max-w-none xl:max-w-[28rem] ${detailLines(f).length ? "" : "max-lg:hidden"}`}>
                     <DetailsCell feed={f} open={detailsOpen.has(f.source)} onToggle={() => setDetailsOpen((o) => { const n = new Set(o); if (n.has(f.source)) n.delete(f.source); else n.add(f.source); return n; })} />
                   </td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <Button className="min-w-32" onClick={() => void runOne(f)} busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })} disabled={!f.enabled} aria-label={`${f.label} jetzt abrufen`}>
-                        Jetzt abrufen
-                      </Button>
-                      <RowMenu
-                        label={`Weitere Aktionen für ${f.label}`}
-                        items={[
-                          { label: f.enabled ? "Abschalten" : "Einschalten", aria: `${f.label} ${f.enabled ? "abschalten" : "einschalten"}`, run: () => void toggle(f) },
-                          { label: "Bearbeiten", aria: `${f.label} bearbeiten`, run: () => setEditing(f) },
-                          { label: "Löschen", aria: `${f.label} löschen`, run: () => setRemoving(f), danger: true },
-                        ]}
-                      />
+                  <td className="num max-lg:flex-[1_0_100%]">
+                    <div className="@container">
+                      {/* Vier Knöpfe nebeneinander. Ist die Spalte (Container, nicht Fenster) schmaler als 28 rem, werden Abschalten, Bearbeiten
+                          und Löschen zu Symbolen; unter 1024 px (Karten) bleiben die Texte und die Knöpfe laufen bei Platzmangel in zwei Reihen. */}
+                      <div className="feed-actions flex items-center justify-end gap-2 max-lg:grid max-lg:grid-cols-4 max-lg:@max-[28rem]:grid-cols-2">
+                        <Button
+                          className="min-w-0! border-accent text-accent"
+                          onClick={() => void runOne(f)}
+                          busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })}
+                          disabled={!f.enabled}
+                          aria-label={`${f.label} jetzt abrufen`}
+                        >
+                          {starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" }) ? "läuft" : "Jetzt abrufen"}
+                        </Button>
+                        <ActionButton icon="power" label={f.enabled ? "Abschalten" : "Einschalten"} aria={`${f.label} ${f.enabled ? "abschalten" : "einschalten"}`} onClick={() => void setEnabled(f, !f.enabled)} />
+                        <ActionButton icon="edit" label="Bearbeiten" aria={`${f.label} bearbeiten`} onClick={() => setEditing(f)} />
+                        <ActionButton icon="trash" label="Löschen" aria={`${f.label} löschen`} danger onClick={() => setRemoving(f)} />
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -423,6 +424,7 @@ export function FeedSources() {
         Die Quelle ist nach {backoff?.failures ?? 0} Fehlversuchen in Wartezeit{backoff?.next ? ` (nächster automatischer Versuch ${absTime(backoff.next)})` : ""}. Ein zusätzlicher Abruf belastet den Server der Quelle und kann das Limit verlängern. Von Hand ist nur ein Versuch alle 5 Minuten erlaubt.
       </ConfirmDialog>
       <ConfirmDialog open={removing !== null} danger title={`Quelle „${removing?.label ?? ""}“ löschen?`} confirmLabel="Löschen" onConfirm={() => void remove()} onCancel={() => setRemoving(null)}>
+        {removing && (starting.has(removing.source) || isActive(latest.get(removing.source) ?? { status: "ok" })) ? <strong className="mb-2 block text-warn">Achtung: Für diese Quelle läuft gerade ein Abruf.</strong> : null}
         Hosts, die auf diese Quelle angewiesen sind, werden auf „unbekannt“ gesetzt. Die gespeicherten Daten der Quelle zählen nicht mehr und werden nach 30 Tagen gelöscht. Du kannst die Quelle jederzeit wieder hinzufügen.
       </ConfirmDialog>
     </section>
@@ -608,5 +610,28 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/** Aktionsknopf in der Quellenzeile: Text; bei schmaler Spalte (Container-Query) nur Symbol mit Tooltip und vollem Namen. */
+function ActionButton({ icon, label, aria, danger, onClick }: { icon: "power" | "edit" | "trash"; label: string; aria: string; danger?: boolean; onClick: () => void }) {
+  const paths = {
+    power: <><path d="M8 2v5.5" /><path d="M4.6 4.3a5.5 5.5 0 1 0 6.8 0" /></>,
+    edit: <><path d="M10.5 2.5l3 3L5.5 13.5 2 14l.5-3.5z" /><path d="M9 4l3 3" /></>,
+    trash: <><path d="M2.5 4.5h11" /><path d="M6 4.5V3h4v1.5" /><path d="M4 4.5l.7 8.5h6.6l.7-8.5" /><path d="M6.5 7v4M9.5 7v4" /></>,
+  } as const;
+  return (
+    <Button
+      variant={danger ? "danger" : "default"}
+      className={`min-w-0! ${danger ? "lg:ml-2 max-lg:ml-0" : ""} lg:@max-[28rem]:w-8! lg:@max-[28rem]:px-0!`}
+      title={label}
+      aria-label={aria}
+      onClick={onClick}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" className="hidden lg:@max-[28rem]:block">
+        {paths[icon]}
+      </svg>
+      <span className="lg:@max-[28rem]:sr-only">{label}</span>
+    </Button>
   );
 }
