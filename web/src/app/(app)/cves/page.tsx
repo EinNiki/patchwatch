@@ -466,18 +466,18 @@ function CveView() {
         ) : (
           <>
             <div className="updatable max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
-              <table className="tbl stack fit">
+              <table className="tbl stack dist md:[--tbl-min:45.5rem] xl:[--tbl-min:52.5rem] wide:[--tbl-min:63.5rem]">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
                   <tr>
-                    <th scope="col" className="w-10"><span className="th-pad"><span className="sr-only">Beobachten</span></span></th>
-                    <SortTh label="CVE" hint={sort === "latest" ? (dir === "desc" ? "neueste zuerst" : "älteste zuerst") : "nach Datum sortieren"} active={sort === "latest"} dir={dir} onClick={() => sortBy("latest")} />
-                    <th scope="col" className="grow"><span className="th-pad">Beschreibung</span></th>
-                    <th scope="col"><span className="th-pad">Distributionen</span></th>
-                    <SortTh label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
-                    <th scope="col" className="max-wide:hidden"><span className="th-pad">Pakete</span></th>
-                    <SortTh label="Level" className="max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
-                    <SortTh label="Aktualisiert" className="md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />
+                    <th scope="col" className="w-[3%] min-w-10"><span className="th-pad"><span className="sr-only">Beobachten</span></span></th>
+                    <SortTh className="w-[10%] min-w-36" label="CVE" hint={sort === "latest" ? (dir === "desc" ? "neueste zuerst" : "älteste zuerst") : "nach Datum sortieren"} active={sort === "latest"} dir={dir} onClick={() => sortBy("latest")} />
+                    <th scope="col" className="w-[24%] min-w-40"><span className="th-pad">Beschreibung</span></th>
+                    <th scope="col" className="w-[15%] min-w-40"><span className="th-pad">Distributionen</span></th>
+                    <SortTh className="w-[22%] min-w-56" label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
+                    <th scope="col" className="w-[8%] min-w-24 max-wide:hidden"><span className="th-pad">Pakete</span></th>
+                    <SortTh label="Level" className="w-[6%] min-w-20 max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
+                    <SortTh label="Aktualisiert" className="w-[12%] min-w-28 md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -559,21 +559,21 @@ const CveRow = memo(function CveRow({
           {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
           {c.level ? <div className="text-xs text-fg3 wide:hidden">Level {c.level}/10</div> : null}
         </td>
-        <td className="grow wrap min-w-24 max-md:order-0 max-md:flex-[1_0_100%]">
+        <td className="max-md:order-0 max-md:flex-[1_0_100%]">
           {c.description ? <span className="line-clamp-2 max-w-[64rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
           {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
         </td>
-        <td className="cell-status min-w-[12rem] max-md:min-w-0 max-md:flex-[1_0_100%]">
+        <td className="cell-status md:max-w-0 max-md:flex-[1_0_100%]">
           <Distros c={c} />
         </td>
-        <td data-label="Hosts">
+        <td data-label="Hosts" className="md:max-w-0">
           <HostChips c={c} ids={hostIds} />
         </td>
         <td className="max-wide:hidden">
           <PackagesCell c={c} />
         </td>
         <td className="mono max-wide:hidden" title={c.priority ?? undefined}>{c.level ? `${c.level}/10` : "–"}</td>
-        <td data-label="Aktualisiert" className="whitespace-nowrap md:max-xl:hidden">
+        <td data-label="Aktualisiert" className="md:max-xl:hidden">
           {c.updated_at ? (
             <time dateTime={c.updated_at} title={updatedTitle(c.updated_at, c.last_synced_at, absTime)}>
               {relTime(c.updated_at)}
@@ -676,7 +676,7 @@ function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number
   };
   const rest = affectedHosts(c) - all.length;
   return (
-    <ul className="m-0 flex list-none flex-nowrap items-center gap-1 p-0" aria-label="Betroffene Hosts">
+    <ul className="m-0 flex min-w-0 list-none flex-nowrap items-center gap-1 p-0" aria-label="Betroffene Hosts">
       {names.map((n) => (
         <li key={n} className="min-w-0">{hostLink(n, chip)}</li>
       ))}
@@ -694,7 +694,7 @@ function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number
                 aria-controls={t["aria-controls"]}
                 title={`${more} weitere Hosts anzeigen`}
                 onClick={t.toggle}
-                className="inline-flex h-(--chip-h) items-center justify-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:min-w-11 max-md:px-3"
+                className="inline-flex h-(--chip-h) min-h-6 min-w-6 shrink-0 whitespace-nowrap items-center justify-center rounded-xs px-1.5 text-xs text-fg2 hover:text-fg max-md:min-h-11 max-md:min-w-11 max-md:px-3"
               >
                 +{more}
                 <span className="sr-only"> weitere Hosts</span>

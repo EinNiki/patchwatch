@@ -287,7 +287,7 @@ export default function AgentsPage() {
         </div>
         <p className="m-0 mt-1 flex flex-wrap items-center gap-x-2 text-sm text-fg3">
           <span>Ältere Agents aktualisierst du einmalig mit dem Installationsbefehl aus „Agent hinzufügen“.</span>
-          <button type="button" aria-expanded={more} aria-controls={moreId} onClick={() => setMore(!more)} className="inline-flex min-h-6 items-center px-1 text-accent underline max-md:min-h-11">
+          <button type="button" aria-expanded={more} aria-controls={moreId} onClick={() => setMore(!more)} className="inline-flex min-h-6 items-center px-1 text-accent underline max-md:min-h-11 max-md:min-w-11 max-md:justify-center">
             {more ? "Weniger" : "Mehr"}
           </button>
         </p>
@@ -316,18 +316,18 @@ export default function AgentsPage() {
           </div>
         </Empty>
       ) : (
-        <div className="max-xl:overflow-x-auto">
-          <table className="tbl stack fit">
+        <div className="max-hd:overflow-x-auto">
+          <table className="tbl stack dist md:[--tbl-min:35.5rem] lg:[--tbl-min:45rem] hd:[--tbl-min:55.5rem]">
             <caption>Agents mit Version, Zeitpunkt der letzten Daten und letzter Aktivität</caption>
             <thead>
               <tr>
-                <th scope="col" className="share"><span className="th-pad">Name</span></th>
-                <th scope="col" className="share"><span className="th-pad">Hostname laut Agent</span></th>
-                <th scope="col" className="share"><span className="th-pad">Distribution</span></th>
-                <th scope="col"><span className="th-pad">Agent-Version</span></th>
-                <th scope="col"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
-                <th scope="col"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
-                <th scope="col"><span className="th-pad justify-end">Aktionen</span></th>
+                <th scope="col" className="w-[13%] min-w-30"><span className="th-pad">Name</span></th>
+                <th scope="col" className="w-[17%] min-w-38 md:max-lg:hidden"><span className="th-pad">Hostname laut Agent</span></th>
+                <th scope="col" className="w-[21%] min-w-40"><span className="th-pad">Distribution</span></th>
+                <th scope="col" className="w-[8%] min-w-18 md:max-hd:hidden"><span className="th-pad">Agent-Version</span></th>
+                <th scope="col" className="w-[10%] min-w-24"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
+                <th scope="col" className="w-[10%] min-w-24 md:max-hd:hidden"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
+                <th scope="col" className="num w-[21%] min-w-48"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -336,20 +336,20 @@ export default function AgentsPage() {
                 const coolingDown = (limited[h.id] ?? 0) > now;
                 return (
                   <tr key={h.id}>
-                    <td className="cell-primary share">
+                    <td className="cell-primary">
                       <Link href={`/hosts/${h.id}`} className="whitespace-nowrap font-semibold">
                         {h.name}
                       </Link>
                     </td>
-                    <td data-label="Hostname" className="share">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch keine Daten</span>}</td>
-                    <td data-label="Distribution" className="share">{h.pretty_name ?? <span className="text-fg3">–</span>}</td>
-                    <td data-label="Agent-Version">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
+                    <td data-label="Hostname" className="md:max-lg:hidden">{h.hostname ? <Mono>{h.hostname}</Mono> : <span className="text-fg3">noch keine Daten</span>}</td>
+                    <td data-label="Distribution">{h.pretty_name ?? <span className="text-fg3">–</span>}</td>
+                    <td data-label="Agent-Version" className="md:max-hd:hidden">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
                     <td data-label={DATA_LABEL}>
                       <RelTime iso={h.last_report_at} />
                       <WaitState h={h} now={now} />
                     </td>
-                    <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
-                    <td data-label="Aktionen">
+                    <td data-label={ACTIVE_LABEL} className="md:max-hd:hidden"><RelTime iso={h.last_checkin_at} /></td>
+                    <td data-label="Aktionen" className="num">
                       <div className="flex items-center justify-end gap-2 max-md:justify-start">
                         <Button className="min-w-0" onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
                           {FETCH_ACTION}

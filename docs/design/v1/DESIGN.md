@@ -67,8 +67,11 @@ Zusätzliche Marker mit eigenem Icon: Neustart (Kreispfeil), veraltet/stale (Uhr
 ## Komponenten
 
 - **Tabelle** (Hauptelement): Kopf in `sunk`, Haarlinien zwischen Zeilen, Zeilen-Hover `sunk` 50 %, sortierbare Köpfe
-  sind `<button>` in `<th aria-sort>`. Zahlen/Versionen rechtsbündig bzw. mono. Mobil (< 768 px): Zeilen werden
-  gestapelt, jede Zelle trägt ihr Label (`data-label`).
+  sind `<button>` in `<th aria-sort>`. Zahlen/Versionen rechtsbündig bzw. mono (Kopf und Zelle gleich ausgerichtet). Die Tabelle
+  füllt die Inhaltsbreite (`width: 100%`), jede Spalte hat Prozentanteil und Mindestbreite, Textspalten bekommen den
+  größten Anteil; Zellabstand 12/16/24 px (ab 768/1280/1600). `table-layout: auto`, weil Browser `min-width` an Zellen
+  bei `fixed` ignorieren. Mobil (< 768 px): Zeilen werden gestapelt, jede Zelle trägt ihr Label (`data-label`).
+  Zeilenaktionen stehen nebeneinander statt in einem „…“-Menü; bei Platzmangel (Container-Query) werden sie zu Symbolen.
 - **Statusanzeige** (`StatusBadge`): 2-px-Rundung, Fläche = Statusfläche, Text = Statusfarbe, Icon links, Text immer sichtbar.
 - **Leerzustände:** sagen, was fehlt und was als Nächstes zu tun ist (konkret, ohne Floskeln).
 - **Kopfzeile:** Navigation (Hosts · CVEs · Matrix [„bald“, nicht anklickbar] · Einstellungen), rechts Feed-Zustand,

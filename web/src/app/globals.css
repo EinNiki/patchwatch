@@ -129,47 +129,118 @@ code,
   /* Chips, Zahlen und Texte einer Zeile liegen auf einer Linie. */
   vertical-align: middle;
 }
-@media (min-width: 1600px) {
+@media (min-width: 768px) {
+  .tbl {
+    --col-pad: 12px;
+  }
+}
+@media (min-width: 1280px) {
   .tbl {
     --col-pad: 16px;
   }
 }
-/* Spalten nach Inhalt: jede Spalte so schmal wie ihr Inhalt, damit alle Abstände gleich bleiben. Freier Platz bei breiten
-   Bildschirmen geht an die leere Füllspalte am Ende (.fill) oder, wo eine Spalte Fließtext trägt, an diese (td.grow). */
+@media (min-width: 1600px) {
+  .tbl {
+    --col-pad: 24px;
+  }
+}
+/* Spalten nach Anteilen (.dist): die Tabelle füllt den Inhaltsbereich (width: 100 %), jede Spalte bekommt einen Prozentanteil (Klasse
+   w-[n%] am <th>) und eine Mindestbreite (min-w-*); die Tabelle selbst hat die Summe der Mindestbreiten als min-width (--tbl-min).
+   Fehlen Spalten (ausgeblendet), verteilt sich der Rest im Verhältnis der Anteile, die letzte Spalte endet am rechten Rand.
+   Bewusst table-layout: auto: bei fixed wird min-width an Zellen ignoriert, die Mindestbreiten gälten dann nicht. */
 @media (min-width: 768px) {
-  .tbl.fit th:not(.fill, .grow, .share),
-  .tbl.fit td:not(.fill, .grow, .share) {
-    width: 1%;
-    white-space: nowrap;
-  }
-  .tbl.fit th.grow,
-  .tbl.fit td.grow {
+  .tbl.dist {
     width: 100%;
+    min-width: var(--tbl-min, 0);
   }
-  /* .share: Spalten, die sich den freien Platz teilen (Name, Hostname, Distribution): nie schmaler als ihr Inhalt. */
-  .tbl.fit th.share,
-  .tbl.fit td.share {
-    width: 30%;
-    white-space: nowrap;
-  }
-  .tbl.fit td.wrap,
-  .tbl.fit th.wrap {
+  .tbl.dist th,
+  .tbl.dist td {
     white-space: normal;
   }
-  .tbl.fit .fill {
-    width: auto;
+  .tbl.dist td {
+    overflow-wrap: anywhere;
+  }
+}
+/* Wie .dist, aber erst ab 1024 px (darunter stapelt .stack-lg). */
+@media (min-width: 1024px) {
+  .tbl.dist1024 {
+    width: 100%;
+    min-width: var(--tbl-min, 0);
+  }
+  .tbl.dist1024 th,
+  .tbl.dist1024 td {
+    white-space: normal;
+  }
+  .tbl.dist1024 td {
+    overflow-wrap: anywhere;
+  }
+}
+/* Knöpfe der Quellenzeile über der Tabelle (CVE-Seite): 36 px (mobil 44 px), Abstand 8 px, nie umbrechen. */
+.sbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--control);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sbtn:hover:not(:disabled) {
+  background: var(--sunk);
+}
+.sbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sbtn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+.sbtn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+@media (max-width: 767px) {
+  .sbtn {
+    height: 44px;
+  }
+}
+/* Unter 1100 px nur Symbole, unter 640 px eigene Zeile unter dem Text, die drei Knöpfe gleich breit. */
+@media (max-width: 1099px) {
+  .sbtn {
+    width: 36px;
     padding: 0;
   }
-  .tbl.fit td.fill {
-    cursor: inherit;
+  .sbtn-t {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
-.tbl .fill {
-  display: none;
+@media (max-width: 1099px) and (max-width: 767px) {
+  .sbtn {
+    width: 44px;
+  }
 }
-@media (min-width: 768px) {
-  .tbl .fill {
-    display: table-cell;
+@media (max-width: 639px) {
+  .src-actions {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  .src-actions .sbtn {
+    flex: 1 1 0;
+    width: auto;
   }
 }
 @media (hover: hover) {
@@ -484,6 +555,112 @@ details[open] > :not(summary) {
     margin: 0;
   }
   .tbl.stack td.cell-hide {
+    display: none;
+  }
+}
+
+/* Wie oben, aber schon unter 1024 px (Tabelle „CVE-Quellen“: Karten je Quelle). Gleiche Regeln, anderer Umschaltpunkt.
+   Hier ist der Rest des ursprünglichen Kommentars: gestapelte Einträge. Name oben, Status-Chips darunter, Nebenwerte klein in einer Zeile.
+   Zellklassen: cell-primary (Name), cell-status (Chips), alles andere ist Nebenwert und trägt sein Label per data-label. */
+@media (max-width: 1023px) {
+  .tbl.stack-lg thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .tbl.stack-lg,
+  .tbl.stack-lg tbody {
+    display: block;
+  }
+  .tbl.stack-lg tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .tbl.stack-lg td {
+    display: block;
+    border: 0;
+    padding: 0;
+    min-width: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+    font-size: var(--text-xs);
+    color: var(--text-2);
+  }
+  .tbl.stack-lg td::after {
+    display: none;
+  }
+  .tbl.stack-lg tbody tr:hover td {
+    background: none;
+  }
+  .tbl.stack-lg td[data-label]::before {
+    content: attr(data-label) " ";
+    color: var(--text-3);
+  }
+  .tbl.stack-lg td.cell-primary {
+    order: -2;
+    flex: 1 0 100%;
+    font-size: var(--text-base);
+    color: var(--text);
+  }
+  .tbl.stack-lg td.cell-primary::before,
+  .tbl.stack-lg td.cell-status::before {
+    display: none;
+  }
+  .tbl.stack-lg td.cell-status.lead {
+    order: -2;
+  }
+  .tbl.stack-lg td.cell-status {
+    order: -1;
+    flex: 0 1 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    font-size: var(--text-xs);
+  }
+  .tbl.stack-lg td.cell-primary a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch);
+  }
+  .tbl.stack-lg tbody tr[data-watched] {
+    margin: 4px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--watch-border);
+    border-radius: 4px;
+  }
+  .tbl.stack-lg tbody tr[data-watched] td {
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .tbl.stack-lg tr:has(.cell-star) {
+    position: relative;
+  }
+  .tbl.stack-lg td.cell-star {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: auto;
+  }
+  .tbl.stack-lg tr[data-watched] td.cell-star {
+    top: 0;
+    right: 0;
+  }
+  .tbl.stack-lg td.cell-star + td.cell-primary {
+    padding-right: var(--touch);
+  }
+  .star-btn {
+    width: var(--touch);
+    height: var(--touch);
+    margin: 0;
+  }
+  .tbl.stack-lg td.cell-hide {
     display: none;
   }
 }

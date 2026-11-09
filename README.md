@@ -379,10 +379,22 @@ Feed-Zustand je Quelle („veraltet seit …“).
 
 - **Tabellen**: In der Hostliste ist die ganze Zeile klickbar (Maus, Touch; Hostname bleibt der echte Link, Strg/Cmd/Shift und
   Mittelklick öffnen einen neuen Tab, markierter Text und Bedienelemente in der Zeile lösen nichts aus; die CVE-Zelle öffnet
-  die Host-Seite gefiltert). Spalten sind so breit wie ihr Inhalt, der Abstand zwischen ihnen ist überall gleich (24 px,
-  ab 1600 px 32 px), alle Zellen stehen vertikal mittig. In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und
+  die Host-Seite gefiltert). Die Tabellen (Hosts, Agents, CVEs, CVE-Quellen) füllen die ganze Inhaltsbreite bis 2560 px:
+  jede Spalte hat einen prozentualen Anteil und eine Mindestbreite, die letzte Spalte endet am rechten Inhaltsrand, freier
+  Platz geht an die Textspalten (Host, Beschreibung, Hostname). Text steht linksbündig, Zahlenspalten (Updates, Uptime)
+  rechtsbündig samt Kopf; der Zellabstand ist links und rechts gleich (12 px ab 768, 16 px ab 1280, 24 px ab 1600), alle
+  Zellen stehen vertikal mittig. Unter 1024 px entfallen Spalten (Uptime und Agent zuerst, dann Updates), unter 768 px
+  werden Zeilen gestapelt; die Seite scrollt nie waagerecht. In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und
   darunter die Hostnamen als Links (höchstens 3, der Rest hinter „+N“).
 
+- **CVE-Quellen** (oben auf der CVE-Seite): Die Knopfreihe „Alle abrufen“, „Quelle hinzufügen“ (einziger Primärknopf) und
+  „Verwalten“ steht rechts neben der Textzeile (36 px hoch); unter 1100 px sind es Symbolknöpfe mit Tooltip und `aria-label`,
+  unter 640 px eine eigene Reihe in gleicher Breite (44 px). Der Zustandschip zeigt nur das Wort, das Datum („seit …“)
+  steht klein darunter. Unter 1280 px entfällt die Spalte „Intervall“ (steht in den Details), unter 1024 px werden die
+  Quellen zu Karten. Die Aktionen je Quelle stehen ohne Menü nebeneinander: „Jetzt abrufen“ (Akzentrand), „Abschalten“
+  bzw. „Einschalten“, „Bearbeiten“ und „Löschen“ (Fehlerfarbe, 16 px Abstand). Ist die Spalte schmaler als 28 rem
+  (Container-Query), werden die letzten drei zu Symbolen (16 px) mit Tooltip. „Löschen“ fragt nach und warnt bei laufendem
+  Abruf, „Abschalten“ zeigt einen Hinweis mit „Rückgängig“.
 - **CVEs**: Spalte „Distributionen“ mit einem Chip je Quelle und Release (Icon + Text + Fix-Version). Standard sind nur
   Releases, die auf deinen Hosts laufen („+ n weitere Releases“ blendet den Rest ein). Filter:
   Distribution sowie „Debian gefixt, Ubuntu offen“ und umgekehrt. `/cves/<ID>` zeigt Quellen-Links, letzte Änderung und

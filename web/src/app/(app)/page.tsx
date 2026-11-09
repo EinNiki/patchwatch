@@ -26,13 +26,15 @@ import { feedSummary } from "@/components/FeedStatus";
 type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 
 /** `cls`: Sichtbarkeit je Breite. Der letzte Report rutscht zwischen 768 und 1439 px unter den Hostnamen, Agent und Uptime kommen ab 1600 px dazu. */
-const COLUMNS: { key: SortKey; label: string; num?: boolean; cls?: string; tip?: string }[] = [
-  { key: "name", label: "Host" },
-  { key: "kernel", label: "Distribution / Kernel" },
-  { key: "report", label: DATA_LABEL, cls: "md:max-xl:hidden", tip: DATA_TIP },
-  { key: "updates", label: "Updates", num: true },
-  { key: "cve", label: "CVE" },
-  { key: "status", label: "Status" },
+/** Spaltenanteile (Summe 100 % bei 8 Spalten) und Mindestbreiten (Summe 59 rem). Unter 1280 px entfallen Zuletzt gemeldet, Uptime
+ *  und Agent (Meldezeit steht dann im Host-Feld), unter 1024 px zusätzlich Updates. */
+const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: string }[] = [
+  { key: "name", label: "Host", cls: "w-[15%] min-w-36" },
+  { key: "kernel", label: "Distribution / Kernel", cls: "w-[18%] min-w-42" },
+  { key: "report", label: DATA_LABEL, cls: "w-[11%] min-w-26 md:max-hd:hidden", tip: DATA_TIP },
+  { key: "updates", label: "Updates", num: true, cls: "w-[10%] min-w-24 md:max-lg:hidden" },
+  { key: "cve", label: "CVE", cls: "w-[14%] min-w-32" },
+  { key: "status", label: "Status", cls: "w-[12%] min-w-28" },
 ];
 
 const SORT_LABEL: Record<SortKey, string> = { name: "Host", kernel: "Kernel", report: DATA_LABEL, updates: "Updates", cve: "CVE", status: "Status" };
@@ -247,8 +249,8 @@ function HostsView() {
           {rows.length === 0 ? (
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
-            <div className="max-xl:overflow-x-auto">
-              <table className="tbl stack fit">
+            <div className="max-hd:overflow-x-auto">
+              <table className="tbl stack dist md:[--tbl-min:34.5rem] lg:[--tbl-min:40.5rem] hd:[--tbl-min:59rem]">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
@@ -264,13 +266,12 @@ function HostsView() {
                         onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
                       />
                     ))}
-                    <th scope="col" className="max-wide:hidden">
+                    <th scope="col" className="num w-[11%] min-w-26 max-hd:hidden">
                       <span className="th-pad">Uptime</span>
                     </th>
-                    <th scope="col" className="max-wide:hidden">
+                    <th scope="col" className="w-[9%] min-w-22 max-hd:hidden">
                       <span className="th-pad">Agent</span>
                     </th>
-                    <th scope="col" className="fill" aria-hidden="true" />
                   </tr>
                 </thead>
                 <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${updatesOnly}|${unknownOnly}|${q}`}>
@@ -299,7 +300,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         </Link>
         {h.is_proxmox ? <span className="mt-1 flex xl:ml-2 xl:mt-0 xl:inline-flex xl:align-middle"><Marker>Proxmox {h.proxmox_version}</Marker></span> : null}
         {h.hostname && h.hostname !== h.name ? <div className="text-xs text-fg3">{h.hostname}</div> : null}
-        <div className="hidden text-xs text-fg3 md:max-xl:block">
+        <div className="hidden text-xs text-fg3 md:max-hd:block">
           {DATA_LABEL} <RelTime iso={h.last_report_at} />
         </div>
       </td>
@@ -316,14 +317,14 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           ) : null}
         </span>
       </td>
-      <td data-label={DATA_LABEL} className={`md:max-xl:hidden ${stale ? "text-warn" : ""}`}>
+      <td data-label={DATA_LABEL} className={`md:max-hd:hidden ${stale ? "text-warn" : ""}`}>
         <span className="inline-flex items-center gap-1">
           {stale ? <Icon name="clock" /> : null}
           <RelTime iso={h.last_report_at} />
           {stale ? <span className="sr-only">: meldet sich nicht mehr</span> : null}
         </span>
       </td>
-      <td data-label="Updates" className="num">
+      <td data-label="Updates" className="num md:max-lg:hidden">
         {h.updates_pending == null ? (
           <span className="text-fg3">unbekannt</span>
         ) : (
@@ -344,9 +345,8 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </div>
         ) : null}
       </td>
-      <td className="mono max-wide:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
-      <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
-      <td className="fill" aria-hidden="true" />
+      <td className="mono num max-hd:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
+      <td className="mono max-hd:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
     </tr>
   );
 }
