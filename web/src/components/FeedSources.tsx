@@ -317,7 +317,7 @@ export function FeedSources() {
         // Auf- und Zuklappen über die Zeilenhöhe (150 ms), damit die Seite darunter nicht springt.
         <div id="feeds-table" className={`grid transition-[grid-template-rows] duration-(--dur-1) ${tableOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`} inert={!tableOpen}>
         <div className="min-h-0 overflow-hidden">
-        <div>
+        <div className="tcard">
           {/* Spalten nach Anteilen bei fester Breite (siehe .dist1024): Zähler und Laufmeldungen ändern sich im Sekundentakt und dürfen die
               Spalten nicht verschieben. Unter 1024 px erscheint jede Quelle als Karte. */}
           <table data-t="feeds" className="tbl stack-lg dist1024 lg:[--tbl-min:46rem] hd:[table-layout:fixed] hd:[--tbl-min:59.5rem]">

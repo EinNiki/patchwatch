@@ -29,8 +29,8 @@ type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 /** Spaltenanteile (Summe 100 % bei 8 Spalten) und Mindestbreiten (Summe 59 rem). Unter 1280 px entfallen Zuletzt gemeldet, Uptime
  *  und Agent (Meldezeit steht dann im Host-Feld), unter 1024 px zusätzlich Updates. */
 const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: string }[] = [
-  { key: "name", label: "Host", cls: "w-[15%] min-w-36" },
-  { key: "kernel", label: "Distribution / Kernel", cls: "w-[18%] min-w-42" },
+  { key: "name", label: "Host", cls: "w-[15%] min-w-32" },
+  { key: "kernel", label: "Distribution / Kernel", cls: "w-[18%] min-w-38" },
   { key: "report", label: DATA_LABEL, cls: "w-[11%] min-w-26 md:max-hd:hidden", tip: DATA_TIP },
   { key: "updates", label: "Updates", num: true, cls: "w-[10%] min-w-24 md:max-lg:hidden" },
   { key: "cve", label: "CVE", cls: "w-[14%] min-w-32" },
@@ -249,7 +249,7 @@ function HostsView() {
           {rows.length === 0 ? (
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
-            <div className="max-hd:overflow-x-auto">
+            <div className="tcard max-hd:overflow-x-auto">
               <table className="tbl stack dist md:[--tbl-min:34.5rem] lg:[--tbl-min:40.5rem] hd:[--tbl-min:59rem]">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
@@ -266,7 +266,7 @@ function HostsView() {
                         onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
                       />
                     ))}
-                    <th scope="col" className="num w-[11%] min-w-26 max-hd:hidden">
+                    <th scope="col" className="num w-[11%] min-w-32 max-hd:hidden">
                       <span className="th-pad">Uptime</span>
                     </th>
                     <th scope="col" className="w-[9%] min-w-22 max-hd:hidden">
@@ -345,7 +345,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </div>
         ) : null}
       </td>
-      <td className="mono num max-hd:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
+      <td className="mono num whitespace-nowrap max-hd:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-hd:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
     </tr>
   );
