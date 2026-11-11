@@ -535,6 +535,21 @@ details[open] > :not(summary) {
     font-size: var(--text-xs);
     color: var(--text-2);
   }
+  .tbl.stack-lg td.cell-primary {
+    order: -2;
+    flex: 1 0 100%;
+    font-size: var(--text-base);
+    color: var(--text);
+  }
+  .tbl.stack-lg td.cell-primary::before,
+  .tbl.stack-lg td.cell-actions::before {
+    display: none;
+  }
+  .tbl.stack-lg td.cell-actions {
+    order: 9;
+    flex: 1 0 100%;
+    padding-top: 6px;
+  }
   .tbl.stack-lg td::after {
     display: none;
   }
