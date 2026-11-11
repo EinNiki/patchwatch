@@ -329,7 +329,7 @@ export function FeedSources() {
               <tr>
                 <th scope="col" className="w-[12%] min-w-26"><span className="th-pad">Quelle</span></th>
                 <th scope="col" className="w-[17%] min-w-30 hd:min-w-32"><span className="th-pad">Zustand</span></th>
-                <th scope="col" className="w-[12%] min-w-32"><span className="th-pad">Letzter erfolgreicher Abruf</span></th>
+                <th scope="col" className="w-[12%] min-w-32"><span className="th-pad">Zuletzt erfolgreich</span></th>
                 <th scope="col" className="w-[9%] min-w-24 lg:max-hd:hidden"><span className="th-pad">Intervall</span></th>
                 <th scope="col" className="w-[9%] min-w-26 lg:max-hd:hidden"><span className="th-pad">Nächster Versuch</span></th>
                 <th scope="col" className="w-[14%] xl:w-[18%] min-w-26 hd:min-w-28"><span className="th-pad">Details</span></th>

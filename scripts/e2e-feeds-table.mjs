@@ -47,7 +47,7 @@ try {
     ok((await rows.count()) === 2, `${label}: zwei Quellen`);
     if (size.width >= 768) {
       const heads = (await table.locator("thead th").allInnerTexts()).map((t) => t.trim());
-      ok(JSON.stringify(heads) === JSON.stringify(["Quelle", "Zustand", "Letzter erfolgreicher Abruf", "Intervall", "Nächster Versuch", "Details", "Aktionen"]), `${label}: Spalten ${heads.join(" | ")}`);
+      ok(JSON.stringify(heads) === JSON.stringify(["Quelle", "Zustand", "Zuletzt erfolgreich", "Intervall", "Nächster Versuch", "Details", "Aktionen"]), `${label}: Spalten ${heads.join(" | ")}`);
       ok(!heads.includes("Fehler"), `${label}: keine Spalte "Fehler"`);
     }
     for (let i = 0; i < 2; i++) {
