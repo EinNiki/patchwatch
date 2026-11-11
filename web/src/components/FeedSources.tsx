@@ -41,8 +41,8 @@ const ADDABLE: { name: Feed["type"]; title: string; text: string }[] = [
 
 const BTN = "min-w-28 lg:max-xl:min-w-0";
 // Kopfzeile: unter 1100 px nur Symbole (quadratisch, Tooltip und Name für Hilfstechnik), darüber Text bei fester Breite.
-const HEAD_ICON = "max-[1099px]:w-8! max-[1099px]:min-w-0! max-[1099px]:px-0! max-[1099px]:max-md:w-11!";
-const HEAD_TXT = "max-[1099px]:sr-only";
+const HEAD_ICON = "max-[1100px]:w-8! max-[1100px]:min-w-0! max-[1100px]:px-0! max-[1100px]:max-md:w-11!";
+const HEAD_TXT = "max-[1100px]:sr-only";
 
 const TYPE_TITLE: Record<Feed["type"], string> = { debian: "Debian", ubuntu: "Ubuntu", osv: "OSV", nvd: "NVD", cisa_kev: "CISA KEV" };
 
@@ -328,12 +328,12 @@ export function FeedSources() {
             <thead>
               <tr>
                 <th scope="col" className="w-[12%] min-w-26"><span className="th-pad">Quelle</span></th>
-                <th scope="col" className="w-[17%] min-w-30 hd:min-w-32"><span className="th-pad">Zustand</span></th>
+                <th scope="col" className="w-[17%] xl:w-[15%] min-w-30 hd:min-w-32"><span className="th-pad">Zustand</span></th>
                 <th scope="col" className="w-[12%] min-w-32"><span className="th-pad">Zuletzt erfolgreich</span></th>
                 <th scope="col" className="w-[9%] min-w-24 lg:max-hd:hidden"><span className="th-pad">Intervall</span></th>
                 <th scope="col" className="w-[9%] min-w-26 lg:max-hd:hidden"><span className="th-pad">Nächster Versuch</span></th>
                 <th scope="col" className="w-[14%] xl:w-[18%] min-w-26 hd:min-w-28"><span className="th-pad">Details</span></th>
-                <th scope="col" className="num w-[27%] xl:w-[23%] min-w-70"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="num w-[27%] xl:w-[25%] min-w-70"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -633,7 +633,7 @@ function ActionButton({ icon, label, aria, danger, onClick }: { icon: "power" | 
     trash: <><path d="M2.5 4.5h11" /><path d="M6 4.5V3h4v1.5" /><path d="M4 4.5l.7 8.5h6.6l.7-8.5" /><path d="M6.5 7v4M9.5 7v4" /></>,
   } as const;
   return (
-    <Button size="row" variant={danger ? "danger" : "default"} className={ROW_BTN} title={label} aria-label={aria} onClick={onClick}>
+    <Button size="row" variant={danger ? "danger" : "default"} className={`${ROW_BTN} ${danger ? "lg:ml-2" : ""}`} title={label} aria-label={aria} onClick={onClick}>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" className={ROW_ICON}>
         {paths[icon]}
       </svg>

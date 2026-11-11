@@ -11,7 +11,7 @@ const axeSrc = readFileSync(process.env.AXE_JS, "utf8");
 const base = process.env.PW_BASE ?? "http://127.0.0.1:3100";
 const shots = process.env.PW_SHOTS;
 const ok = (c, m) => { console.log(c ? "OK  " : "FAIL", m); if (!c) process.exitCode = 1; };
-const HEADERS = ["Name", "Hostname laut Agent", "Distribution", "Agent-Version", "Zuletzt gemeldet", "Zuletzt erreichbar", "Aktionen"];
+const HEADERS = ["Name", "Hostname laut Agent", "Distribution", "Zuletzt gemeldet", "Zuletzt erreichbar", "Aktionen", "Agent-Version"];
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });
 try {
@@ -46,7 +46,7 @@ try {
     // Aktionen in einer Zeile, Zeilenhöhe, Mitte
     const geo = await page.evaluate(() => [...document.querySelectorAll("table.tbl tbody tr")].map((tr) => {
       const r = tr.getBoundingClientRect();
-      const btns = [...tr.querySelectorAll("td:last-child button")].filter((b) => b.offsetParent).map((b) => { const q = b.getBoundingClientRect(); return { top: Math.round(q.top), h: Math.round(q.height), mid: q.top + q.height / 2 }; });
+      const btns = [...tr.querySelectorAll("td.cell-actions button")].filter((b) => b.offsetParent).map((b) => { const q = b.getBoundingClientRect(); return { top: Math.round(q.top), h: Math.round(q.height), mid: q.top + q.height / 2 }; });
       const tds = [...tr.children].filter((c) => c.offsetParent).map((td) => { const q = td.getBoundingClientRect(); return { top: q.top, h: q.height }; });
       return { h: Math.round(r.height), btns, centered: Math.max(...tds.map((t) => Math.abs(t.top + t.h / 2 - (r.top + r.height / 2)))) };
     }));
@@ -54,7 +54,7 @@ try {
     ok(geo.every((g) => g.btns[0].h === 32 && g.btns[1].h === 32), `${L}: Knöpfe 32 px hoch (${geo[0].btns.map((b) => b.h).join("/")})`);
     ok(geo.every((g) => g.h <= 56), `${L}: Zeilenhöhe ≤ 56 px (${geo.map((g) => g.h).join(", ")})`);
     ok(geo.every((g) => g.centered <= 2), `${L}: Zellen vertikal mittig (Abweichung ${Math.max(...geo.map((g) => g.centered)).toFixed(1)} px)`);
-    const names = await table.locator("tbody td:last-child button").allInnerTexts();
+    const names = await table.locator("tbody td.cell-actions button").allInnerTexts();
     ok(names.filter((t) => /Token erneuern|Löschen/.test(t)).length === 0, `${L}: Token erneuern/Löschen nicht direkt sichtbar`);
 
     // Abstände und Breite
@@ -62,7 +62,7 @@ try {
     const pad = w >= 1600 ? 32 : 24;
     // Abstände ergeben sich seit der Volle-Breite-Verteilung aus Prozentanteilen (e2e-fullwidth prüft den Rand).
     // Die Messfunktion zählt bei Knöpfen nur den Text; der sichtbare Abstand zum Rand des ersten Knopfes ist maßgeblich.
-    const btnGap = await page.evaluate(() => { const tr = document.querySelector("table.tbl tbody tr"); const prev = tr.children[5]; const b = tr.lastElementChild.querySelector("button").getBoundingClientRect(); return Math.round(b.left - (prev.getBoundingClientRect().right - parseFloat(getComputedStyle(prev).paddingRight))); });
+    const btnGap = await page.evaluate(() => { const tr = document.querySelector("table.tbl tbody tr"); const prev = tr.querySelector("td.cell-actions").previousElementSibling; const b = tr.querySelector("td.cell-actions button").getBoundingClientRect(); return Math.round(b.left - (prev.getBoundingClientRect().right - parseFloat(getComputedStyle(prev).paddingRight))); });
     console.log(`INFO ${L}: Abstand zum Knopf ${btnGap}`);
     ok(r.pairs.every((p) => p.gap >= pad - 8), `${L}: kein Abstand unter ${pad - 8} px (${r.pairs.map((p) => p.gap).join(", ")})`);
     ok(r.overflow <= 0, `${L}: kein horizontaler Überlauf`);
@@ -74,8 +74,8 @@ try {
       return { dt: Math.abs(t.right - c.right), dl: Math.abs(t.left - c.left), lastRight: last.right, tr: t.right };
     });
     ok(fill.dt <= 1 && fill.dl <= 1, `${L}: Tabelle füllt die Breite des Inhaltsbereichs (Δ rechts ${fill.dt.toFixed(1)} px)`);
-    const act = await page.evaluate(() => { const tr = document.querySelector("table.tbl tbody tr"); const btns = [...tr.querySelectorAll("td:last-child button")].filter((b) => b.offsetParent); const rr = btns[btns.length - 1].getBoundingClientRect(); const td = tr.lastElementChild.getBoundingClientRect(); return td.right - rr.right; });
-    ok(act <= 32 + 1, `${L}: Aktionen rechtsbündig in der letzten Spalte (Abstand zum Rand ${act.toFixed(1)} px)`);
+    const act = await page.evaluate(() => { const tr = document.querySelector("table.tbl tbody tr"); const td = tr.querySelector("td.cell-actions"); const b = td.querySelector("button"); return b.getBoundingClientRect().left - td.getBoundingClientRect().left; });
+    ok(act <= 32 + 1, `${L}: Aktionen linksbündig in ihrer Zelle (Abstand zum Zellrand ${act.toFixed(1)} px)`);
     if (shots) await page.screenshot({ path: `${shots}/agents-${w}-${scheme}.png` });
     await page.evaluate(axeSrc);
     const v = await page.evaluate(() => axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21aa", "best-practice"] }).then((x) => x.violations.map((y) => `${y.id}: ${y.nodes.length}`)));
@@ -150,7 +150,7 @@ try {
     const L = `390/${scheme}`;
     ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${L}: kein Überlauf`);
     ok(await table.locator("thead").evaluate((e) => e.getBoundingClientRect().height <= 1), `${L}: Kopfzeile nur für Screenreader (gestapelt)`);
-    const b = await page.evaluate(() => [...document.querySelectorAll("table.tbl tbody tr:first-child td:last-child button")].filter((x) => x.offsetParent).map((x) => { const r = x.getBoundingClientRect(); return [Math.round(r.height), Math.round(r.width)]; }));
+    const b = await page.evaluate(() => [...document.querySelectorAll("table.tbl tbody tr:first-child td.cell-actions button")].filter((x) => x.offsetParent).map((x) => { const r = x.getBoundingClientRect(); return [Math.round(r.height), Math.round(r.width)]; }));
     ok(b.length === 2 && b.every(([h, w]) => h >= 44 && w >= 44), `${L}: Aktionen ≥ 44 px (${JSON.stringify(b)})`);
     if (shots) await page.screenshot({ path: `${shots}/agents-390-${scheme}.png` });
     await page.evaluate(axeSrc);

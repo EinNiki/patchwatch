@@ -129,11 +129,11 @@ try {
       const sameRow = bs.every((b) => Math.abs(b.y - bs[0].y) <= 1);
       const ordered = bs[0].x < bs[1].x && bs[1].x < bs[2].x;
       ok(sameRow && ordered, `${tag}: drei Knöpfe in einer Reihe, Reihenfolge Alle abrufen, Quelle hinzufügen, Verwalten ${JSON.stringify(bs.map((b) => [b.x, b.y, b.width].map(Math.round)))}`);
-      const wantH = w < 768 ? 44 : 36;
+      const wantH = w < 768 ? 44 : 32;
       ok(bs.every((b) => Math.abs(b.height - wantH) <= 1), `${tag}: Knopfhöhe ${wantH} (${bs.map((b) => Math.round(b.height))})`);
       ok(bs[2].x + bs[2].width <= w - 8 && bs[2].x + bs[2].width >= w * 0.8, `${tag}: rechts im Kopf ausgerichtet ${Math.round(bs[2].x + bs[2].width)}`);
       if (w >= 640) ok(Math.abs(bs[1].x - bs[0].x - bs[0].width - 8) <= 1 && Math.abs(bs[2].x - bs[1].x - bs[1].width - 8) <= 1, `${tag}: 8 px Abstand`);
-      const textVisible = await bar.getByRole("button", { name: "Quelle hinzufügen" }).evaluate((b) => { const t = b.querySelector(".sbtn-t"); return t.getBoundingClientRect().width > 4 && getComputedStyle(t).position !== "absolute"; });
+      const textVisible = await bar.getByRole("button", { name: "Quelle hinzufügen" }).evaluate((b) => { const t = [...b.querySelectorAll("span")].pop(); return t.getBoundingClientRect().width > 4 && getComputedStyle(t).position !== "absolute"; });
       ok(textVisible === (w >= 1100), `${tag}: ${w >= 1100 ? "Knöpfe mit Text" : "nur Symbole"}`);
       if (w < 1100) for (const n of names) ok(!!(await bar.getByRole("button", { name: n }).getAttribute("title")), `${tag}: ${n} hat Tooltip und Namen`);
       if (w < 640) {
@@ -213,8 +213,16 @@ try {
         row.getByRole("button", { name: `${f.label} bearbeiten` }),
         row.getByRole("button", { name: `${f.label} löschen` }),
       ];
-      const bs = [];
-      for (const b of btns) { await b.waitFor({ state: "visible" }); bs.push(await b.boundingBox()); }
+      // Warten, bis die Zeile ruhig steht (Details und Höhen setzen sich kurz nach dem Laden), dann alle vier Boxen messen.
+      let bs = [];
+      for (let k = 0, prevJ = ""; k < 30; k++) {
+        bs = [];
+        for (const b of btns) { await b.waitFor({ state: "visible" }); bs.push(await b.boundingBox()); }
+        const j = JSON.stringify(bs);
+        if (j === prevJ && bs.every((b) => Math.abs(b.y - bs[0].y) <= 1 || w < 1024)) break;
+        prevJ = j;
+        await page.waitForTimeout(200);
+      }
       if (w >= 1024) {
         ok(bs.every((b) => Math.abs(b.y - bs[0].y) <= 1), `${tag} ${f.label}: vier Knöpfe in einer Reihe, ohne Umbruch ${JSON.stringify(bs.map((b) => [b.x, b.y, b.width, b.height].map(Math.round)))}`);
         ok(bs.every((b) => Math.abs(b.height - 32) <= 1), `${tag} ${f.label}: Höhe 32 (${bs.map((b) => Math.round(b.height))})`);
@@ -293,8 +301,8 @@ try {
   await page.goto(`${base}/cves`);
   await table.waitFor();
   const deb2 = table.locator("tbody > tr:not(.run-row)").first();
-  const run = deb2.getByRole("button", { name: "Debian jetzt abrufen" });
-  ok(/läuft/.test(await run.innerText()), "Lauf aktiv: Knopf zeigt „läuft“");
+  const run = deb2.getByRole("button", { name: /Debian.*(jetzt abrufen|Abruf läuft)/ });
+  ok(/läuft/i.test(await run.innerText()), "Lauf aktiv: Knopf zeigt „läuft“");
   ok((await run.getAttribute("aria-busy")) === "true" || (await run.isDisabled()), "Lauf aktiv: Knopf gesperrt");
   ok(await deb2.getByRole("button", { name: "Debian abschalten" }).isEnabled() && await deb2.getByRole("button", { name: "Debian löschen" }).isEnabled(), "Lauf aktiv: Abschalten und Löschen bleiben nutzbar");
   await deb2.getByRole("button", { name: "Debian löschen" }).click();
