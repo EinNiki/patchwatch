@@ -162,9 +162,8 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
 
   const sentence = sc ? summarySentence(sc, { newest, proxmox: host.is_proxmox, restricted: notice.restricted }) : "CVE-Lage wird geladen …";
   const segments = sc ? barSegments(sc) : [];
-  const bigTiles: Tile[] = ["open", "reboot", "fixed"];
-  // „Unbekannt“ nur als Kachel, wenn es etwas gibt (oder die Liste gerade gewählt ist); sonst steht es ruhig in den Host-Details.
-  const showUnknown = Boolean(sc) && (numbers.unknown > 0 || tile === "unknown");
+  // Vier gleichwertige Kacheln; „Unbekannt“ bleibt auch bei 0 sichtbar (dann gedämpft), damit das Raster stabil ist.
+  const bigTiles: Tile[] = ["open", "reboot", "fixed", "unknown"];
 
   return (
     <section aria-labelledby="cve" className="mb-6">
@@ -210,7 +209,7 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
           <span key={sg.tile} style={{ width: `${sg.pct}%` }} className={`${TONE_BG[TILE_META[sg.tile].tone]} ${sg.tile === "unknown" ? "opacity-60" : ""}`} title={`${TILE_META[sg.tile].word}: ${sg.count}`} />
         ))}
       </div>
-      <div className={`mb-2 grid gap-2 max-md:flex max-md:overflow-x-auto max-md:pb-1 max-md:[scroll-snap-type:x_proximity] ${showUnknown ? "grid-cols-[repeat(3,minmax(0,1fr))_auto]" : "grid-cols-3"}`} role="group" aria-label="CVE-Zustände">
+      <div className="mb-2 grid grid-cols-1 gap-2 min-[640px]:grid-cols-2 hd:grid-cols-4" role="group" aria-label="CVE-Zustände">
         {bigTiles.map((t) => (
           <TileButton
             key={t}
@@ -224,26 +223,10 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
             warn={t === "open" && notice.restricted}
           />
         ))}
-        {showUnknown ? (
-          <button
-            type="button"
-            aria-pressed={tile === "unknown"}
-            onClick={() => pick("unknown")}
-            className={`flex shrink-0 flex-col justify-center gap-0.5 rounded-xs border px-3 py-2 text-left max-md:min-h-11 ${tile === "unknown" ? "border-2 border-unknown bg-unknown-soft" : "border-line bg-surface hover:bg-sunk"}`}
-          >
-            <span className="flex items-center gap-1.5 text-sm font-semibold text-unknown">
-              <Icon name="unknown" size={16} /> Unbekannt
-              {tile === "unknown" ? <Icon name="ok" size={14} /> : null}
-            </span>
-            <span className="text-2xl font-semibold leading-none tabular-nums text-fg">{numbers.unknown.toLocaleString("de-DE")}</span>
-            <span className="text-xs text-fg2">ohne Aussage</span>
-          </button>
-        ) : null}
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg2">
         <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>{kernelLine(running ?? null, newest ?? null, Boolean(rebootNeeded))}</span>
-          {rebootNeeded ? <CodeField inline text="sudo reboot" label="Befehl kopieren" /> : null}
         </span>
       </div>
       {details}
@@ -364,7 +347,7 @@ function TileButton({ t, n, active, loaded, onPick, line, sub, warn }: { t: Tile
       type="button"
       aria-pressed={active}
       onClick={() => onPick(t)}
-      className={`flex min-w-0 flex-col gap-0.5 rounded-xs border bg-surface px-3 py-2 text-left hover:bg-sunk max-md:min-h-11 max-md:w-56 max-md:shrink-0 ${active ? `border-2 ${TONE_BORDER[m.tone]} bg-sunk` : "border-line"}`}
+      className={`flex min-w-0 flex-col gap-0.5 rounded-xs border bg-surface px-3 py-2 text-left hover:bg-sunk max-md:min-h-11 ${active ? `border-2 ${TONE_BORDER[m.tone]} bg-sunk` : "border-line"}`}
     >
       <span className={`flex items-center gap-1.5 text-sm font-semibold ${TONE_TEXT[m.tone]}`}>
         <Icon name={warn ? "warn" : m.icon} size={16} />
@@ -375,7 +358,7 @@ function TileButton({ t, n, active, loaded, onPick, line, sub, warn }: { t: Tile
           </span>
         ) : null}
       </span>
-      <span className="text-2xl font-semibold leading-none tabular-nums text-fg">{loaded ? n.toLocaleString("de-DE") : "…"}</span>
+      <span className={`text-2xl font-semibold leading-none tabular-nums ${loaded && n === 0 && !active ? "text-fg3" : "text-fg"}`}>{loaded ? n.toLocaleString("de-DE") : "…"}</span>
       <span className="text-xs text-fg2">{line}</span>
       {sub ? (
         <span className="text-xs text-fg3" title={t === "open" && /Fix im Archiv/.test(sub) ? UPDATE_HINT : undefined}>
