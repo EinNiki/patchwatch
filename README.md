@@ -401,14 +401,13 @@ Feed-Zustand je Quelle („veraltet seit …“).
   betroffene Hosts.
 - **Host-Detail, CVE-Lage**: ein Satz als Entscheidungshilfe („Nach dem Neustart auf 7.0.0-42.42 sind noch 81 CVEs
   offen, 2894 werden behoben.“; ohne nötigen Neustart „81 CVEs offen, kein Fix installiert.“; ohne offene „Keine
-  offenen CVEs.“), ein gestapelter Balken und drei Kacheln: **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
-  Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**; „Unbekannt“
-  als kleiner Zähler. „Nicht betroffen“ wird in der Host-Ansicht nicht angezeigt (die API liefert die Zahl weiter; eine alte
+  offenen CVEs.“), ein gestapelter Balken und vier gleich große Kacheln (ab 1280 px in einer Reihe, 640–1279 px 2×2, darunter eine Spalte): **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
+  Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**, **Unbekannt** (bei 0 gedämpft, aber sichtbar). „Nicht betroffen“ wird in der Host-Ansicht nicht angezeigt (die API liefert die Zahl weiter; eine alte
   URL mit `?cve=not_affected` öffnet die Standardansicht). Jede Kachel zeigt Zahl, Wort, Icon und eine Zeile, die aktive ist per Rahmen und Haken markiert. Es
   steht immer nur **eine** Liste da (Standard „Offen“): nach Level (hoch zuerst), dann Alter sortiert; „Neustart nötig“ und
   „Gefixt“ sind nach Fix-Version gruppiert (neueste zuerst, „Gefixt“ eingeklappt, „Alle anzeigen“ klappt alles auf).
   Suche (CVE-ID und Text) und Level-Filter gelten für die aktive Liste. Die Kernel-Zeile zeigt laufenden und neuesten
-  installierten Kernel; „Befehl kopieren“ legt `sudo reboot` in die Zwischenablage und führt nichts aus. Beim Scrollen
+  installierten Kernel. Beim Scrollen
   bleibt eine verkürzte Leiste mit den Zählern stehen. Ein Eintrag ohne Fix-Version zählt nie als „Fix installiert“.
   Ist die zuständige Quelle eingeschränkt, steht über der Liste ein Hinweis (z. B. „Ubuntu: Offene Fälle nicht vollständig
   geladen (API überlastet, seit 22:08) …“), die Kachel „Offen“ trägt ein Warnsymbol und „kann unvollständig sein“; nie

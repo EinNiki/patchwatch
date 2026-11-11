@@ -4,9 +4,9 @@ import { copyText } from "../src/lib/clipboard.ts";
 
 test("uses the clipboard API when available", async () => {
   let got = "";
-  const r = await copyText("sudo reboot", { writeText: async (t) => void (got = t), legacy: () => assert.fail("kein Rückfall nötig") });
+  const r = await copyText("echo Beispiel", { writeText: async (t) => void (got = t), legacy: () => assert.fail("kein Rückfall nötig") });
   assert.equal(r, "clipboard");
-  assert.equal(got, "sudo reboot");
+  assert.equal(got, "echo Beispiel");
 });
 
 test("falls back when navigator.clipboard is missing (insecure context)", async () => {

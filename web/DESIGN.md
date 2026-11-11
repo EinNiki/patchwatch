@@ -175,8 +175,8 @@ und ein kleiner Hook genügen (Messung: First-Load-JS +0,4 KB gegenüber +30–4
   (`clamp(12rem, 100dvh − 22rem, 56rem)`); erst darüber scrollt sie innen (ab 60 Zeilen virtualisiert). Der Platzhalter beim
   Laden nutzt die Zahl aus den Kopfzahlen, damit nichts springt.
 - Ab 1280 px (Breakpoint `hd`) steht rechts die mitlaufende Spalte „Host-Details“ (20 rem), darunter derselbe Inhalt als
-  aufklappbarer Abschnitt unter den Kacheln. „Unbekannt“ ist nur dann eine kleine Kachel in derselben Reihe, wenn es größer
-  als 0 ist; sonst steht es ruhig in den Host-Details.
+  aufklappbarer Abschnitt unter den Kacheln. Die vier Kacheln (Offen, Neustart nötig, Gefixt, Unbekannt) sind gleich groß: ab 1280 px vier in einer Reihe,
+  640–1279 px 2×2, darunter eine Spalte; „Unbekannt“ bleibt bei 0 sichtbar, aber gedämpft.
 - Ab 1600 px (`wide`) kommen Fix-Version (Offen), Paket und Quelle als Spalten dazu; die Beschreibung behält `1fr`.
   Unter 768 px bleibt die Zeile gestapelt.
 - „Fix im Archiv“: Tooltip und Detaildialog nennen den Weg (`sudo apt update && sudo apt upgrade`, danach Neustart bei
