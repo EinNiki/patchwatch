@@ -1,6 +1,6 @@
 name: Images
 
-# Baut die Docker-Images auf GitHub (nichts lokal) und veröffentlicht sie in ghcr.io: latest + dev + sha-<commit>.
+# Baut die Docker-Images auf GitHub (nichts lokal) und veröffentlicht sie in ghcr.io: latest + dev + sha-<commit>. Schreibrecht auf die ghcr-Pakete kommt aus den Paketeinstellungen (Actions access: Repository mit Write oder Admin).
 # Versionierte Images (v1.2.3) und Agent-Binaries kommen weiterhin aus release.yml beim Tag.
 on:
   push:
