@@ -29,8 +29,8 @@ type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 /** Spaltenanteile (Summe 100 % bei 8 Spalten) und Mindestbreiten (Summe 59 rem). Unter 1280 px entfallen Zuletzt gemeldet, Uptime
  *  und Agent (Meldezeit steht dann im Host-Feld), unter 1024 px zusätzlich Updates. */
 const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: string }[] = [
-  { key: "name", label: "Host", cls: "w-[15%] min-w-32" },
-  { key: "kernel", label: "Distribution / Kernel", cls: "w-[18%] min-w-38" },
+  { key: "name", label: "Host", cls: "w-[15%] min-w-36" },
+  { key: "kernel", label: "Distribution / Kernel", cls: "w-[18%] min-w-42" },
   { key: "report", label: DATA_LABEL, cls: "w-[11%] min-w-26 md:max-hd:hidden", tip: DATA_TIP },
   { key: "updates", label: "Updates", num: true, cls: "w-[10%] min-w-24 md:max-lg:hidden" },
   { key: "cve", label: "CVE", cls: "w-[14%] min-w-32" },
@@ -186,34 +186,29 @@ function HostsView() {
               Filter{activeFilters ? ` (${activeFilters})` : ""}
             </Button>
           </div>
-          <section className="tcard" aria-labelledby="hosts-card-h">
-          <div className="px-4 pb-1 pt-5 md:px-7 md:pt-6">
-            <h2 id="hosts-card-h" className="m-0 mb-1 text-xl font-bold">Hosts verwalten</h2>
-            <p className="m-0 max-w-[78ch] text-sm text-fg2">Hier siehst du, welche Hosts Patchwatch überwacht und wie es um ihre Updates und CVEs steht. Ein Klick auf eine Zeile öffnet die Host-Seite.</p>
-          </div>
           <form
             id="host-filters"
             role="search"
             aria-label="Hosts filtern"
             onSubmit={(e) => e.preventDefault()}
-            className={`flex-wrap items-end gap-x-4 gap-y-3 px-4 py-5 max-md:flex-col max-md:items-stretch md:px-7 ${filtersOpen ? "flex" : "max-md:hidden md:flex"}`}
+            className={`mb-3 flex-wrap items-center gap-x-4 gap-y-2 max-md:flex-col max-md:items-stretch ${filtersOpen ? "flex" : "max-md:hidden md:flex"}`}
           >
-            <label className="flex flex-col items-start gap-1.5 text-[13px] font-bold text-fg max-md:items-stretch">
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
               Suche
               <TextInput
                 type="search"
                 value={q}
                 onChange={(e) => setParam({ q: e.target.value })}
                 placeholder="Name, Distribution, Kernel"
-                className="min-h-10 w-72 max-w-full rounded-lg bg-surface font-normal max-md:min-h-11 max-md:w-full"
+                className="w-64 max-w-full font-normal max-md:w-full"
               />
             </label>
-            <label className="flex flex-col items-start gap-1.5 text-[13px] font-bold text-fg max-md:items-stretch">
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
               Status
               <select
                 value={status}
                 onChange={(e) => setParam({ status: e.target.value })}
-                className="min-h-10 rounded-lg border border-control bg-surface px-3 text-sm font-normal text-fg max-md:min-h-11"
+                className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11"
               >
                 <option value="">alle</option>
                 {HOST_STATUS_ORDER.map((s) => (
@@ -228,7 +223,7 @@ function HostsView() {
               nur Neustart nötig
             </label>
             {/* Mobil sind die Spaltenköpfe ausgeblendet: Sortierung steht hier. */}
-            <label className="flex flex-col items-start gap-1.5 text-[13px] font-bold text-fg max-md:items-stretch md:hidden">
+            <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1 md:hidden">
               Sortierung
               <select
                 value={`${sort}:${dir}`}
@@ -271,7 +266,7 @@ function HostsView() {
                         onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
                       />
                     ))}
-                    <th scope="col" className="num w-[11%] min-w-32 max-hd:hidden">
+                    <th scope="col" className="num w-[11%] min-w-26 max-hd:hidden">
                       <span className="th-pad">Uptime</span>
                     </th>
                     <th scope="col" className="w-[9%] min-w-22 max-hd:hidden">
@@ -287,7 +282,6 @@ function HostsView() {
               </table>
             </div>
           )}
-          </section>
         </>
       )}
     </>
@@ -351,7 +345,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </div>
         ) : null}
       </td>
-      <td className="mono num whitespace-nowrap max-hd:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
+      <td className="mono num max-hd:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-hd:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
     </tr>
   );
@@ -363,32 +357,32 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
   const parts: React.ReactNode[] = [];
   if (h.cve_vulnerable > 0)
     parts.push(
-      <Link key="v" href={to("open")} className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] font-semibold text-crit no-underline hover:underline max-md:min-h-11">
+      <Link key="v" href={to("open")} className="inline-flex items-center gap-1 font-semibold text-crit no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="crit" /> {h.cve_vulnerable} offen
       </Link>,
     );
   if (h.cve_fix_pending > 0)
     parts.push(
-      <Link key="p" href={to("open")} className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-warn no-underline hover:underline max-md:min-h-11">
+      <Link key="p" href={to("open")} className="inline-flex items-center gap-1 text-warn no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="warn" /> {h.cve_fix_pending} Fix angekündigt
       </Link>,
     );
   if (h.cve_reboot > 0)
     parts.push(
-      <Link key="r" href={to("reboot")} className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-warn no-underline hover:underline max-md:min-h-11">
+      <Link key="r" href={to("reboot")} className="inline-flex items-center gap-1 text-warn no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="reboot" /> {h.cve_reboot} Neustart
       </Link>,
     );
   if (h.is_proxmox || h.cve_unknown > 0)
     parts.push(
-      <Link key="u" href={to("unknown")} className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-unknown no-underline hover:underline max-md:min-h-11">
+      <Link key="u" href={to("unknown")} className="inline-flex items-center gap-1 text-unknown no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="unknown" /> {h.is_proxmox ? "manuell prüfen" : `${h.cve_unknown} unbekannt`}
       </Link>,
     );
   // Gefixt zählt nie als Entwarnung für Proxmox oder bei fehlender Quelle; es steht nur als ruhige Information dabei.
   const fixed =
     h.cve_fixed > 0 && !h.is_proxmox ? (
-      <Link key="f" href={to("fixed")} className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-fg2 no-underline hover:underline max-md:min-h-11">
+      <Link key="f" href={to("fixed")} className="inline-flex items-center gap-1 text-fg2 no-underline hover:underline min-h-6 items-center max-md:min-h-11">
         <Icon name="ok" /> {h.cve_fixed} gefixt
       </Link>
     ) : null;
@@ -397,18 +391,18 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
     // Quelle unvollständig/veraltet/fehlerhaft: nie "keine offenen", sondern die Begründung zeigen.
     if (h.cve_source_issue)
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-unknown">
+        <span className="inline-flex items-center gap-1 text-unknown">
           <Icon name="unknown" /> {h.cve_source_issue}
         </span>
       );
     return (
-      <div className="flex flex-col items-start gap-1.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
+      <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
         {feedOk ? (
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-fg2">
+          <span className="inline-flex items-center gap-1 text-fg2">
             <Icon name="ok" /> keine offenen
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-sunk px-2.5 py-1 text-[13px] text-unknown">
+          <span className="inline-flex items-center gap-1 text-unknown">
             <Icon name="unknown" /> Feed prüfen
           </span>
         )}
@@ -417,7 +411,7 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
     );
   }
   return (
-    <div className="flex flex-col items-start gap-1.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
+    <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
       {parts}
       {fixed}
     </div>

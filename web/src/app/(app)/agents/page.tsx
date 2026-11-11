@@ -316,7 +316,7 @@ export default function AgentsPage() {
           </div>
         </Empty>
       ) : (
-        <div className="tcard max-hd:overflow-x-auto">
+        <div className="max-hd:overflow-x-auto">
           <table className="tbl stack dist md:[--tbl-min:35.5rem] lg:[--tbl-min:45rem] hd:[--tbl-min:55.5rem]">
             <caption>Agents mit Version, Zeitpunkt der letzten Daten und letzter Aktivität</caption>
             <thead>

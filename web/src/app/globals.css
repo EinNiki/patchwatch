@@ -129,48 +129,6 @@ code,
   /* Chips, Zahlen und Texte einer Zeile liegen auf einer Linie. */
   vertical-align: middle;
 }
-
-/* Tabellenkarte: abgerundeter Rahmen um die Tabelle, höherer Kopf, großzügigere Zeilen. `clip` statt `hidden`, damit der Kopf sticky bleibt. */
-.tcard {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  overflow: clip;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
-}
-.tcard .tbl {
-  --head-h: 44px;
-}
-.tcard .tbl th {
-  font-weight: 700;
-  border-top: 0;
-}
-.tcard .tbl td {
-  padding-block: 16px;
-}
-.tcard .tbl tbody tr:last-child td {
-  border-bottom: 0;
-}
-@media (max-width: 767px) {
-  /* Gestapelte Einträge halten Abstand zum Kartenrand. */
-  .tcard .tbl.stack td,
-  .tcard .tbl.stack tbody td {
-    padding-inline: 16px;
-  }
-}
-@media (min-width: 768px) {
-  /* Erste und letzte Spalte halten Abstand zum Kartenrand. */
-  .tcard .tbl th:first-child > .th-pad,
-  .tcard .tbl th:first-child > button,
-  .tcard .tbl td:first-child {
-    padding-left: calc(var(--col-pad) + 8px);
-  }
-  .tcard .tbl th:last-child > .th-pad,
-  .tcard .tbl th:last-child > button,
-  .tcard .tbl td:last-child {
-    padding-right: calc(var(--col-pad) + 8px);
-  }
-}
 @media (min-width: 768px) {
   .tbl {
     --col-pad: 12px;

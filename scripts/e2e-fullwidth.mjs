@@ -213,17 +213,8 @@ try {
         row.getByRole("button", { name: `${f.label} bearbeiten` }),
         row.getByRole("button", { name: `${f.label} löschen` }),
       ];
-      for (const b of btns) await b.waitFor({ state: "visible" });
-      // Layout abwarten (Zeilenhöhen setzen sich nach dem Laden): zweimal hintereinander gleiche Lage.
-      let bs = [], prevBs = "";
-      for (let k = 0; k < 20; k++) {
-        bs = [];
-        for (const b of btns) bs.push(await b.boundingBox());
-        const cur = JSON.stringify(bs);
-        if (cur === prevBs) break;
-        prevBs = cur;
-        await page.waitForTimeout(150);
-      }
+      const bs = [];
+      for (const b of btns) { await b.waitFor({ state: "visible" }); bs.push(await b.boundingBox()); }
       if (w >= 1024) {
         ok(bs.every((b) => Math.abs(b.y - bs[0].y) <= 1), `${tag} ${f.label}: vier Knöpfe in einer Reihe, ohne Umbruch ${JSON.stringify(bs.map((b) => [b.x, b.y, b.width, b.height].map(Math.round)))}`);
         ok(bs.every((b) => Math.abs(b.height - 32) <= 1), `${tag} ${f.label}: Höhe 32 (${bs.map((b) => Math.round(b.height))})`);
