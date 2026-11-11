@@ -16,7 +16,7 @@ import { Empty, ErrorNote } from "@/components/States";
 import { writeFailure } from "@/lib/apiErrors";
 import { toast } from "@/lib/toastStore";
 import { useFeedRuns } from "@/lib/useFeedRuns";
-import { isActive, isFailure, latestBySource, summary, type FeedRun } from "@/lib/feedRuns";
+import { isActive, isFailure, latestBySource, runText, summary, type FeedRun } from "@/lib/feedRuns";
 import { MiniStepper, RunStepper } from "@/components/RunStepper";
 import { StatusBadge } from "@/components/StatusBadge";
 import { VISIBLE_DETAIL_LINES, detailLines, errorChip, errorLine, needsAttention } from "@/lib/feedView";
@@ -40,6 +40,9 @@ const ADDABLE: { name: Feed["type"]; title: string; text: string }[] = [
 ];
 
 const BTN = "min-w-28 lg:max-xl:min-w-0";
+// Kopfzeile: unter 1100 px nur Symbole (quadratisch, Tooltip und Name für Hilfstechnik), darüber Text bei fester Breite.
+const HEAD_ICON = "max-[1099px]:w-8! max-[1099px]:min-w-0! max-[1099px]:px-0! max-[1099px]:max-md:w-11!";
+const HEAD_TXT = "max-[1099px]:sr-only";
 
 const TYPE_TITLE: Record<Feed["type"], string> = { debian: "Debian", ubuntu: "Ubuntu", osv: "OSV", nvd: "NVD", cisa_kev: "CISA KEV" };
 
@@ -294,20 +297,20 @@ export function FeedSources() {
         </p>
         {/* Knopfreihe: rechts neben dem Text; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eine eigene Zeile, gleich breit. */}
         <span className="src-actions ml-auto flex shrink-0 items-center gap-2">
-          <button type="button" className="sbtn" title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning || allBusy} aria-busy={allBusy || undefined}>
-            <NavIcon name="refresh" />
-            <span className="sbtn-t">Alle abrufen</span>
-          </button>
-          <button type="button" className="sbtn sbtn-primary" title="Quelle hinzufügen" onClick={() => setAdding(true)}>
+          <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
+            {allBusy ? null : <NavIcon name="refresh" />}
+            <span className={HEAD_TXT}>Alle abrufen</span>
+          </Button>
+          <Button size="wide" variant="primary" className={HEAD_ICON} title="Quelle hinzufügen" onClick={() => setAdding(true)}>
             <NavIcon name="plus" />
-            <span className="sbtn-t">Quelle hinzufügen</span>
-          </button>
-          <button type="button" className="sbtn" title="Verwalten" aria-expanded={tableOpen} aria-controls="feeds-table" onClick={() => setManage(!tableOpen)}>
+            <span className={HEAD_TXT}>Quelle hinzufügen</span>
+          </Button>
+          <Button size="wide" className={HEAD_ICON} title="Verwalten" aria-expanded={tableOpen} aria-controls="feeds-table" onClick={() => setManage(!tableOpen)}>
             <span className={`transition-transform duration-(--dur-1) ${tableOpen ? "rotate-180" : ""}`}>
               <NavIcon name="chevron" size={14} />
             </span>
-            <span className="sbtn-t">Verwalten</span>
-          </button>
+            <span className={HEAD_TXT}>Verwalten</span>
+          </Button>
         </span>
       </div>
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
@@ -370,18 +373,9 @@ export function FeedSources() {
                   </td>
                   <td className="num max-lg:flex-[1_0_100%]">
                     <div className="@container">
-                      {/* Vier Knöpfe nebeneinander. Ist die Spalte (Container, nicht Fenster) schmaler als 28 rem, werden Abschalten, Bearbeiten
-                          und Löschen zu Symbolen; unter 1024 px (Karten) bleiben die Texte und die Knöpfe laufen bei Platzmangel in zwei Reihen. */}
-                      <div className="feed-actions flex items-center justify-end gap-2 max-lg:grid max-lg:grid-cols-4 max-lg:@max-[28rem]:grid-cols-2">
-                        <Button
-                          className="min-w-0! border-accent text-accent"
-                          onClick={() => void runOne(f)}
-                          busy={starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" })}
-                          disabled={!f.enabled}
-                          aria-label={`${f.label} jetzt abrufen`}
-                        >
-                          {starting.has(f.source) || isActive(latest.get(f.source) ?? { status: "ok" }) ? "läuft" : "Jetzt abrufen"}
-                        </Button>
+                      {/* Vier Knöpfe nebeneinander. Ist die Spalte (Container, nicht Fenster) schmaler als 30 rem, werden alle vier Knöpfe quadratische Symbole; unter 1024 px (Karten) bleiben die Texte und die Knöpfe laufen bei Platzmangel in zwei Reihen. */}
+                      <div className="feed-actions flex items-center justify-end gap-2 max-lg:grid max-lg:grid-cols-4 max-lg:@max-[30rem]:grid-cols-2">
+                        <RunButton f={f} run={latest.get(f.source)} starting={starting.has(f.source)} onRun={() => void runOne(f)} />
                         <ActionButton icon="power" label={f.enabled ? "Abschalten" : "Einschalten"} aria={`${f.label} ${f.enabled ? "abschalten" : "einschalten"}`} onClick={() => void setEnabled(f, !f.enabled)} />
                         <ActionButton icon="edit" label="Bearbeiten" aria={`${f.label} bearbeiten`} onClick={() => setEditing(f)} />
                         <ActionButton icon="trash" label="Löschen" aria={`${f.label} löschen`} danger onClick={() => setRemoving(f)} />
@@ -613,6 +607,24 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
   );
 }
 
+// Aktionsreihe der Quellenzeile: alle vier Knöpfe teilen sich eine Größe (feste Breite 7rem, 32 px hoch). Ist die Spalte (Container)
+// schmaler als 30 rem, werden alle vier gemeinsam quadratische Symbole; auf Karten (<1024 px) füllen sie ihre Rasterzelle.
+const ROW_BTN = "lg:@max-[30rem]:w-8! lg:@max-[30rem]:px-0! max-lg:w-full!";
+const ROW_TXT = "lg:@max-[30rem]:sr-only";
+const ROW_ICON = "hidden lg:@max-[30rem]:block";
+
+/** „Jetzt abrufen“: bleibt im Zustand „Läuft“ exakt gleich groß (Spinner statt Symbol, Text „Läuft“), Fortschritt im Tooltip. */
+function RunButton({ f, run, starting, onRun }: { f: Feed; run: FeedRun | undefined; starting: boolean; onRun: () => void }) {
+  const busy = starting || isActive(run ?? { status: "ok" });
+  const title = busy ? `Abruf läuft${run ? `: ${runText(run)}` : ""}` : "Jetzt abrufen";
+  return (
+    <Button size="row" className={`${ROW_BTN} border-accent text-accent`} onClick={onRun} busy={busy} disabled={!f.enabled} title={title} aria-label={busy ? `${f.label}: Abruf läuft` : `${f.label} jetzt abrufen`}>
+      {busy ? null : <span className={ROW_ICON}><NavIcon name="refresh" /></span>}
+      <span className={ROW_TXT}>{busy ? "Läuft" : "Jetzt abrufen"}</span>
+    </Button>
+  );
+}
+
 /** Aktionsknopf in der Quellenzeile: Text; bei schmaler Spalte (Container-Query) nur Symbol mit Tooltip und vollem Namen. */
 function ActionButton({ icon, label, aria, danger, onClick }: { icon: "power" | "edit" | "trash"; label: string; aria: string; danger?: boolean; onClick: () => void }) {
   const paths = {
@@ -621,17 +633,11 @@ function ActionButton({ icon, label, aria, danger, onClick }: { icon: "power" | 
     trash: <><path d="M2.5 4.5h11" /><path d="M6 4.5V3h4v1.5" /><path d="M4 4.5l.7 8.5h6.6l.7-8.5" /><path d="M6.5 7v4M9.5 7v4" /></>,
   } as const;
   return (
-    <Button
-      variant={danger ? "danger" : "default"}
-      className={`min-w-0! ${danger ? "lg:ml-2 max-lg:ml-0" : ""} lg:@max-[28rem]:w-8! lg:@max-[28rem]:px-0!`}
-      title={label}
-      aria-label={aria}
-      onClick={onClick}
-    >
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" className="hidden lg:@max-[28rem]:block">
+    <Button size="row" variant={danger ? "danger" : "default"} className={ROW_BTN} title={label} aria-label={aria} onClick={onClick}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" className={ROW_ICON}>
         {paths[icon]}
       </svg>
-      <span className="lg:@max-[28rem]:sr-only">{label}</span>
+      <span className={ROW_TXT}>{label}</span>
     </Button>
   );
 }

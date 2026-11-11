@@ -1,26 +1,54 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, Ref, SelectHTMLAttributes } from "react";
 
-// Einheitliche Regeln: 32 px hoch (Touch: 44 px), Mindestbreite 7rem, Zustände hover/active/focus-visible/disabled/busy.
+// Einheitliche Regeln für alle Knöpfe: feste Höhe 32 px (Touch: 44 px), Rahmen immer vorhanden, Zustände nur über Farbe und Symbol,
+// nie über die Größe (kein Skalieren beim Drücken). Größen: default (Mindestbreite 7rem), row (feste Breite 7rem für Aktionsreihen),
+// wide (feste Breite 10rem, Kopfzeile des Quellenbereichs), icon (quadratisch, nur Symbol).
 const base =
-  "inline-flex min-h-8 min-w-28 items-center justify-center gap-1.5 rounded-[3px] border px-3 py-1 text-sm font-semibold whitespace-nowrap transition-[transform,background-color,filter] duration-(--dur-1) ease-(--ease-out) active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 max-md:min-h-11";
+  "inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] border px-2 text-sm font-semibold whitespace-nowrap transition-[background-color,filter,border-color] duration-(--dur-1) ease-(--ease-out) disabled:cursor-not-allowed disabled:opacity-50 max-md:h-11";
+const sizes = {
+  default: "min-w-28 px-3",
+  row: "w-28",
+  wide: "w-40",
+  icon: "w-8 px-0 max-md:w-11",
+} as const;
+
+export type ButtonSize = keyof typeof sizes;
+
+/** Drehendes Lade-Symbol; bei reduzierter Bewegung steht es still (siehe .run-spin). */
+export function Spinner() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true" focusable="false" className="run-spin shrink-0">
+      <path d="M8 2a6 6 0 1 0 6 6" />
+    </svg>
+  );
+}
 
 export function Button({
   variant = "default",
+  size = "default",
   busy = false,
   className = "",
   children,
   disabled,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "primary" | "danger"; busy?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "primary" | "danger"; size?: ButtonSize; busy?: boolean }) {
   const v =
     variant === "primary"
-      ? "border-accent bg-accent text-bg hover:brightness-110"
+      ? "border-accent bg-accent text-bg hover:brightness-110 active:brightness-90"
       : variant === "danger"
-        ? "border-crit bg-surface text-crit hover:bg-crit-soft"
-        : "border-control bg-surface text-fg hover:bg-sunk";
+        ? "border-crit bg-surface text-crit hover:bg-crit-soft active:bg-crit-soft active:brightness-95"
+        : "border-control bg-surface text-fg hover:bg-sunk active:bg-sunk active:brightness-95";
   return (
-    <button type="button" className={`${base} ${v} ${className}`} disabled={disabled || busy} aria-busy={busy || undefined} {...props}>
-      {busy ? <span aria-hidden="true" className="skeleton size-2 rounded-full bg-current" /> : null}
+    // Beschäftigt: Knopf bleibt voll sichtbar (kein „disabled“-Grau) und gleich groß, ist aber nicht bedienbar.
+    <button
+      type="button"
+      className={`${base} ${sizes[size]} ${v} ${busy ? "cursor-progress" : ""} ${className}`}
+      disabled={disabled}
+      aria-busy={busy || undefined}
+      {...props}
+      onClick={busy ? (e) => e.preventDefault() : props.onClick}
+    >
+      {busy ? <Spinner /> : null}
       {children}
     </button>
   );
