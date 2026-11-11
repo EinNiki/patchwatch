@@ -21,6 +21,7 @@ import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { Button, TextInput } from "@/components/Controls";
+import { Popover } from "@/components/Popover";
 import { feedSummary } from "@/components/FeedStatus";
 
 type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
@@ -29,12 +30,12 @@ type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 /** Spaltenanteile (Summe 100 % bei 8 Spalten) und Mindestbreiten (Summe 59 rem). Unter 1280 px entfallen Zuletzt gemeldet, Uptime
  *  und Agent (Meldezeit steht dann im Host-Feld), unter 1024 px zusätzlich Updates. */
 const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: string }[] = [
-  { key: "name", label: "Host", cls: "w-[15%] min-w-36" },
-  { key: "kernel", label: "Distribution / Kernel", cls: "w-[18%] min-w-42" },
-  { key: "report", label: DATA_LABEL, cls: "w-[11%] min-w-26 md:max-hd:hidden", tip: DATA_TIP },
-  { key: "updates", label: "Updates", num: true, cls: "w-[10%] min-w-24 md:max-lg:hidden" },
-  { key: "cve", label: "CVE", cls: "w-[14%] min-w-32" },
-  { key: "status", label: "Status", cls: "w-[12%] min-w-28" },
+  { key: "name", label: "Host", cls: "w-[13%] min-w-28" },
+  { key: "kernel", label: "Distribution / Kernel", cls: "w-[17%] min-w-28 hd:min-w-44" },
+  { key: "report", label: DATA_LABEL, cls: "w-[10%] min-w-32 md:max-hd:hidden", tip: DATA_TIP },
+  { key: "updates", label: "Updates", num: true, cls: "w-[9%] min-w-28 md:max-lg:hidden" },
+  { key: "cve", label: "CVE", cls: "w-[20%] min-w-60 hd:min-w-64" },
+  { key: "status", label: "Status", cls: "w-[12%] min-w-26" },
 ];
 
 const SORT_LABEL: Record<SortKey, string> = { name: "Host", kernel: "Kernel", report: DATA_LABEL, updates: "Updates", cve: "CVE", status: "Status" };
@@ -250,7 +251,7 @@ function HostsView() {
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
             <div className="max-hd:overflow-x-auto">
-              <table className="tbl stack dist md:[--tbl-min:34.5rem] lg:[--tbl-min:40.5rem] hd:[--tbl-min:59rem]">
+              <table className="tbl stack dist [&_td]:py-1.5 md:[--tbl-min:34.5rem] lg:[--tbl-min:40.5rem] hd:[--tbl-min:58rem]">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
@@ -266,10 +267,10 @@ function HostsView() {
                         onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
                       />
                     ))}
-                    <th scope="col" className="num w-[11%] min-w-26 max-hd:hidden">
+                    <th scope="col" className="num w-[10%] min-w-32 max-xl:hidden">
                       <span className="th-pad">Uptime</span>
                     </th>
-                    <th scope="col" className="w-[9%] min-w-22 max-hd:hidden">
+                    <th scope="col" className="w-[9%] min-w-22 max-wide:hidden">
                       <span className="th-pad">Agent</span>
                     </th>
                   </tr>
@@ -317,14 +318,14 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           ) : null}
         </span>
       </td>
-      <td data-label={DATA_LABEL} className={`md:max-hd:hidden ${stale ? "text-warn" : ""}`}>
+      <td data-label={DATA_LABEL} className={`whitespace-nowrap md:max-hd:hidden ${stale ? "text-warn" : ""}`}>
         <span className="inline-flex items-center gap-1">
           {stale ? <Icon name="clock" /> : null}
           <RelTime iso={h.last_report_at} />
           {stale ? <span className="sr-only">: meldet sich nicht mehr</span> : null}
         </span>
       </td>
-      <td data-label="Updates" className="num md:max-lg:hidden">
+      <td data-label="Updates" className="num whitespace-nowrap md:max-lg:hidden">
         {h.updates_pending == null ? (
           <span className="text-fg3">unbekannt</span>
         ) : (
@@ -345,48 +346,31 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </div>
         ) : null}
       </td>
-      <td className="mono num max-hd:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
-      <td className="mono max-hd:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
+      <td className="mono num whitespace-nowrap max-xl:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
+      <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
     </tr>
   );
 }
 
+/** Höchstens vier sichtbare Plätze in der CVE-Zelle; bei mehr Einträgen steht auf dem vierten Platz „+N“ (siehe README, „Anzeige“). */
+const CVE_SLOTS = 4;
+
+type CveEntry = { key: string; to: string; tone: string; icon: "crit" | "warn" | "reboot" | "unknown" | "ok"; num: number | null; word: string; full: string };
+
 /** CVE-Lage: nie "grün" bei fehlender Datenlage (Proxmox, Feed veraltet). Jede Zahl führt gefiltert zur Host-Seite. */
 function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
   const to = (f: string) => `/hosts/${h.id}?cve=${f}`;
-  const parts: React.ReactNode[] = [];
-  if (h.cve_vulnerable > 0)
-    parts.push(
-      <Link key="v" href={to("open")} className="inline-flex items-center gap-1 font-semibold text-crit no-underline hover:underline min-h-6 items-center max-md:min-h-11">
-        <Icon name="crit" /> {h.cve_vulnerable} offen
-      </Link>,
-    );
-  if (h.cve_fix_pending > 0)
-    parts.push(
-      <Link key="p" href={to("open")} className="inline-flex items-center gap-1 text-warn no-underline hover:underline min-h-6 items-center max-md:min-h-11">
-        <Icon name="warn" /> {h.cve_fix_pending} Fix angekündigt
-      </Link>,
-    );
-  if (h.cve_reboot > 0)
-    parts.push(
-      <Link key="r" href={to("reboot")} className="inline-flex items-center gap-1 text-warn no-underline hover:underline min-h-6 items-center max-md:min-h-11">
-        <Icon name="reboot" /> {h.cve_reboot} Neustart
-      </Link>,
-    );
-  if (h.is_proxmox || h.cve_unknown > 0)
-    parts.push(
-      <Link key="u" href={to("unknown")} className="inline-flex items-center gap-1 text-unknown no-underline hover:underline min-h-6 items-center max-md:min-h-11">
-        <Icon name="unknown" /> {h.is_proxmox ? "manuell prüfen" : `${h.cve_unknown} unbekannt`}
-      </Link>,
-    );
+  // Reihenfolge nach Wichtigkeit; Einträge mit 0 entfallen.
+  const entries: CveEntry[] = [];
+  if (h.cve_vulnerable > 0) entries.push({ key: "v", to: to("open"), tone: "font-semibold text-crit", icon: "crit", num: h.cve_vulnerable, word: "offen", full: "offen" });
+  if (h.cve_fix_pending > 0) entries.push({ key: "p", to: to("open"), tone: "text-warn", icon: "warn", num: h.cve_fix_pending, word: "Fix folgt", full: "Fix angekündigt" });
+  if (h.cve_reboot > 0) entries.push({ key: "r", to: to("reboot"), tone: "text-warn", icon: "reboot", num: h.cve_reboot, word: "Neustart", full: "Neustart nötig" });
+  if (h.is_proxmox) entries.push({ key: "u", to: to("unknown"), tone: "text-unknown", icon: "unknown", num: null, word: "manuell prüfen", full: "manuell prüfen" });
+  else if (h.cve_unknown > 0) entries.push({ key: "u", to: to("unknown"), tone: "text-unknown", icon: "unknown", num: h.cve_unknown, word: "unbekannt", full: "unbekannt" });
   // Gefixt zählt nie als Entwarnung für Proxmox oder bei fehlender Quelle; es steht nur als ruhige Information dabei.
-  const fixed =
-    h.cve_fixed > 0 && !h.is_proxmox ? (
-      <Link key="f" href={to("fixed")} className="inline-flex items-center gap-1 text-fg2 no-underline hover:underline min-h-6 items-center max-md:min-h-11">
-        <Icon name="ok" /> {h.cve_fixed} gefixt
-      </Link>
-    ) : null;
-  if (parts.length === 0) {
+  if (h.cve_fixed > 0 && !h.is_proxmox) entries.push({ key: "f", to: to("fixed"), tone: "text-fg2", icon: "ok", num: h.cve_fixed, word: "gefixt", full: "gefixt" });
+
+  if (entries.length === 0) {
     if (h.status === "pending") return <span className="text-fg3">–</span>;
     // Quelle unvollständig/veraltet/fehlerhaft: nie "keine offenen", sondern die Begründung zeigen.
     if (h.cve_source_issue)
@@ -395,28 +379,65 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
           <Icon name="unknown" /> {h.cve_source_issue}
         </span>
       );
-    return (
-      <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
-        {feedOk ? (
-          <span className="inline-flex items-center gap-1 text-fg2">
-            <Icon name="ok" /> keine offenen
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-unknown">
-            <Icon name="unknown" /> Feed prüfen
-          </span>
-        )}
-        {fixed}
-      </div>
+    return feedOk ? (
+      <span className="inline-flex items-center gap-1 text-fg2">
+        <Icon name="ok" /> keine offenen
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-unknown">
+        <Icon name="unknown" /> Feed prüfen
+      </span>
     );
   }
+
+  const link = (e: CveEntry, cls = "") => (
+    <Link
+      key={e.key}
+      href={e.to}
+      title={`${e.num ?? ""} ${e.full}`.trim()}
+      className={`inline-flex min-h-6 items-center gap-1.5 whitespace-nowrap text-[13px] tabular-nums no-underline hover:underline max-md:min-h-11 ${e.tone} ${cls}`}
+    >
+      <Icon name={e.icon} /> {e.num !== null ? <span>{e.num.toLocaleString("de-DE")}</span> : null} <span>{e.word}</span>
+    </Link>
+  );
+  const overflow = entries.length > CVE_SLOTS;
+  const shown = overflow ? entries.slice(0, CVE_SLOTS - 1) : entries;
+  const rest = overflow ? entries.slice(CVE_SLOTS - 1) : [];
   return (
-    <div className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap max-md:gap-x-2">
-      {parts}
-      {fixed}
+    // Zwei feste Spalten: die zweite beginnt in jeder Zeile an derselben Stelle.
+    <div className="grid grid-cols-[repeat(2,7rem)] gap-x-3 gap-y-0 max-md:flex max-md:flex-wrap max-md:gap-x-3">
+      {shown.map((e) => link(e))}
+      {overflow ? (
+        <Popover
+          label={`Weitere CVE-Angaben für ${h.name}`}
+          width={220}
+          trigger={(t) => (
+            <button
+              type="button"
+              ref={t.ref}
+              aria-haspopup={t["aria-haspopup"]}
+              aria-expanded={t["aria-expanded"]}
+              aria-controls={t["aria-controls"]}
+              title={`${rest.length} weitere Angaben: ${rest.map((e) => e.full).join(", ")}`}
+              onClick={t.toggle}
+              className="inline-flex min-h-6 items-center text-[13px] text-fg2 hover:text-fg max-md:min-h-11 max-md:min-w-11"
+            >
+              +{rest.length}
+              <span className="sr-only"> weitere Angaben</span>
+            </button>
+          )}
+        >
+          <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+            {entries.map((e) => (
+              <li key={e.key}>{link(e)}</li>
+            ))}
+          </ul>
+        </Popover>
+      ) : null}
     </div>
   );
 }
+
 
 export default function HostsPage() {
   return (

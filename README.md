@@ -262,6 +262,12 @@ für neue Bewertungen aber nicht mehr erzeugt. Der Fix-Filter „offen“ der CV
 „behoben“ nur veröffentlichte Fixes. Zeilen abgeschalteter oder gelöschter Quellen werden bei der Bewertung ignoriert
 (seit `0cd2c5e`, `reeval.rs`).
 
+**Anzeige – Spalte „CVE“ der Hostliste.** Die Einträge stehen zu zweit nebeneinander (2 × 2 feste Spalten), nach Wichtigkeit
+sortiert: offen, Fix angekündigt, Neustart nötig, unbekannt, gefixt. Einträge mit dem Wert 0 entfallen. Jeder Eintrag zeigt
+Symbol, Zahl und Wort (nie nur Farbe) und führt zur Host-Seite mit passendem Filter. Es sind höchstens vier Plätze sichtbar;
+gibt es mehr als vier Einträge, steht auf dem vierten Platz „+N“ (N = Zahl der nicht gezeigten Einträge) mit Tooltip und
+einem Popover, das alle auflistet. Bei den heutigen vier Zuständen (plus „Fix angekündigt“ nur selten) entfällt „+N“ meist.
+
 **Anzeige im CVE-Fenster („Fix im Archiv“ und „Fix in Arbeit“).** Beide Angaben stammen aus verschiedenen Quellen und
 dürfen sich nicht widersprechen: „Fix im Archiv“ zählt nur **veröffentlichte** Fixes (Quellenstatus ungleich `fix_pending`;
 Server: `open_with_fix` in `routes/hosts.rs`), „Fix in Arbeit“ ist der angekündigte, noch nicht veröffentlichte Fix.
