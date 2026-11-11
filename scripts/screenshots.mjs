@@ -50,6 +50,11 @@ const ACTIONS = {
       await page.getByRole("row").filter({ hasText: "demo-agent" }).waitFor({ state: "detached" });
     };
   },
+  // CVE-Liste mit geöffnetem Filterfenster.
+  "cves-filter": async (page) => {
+    await page.getByRole("button", { name: /^Filter/ }).first().click();
+    await page.getByRole("dialog", { name: "Filter" }).waitFor();
+  },
   menu: async (page, vp) => {
     if (Number(vp) >= 768) return "skip";
     await page.getByRole("button", { name: "Menü" }).click();
