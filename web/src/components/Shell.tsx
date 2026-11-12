@@ -466,7 +466,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <NavIcon name="menu" />
           Menü
         </button>
-        <span className="font-semibold">{pageName(pathname)}</span>
+        <span className="min-w-0 truncate font-semibold" title={pageName(pathname)}>{pageName(pathname)}</span>
       </header>
       {/* Off-Canvas bleibt gerendert und blendet per CSS ein/aus; geschlossen ist es inert und unsichtbar. */}
       <div
