@@ -59,7 +59,12 @@ export function Popover({
     if (!b) return;
     const w = Math.min(width, window.innerWidth - 16);
     const left = align === "end" ? b.right - w : b.left;
-    setPos({ top: b.bottom + 6, left: Math.max(8, Math.min(left, window.innerWidth - w - 8)) });
+    // Höhe: das Fenster bleibt im Viewport. Passt es unter den Auslöser nicht, steht es darüber; passt es nirgends, wird es
+    // am Rand festgemacht und scrollt innen (max-height unten).
+    const h = Math.min(panel.current?.offsetHeight ?? 0, window.innerHeight - 16);
+    let top = b.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = b.top - 6 - h >= 8 ? b.top - 6 - h : Math.max(8, window.innerHeight - 8 - h);
+    setPos({ top, left: Math.max(8, Math.min(left, window.innerWidth - w - 8)) });
   }, [align, width]);
   useLayoutEffect(() => {
     if (open) place();
@@ -132,8 +137,8 @@ export function Popover({
                 role="dialog"
                 aria-label={label}
                 tabIndex={-1}
-                style={pos ? { top: pos.top, left: pos.left, width: Math.min(width, window.innerWidth - 16) } : style}
-                className={`fixed z-[60] rounded-sm border border-line bg-surface p-3 text-sm shadow-lg ${
+                style={pos ? { top: pos.top, left: pos.left, width: Math.min(width, window.innerWidth - 16), maxHeight: "calc(100dvh - 16px)" } : style}
+                className={`fixed z-[60] overflow-y-auto rounded-sm border border-line bg-surface p-3 text-sm shadow-lg ${
                   sheet ? "max-md:!inset-x-0 max-md:!bottom-0 max-md:!top-auto max-md:!left-0 max-md:!w-auto max-md:max-h-[80vh] max-md:overflow-y-auto max-md:rounded-b-none max-md:p-4 max-md:pb-6" : ""
                 }`}
               >
