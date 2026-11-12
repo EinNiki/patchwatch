@@ -25,13 +25,22 @@ fn healthcheck(listen: &str) -> Result<()> {
     }
 }
 
+/// Verbindet mit der Datenbank; ist sie beim Start (noch) nicht erreichbar, wird bis zu 60 s wiederholt.
 async fn connect(cfg: &Config) -> Result<sqlx::PgPool> {
-    PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(cfg.database_url()?)
-        .await
-        .context("Datenbankverbindung fehlgeschlagen")
+    let url = cfg.database_url()?;
+    patchwatch_server::db::connect_with_retry(
+        || {
+            PgPoolOptions::new()
+                .max_connections(10)
+                .acquire_timeout(Duration::from_secs(5))
+                .connect(url)
+        },
+        patchwatch_server::db::STARTUP_FIRST_DELAY,
+        patchwatch_server::db::STARTUP_MAX_DELAY,
+        patchwatch_server::db::STARTUP_MAX_WAIT,
+    )
+    .await
+    .context("Datenbankverbindung fehlgeschlagen")
 }
 
 async fn shutdown_signal() {

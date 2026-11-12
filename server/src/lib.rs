@@ -2,6 +2,7 @@ pub mod admin;
 pub mod avatar;
 pub mod config;
 pub mod cve;
+pub mod db;
 pub mod error;
 pub mod extract;
 pub mod hostops;
