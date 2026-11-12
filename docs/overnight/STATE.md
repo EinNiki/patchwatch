@@ -91,6 +91,8 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
 - 05:29 UTC: Dirigent hat fmt, clippy und cargo test --workspace (335 bestanden) selbst wiederholt; Web seit den
   grünen Läufen unverändert. Eigener Stack beendet, pw-night-pg entfernt, Zugangsdateien gelöscht.
 - 05:30 UTC: Zeitgrenze, keine neue Phase.
+- 05:45 UTC: Der Push der Commits nach fb0215b (3a97664, 53f1304, 1870417 und die Berichte) wurde von der
+  Rechteprüfung der Umgebung abgelehnt ("Out-of-Place Publication"). Sie liegen nur lokal im Worktree. Kein Umweg.
 - 00:19 bis 04:10 UTC: Nutzungslimit erreicht, Lauf stand (STATE.md konnte in dem Moment nicht fortgeschrieben werden).
 - 04:10 und 04:25 UTC: Speicher erneut geprüft, Swap 53 %: schwere Schritte weiter übersprungen.
 - Phase 8: Der Push des Branches (nur docs/overnight/, kein Code) wurde von der Rechteprüfung der Umgebung abgelehnt
