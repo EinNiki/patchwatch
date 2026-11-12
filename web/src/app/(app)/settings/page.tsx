@@ -187,7 +187,7 @@ function Schedules() {
           </Field>
         </div>
         <p className="text-xs text-fg3">
-          „Meldet sich nicht“: {d.stale_after_min_hours} bis {d.stale_after_max_hours} Stunden, Standard {d.stale_after_default_hours} (<Mono>PATCHWATCH_STALE_AFTER_HOURS</Mono>). Aufbewahrung: {d.report_retention_min_days} bis {d.report_retention_max_days} Tage, Standard {d.report_retention_default_days}. Ältere Reports löscht der tägliche Aufräum-Job.
+          „Meldet sich nicht“: {d.stale_after_min_hours} bis {d.stale_after_max_hours} Stunden, Standard {d.stale_after_default_hours} (<Mono>PATCHWATCH_STALE_AFTER_HOURS</Mono>). Aufbewahrung: {d.report_retention_min_days} bis {d.report_retention_max_days} Tage, Standard {d.report_retention_default_days}. Ältere Datenmeldungen löscht der tägliche Aufräum-Job.
         </p>
       </fieldset>
 

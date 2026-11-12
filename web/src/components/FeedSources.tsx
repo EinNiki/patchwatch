@@ -357,7 +357,7 @@ export function FeedSources() {
                     {errorLine(f) ? <p className="w-full max-w-[28rem] text-xs text-warn">{errorLine(f)}</p> : null}
                     {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}
                   </td>
-                  <td data-label="Letzter Erfolg" className="max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)]">
+                  <td data-label="Zuletzt erfolgreich" className="max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)]">
                     <RelTime iso={f.last_success_at} />
                     {f.last_success_at ? <div className="text-xs text-fg3 max-xl:hidden">{absTime(f.last_success_at)}</div> : null}
                   </td>

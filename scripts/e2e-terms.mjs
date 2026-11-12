@@ -1,4 +1,5 @@
 // E2E: Begriffe "Report" und "Check-in" sind in der Oberfläche nicht mehr sichtbar (Hostliste, Host-Seite, Agents-Seite,
+// Einstellungen, Kartenbeschriftung der CVE-Quellen,
 // auch nicht in aria-label und title); neue Beschriftungen, Erklärung per Info-Symbol (Maus, Tastatur, Touch), axe.
 // Nur Lesezugriffe gegen den laufenden Server.
 //   PW_MODULE=… PW_CHROME=… PW_PWFILE=<Datei> AXE_JS=… [PW_SHOTS=<Ordner>] node scripts/e2e-terms.mjs
@@ -34,16 +35,25 @@ try {
   for (const [w, scheme] of [[1440, "light"], [390, "dark"], [768, "light"], [1920, "dark"]]) {
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width: w, height: 900 });
-    for (const [name, path] of [["Hostliste", "/"], ["Host", `/hosts/${host.id}`], ["Agents", "/agents"]]) {
+    for (const [name, path] of [["Hostliste", "/"], ["Host", `/hosts/${host.id}`], ["Agents", "/agents"], ["Einstellungen", "/settings"], ["CVE-Quellen", "/cves"]]) {
       const L = `${w}/${scheme} ${name}`;
       await page.goto(`${base}${path}`);
       await page.waitForLoadState("networkidle");
       await page.waitForTimeout(300);
+      if (name === "CVE-Quellen") {
+        // Kartenbeschriftungen (data-label, per CSS angezeigt) müssen zu den Spaltenköpfen passen.
+        const labels = [...new Set(await page.locator("table.tbl td[data-label]").evaluateAll((l) => l.map((e) => e.getAttribute("data-label"))))];
+        const feed = await page.locator("table.tbl", { hasText: "Zuletzt erfolgreich" }).count();
+        ok(feed === 1 && labels.includes("Zuletzt erfolgreich") && !labels.includes("Letzter Erfolg"), `${L}: Kartenbeschriftung "Zuletzt erfolgreich" wie die Kopfzeile (${labels.join(", ")})`);
+        ok(labels.filter((t) => !OLD.test(t)).length === labels.length, `${L}: keine alten Begriffe in Kartenbeschriftungen`);
+      }
       if (name === "Host" && w < 1280) await page.locator("details summary", { hasText: "Host-Details" }).first().click();
       const text = await scan();
       // Lange Fließtexte sind CVE-Beschreibungen aus den Datenquellen (fremder Text) und gelten nicht als Oberflächentext.
-      const hit = text.split("\n").filter((l) => l.length < 160 && OLD.test(l));
+      // Die Einstellungen enthalten keinen fremden Text: dort zählen auch lange Zeilen (Hilfetext zur Aufbewahrung).
+      const hit = text.split("\n").filter((l) => (l.length < 160 || name === "Einstellungen") && OLD.test(l));
       ok(hit.length === 0, `${L}: alte Begriffe nicht sichtbar (${hit[0] ?? "keine"})`);
+      if (name === "Einstellungen") ok(/Datenmeldungen/.test(text), `${L}: Einstellungen nennen "Datenmeldungen"`);
       if (name === "Hostliste") ok(/Zuletzt gemeldet/.test(text), `${L}: neue Beschriftung`);
       if (name === "Agents") {
         ok(w < 768 || /Zuletzt gemeldet/.test(text) && /Zuletzt erreichbar/.test(text), `${L}: Spalten "Zuletzt gemeldet" und "Zuletzt erreichbar"`);
