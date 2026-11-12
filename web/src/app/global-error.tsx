@@ -7,6 +7,9 @@ import { ErrorScreen } from "@/components/ErrorScreen";
 export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
     <html lang="de">
+      <head>
+        <title>Fehler · patchwatch</title>
+      </head>
       <body>
         <ErrorScreen
           page

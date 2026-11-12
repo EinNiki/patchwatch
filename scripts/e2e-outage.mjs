@@ -116,6 +116,8 @@ try {
     ok(crashShown && !/Application error|couldn.t load/i.test(crashBody), `${label}: Fehlerseite „${title}“: ${JSON.stringify(crashBody.slice(0, 90))}`);
     ok(await crash.getByRole("button", { name: "Erneut versuchen" }).isVisible().catch(() => false), `${label}: Knopf „Erneut versuchen“`);
     if (nav) ok(await crash.getByRole("link", { name: /CVEs/ }).first().isVisible().catch(() => false), `${label}: Navigation bleibt nutzbar`);
+    const docTitle = await crash.title();
+    ok(/patchwatch/.test(docTitle), `${label}: Seitentitel „${docTitle}“`);
     await crash.close();
   }
 
