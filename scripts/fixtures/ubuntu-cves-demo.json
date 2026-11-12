@@ -1,0 +1,413 @@
+{
+ "_fixture_note": "DEMO-DATEN für scripts/mock-feeds.mjs: erfundene Statuswerte zu echten öffentlichen CVE-IDs, keine Abbildung der echten Quellen.",
+ "cves": [
+  {
+   "id": "CVE-2026-99999",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-10T08:00:00+00:00",
+   "description": "[Demo] Demo: Kernel-Schwachstelle mit angekündigtem Fix (Watchlist-Eintrag der Seed-Daten).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "high",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2026-99999"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "pending",
+       "description": "6.8.0-110.110",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "pending",
+       "description": "5.15.0-130.140",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2025-38250",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-09T08:00:00+00:00",
+   "description": "[Demo] Bluetooth: hci_core: Use-after-free in vhci_flush() (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "medium",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2025-38250"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "6.8.0-100.100",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "needed",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-1086",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-08T08:00:00+00:00",
+   "description": "[Demo] netfilter: nf_tables: Use-after-free, lokale Rechteausweitung (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "high",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2024-1086"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "6.8.0-31.31",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "5.15.0-101.111",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2020-12351",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-07T08:00:00+00:00",
+   "description": "[Demo] Bluetooth: Typverwechslung in l2cap_data_channel_rx (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "high",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2020-12351"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "5.15.0-60.66",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2020-12352",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-06T08:00:00+00:00",
+   "description": "[Demo] Bluetooth: Informationsleck in a2mp (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "medium",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2020-12352"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "5.15.0-60.66",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2012-4542",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-05T08:00:00+00:00",
+   "description": "[Demo] block: Befehlsfilter für Partitionen unvollständig (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "low",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2012-4542"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "6.5.0-9.9",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "5.15.0-97.107",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2004-0230",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-04T08:00:00+00:00",
+   "description": "[Demo] TCP: Sequenznummern-Prüfung bei RST erlaubt Verbindungsabbruch (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "low",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2004-0230"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "ignored",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2005-3660",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-03T08:00:00+00:00",
+   "description": "[Demo] Speicherauslastung durch fehlende Begrenzung (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "low",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2005-3660"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "5.15.0-60.66",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2020-0347",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-02T08:00:00+00:00",
+   "description": "[Demo] Android-Kernel: Detailangaben fehlen, Bewertung offen (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "low",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2020-0347"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "needs-triage",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "needs-triage",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2015-8787",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-11-01T08:00:00+00:00",
+   "description": "[Demo] netfilter: nf_nat_redirect: NULL-Dereferenz (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "medium",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2015-8787"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2003-1604",
+   "published": "2026-01-15T00:00:00",
+   "updated_at": "2026-10-31T08:00:00+00:00",
+   "description": "[Demo] Ältere Schwachstelle, für aktuelle Kernel nicht relevant (Kurzfassung).",
+   "ubuntu_description": "",
+   "notes": [],
+   "codename": null,
+   "priority": "low",
+   "cvss3": 7.0,
+   "status": "active",
+   "references": [
+    "https://www.cve.org/CVERecord?id=CVE-2003-1604"
+   ],
+   "packages": [
+    {
+     "name": "linux",
+     "source": "https://ubuntu.com/security/cve?package=linux",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "not-affected",
+       "description": "",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "total_results": 11
+}

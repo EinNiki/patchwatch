@@ -1,5 +1,5 @@
 // E2E: ganze Zeile der Hostliste ist klickbar (Maus, Touch), der Hostname bleibt der echte Link; Ausnahmen, Tastatur, Fokusring,
-// Strg-/Mittelklick, Textauswahl, CVE-Zelle mit Filter, Agents-Zeile bleibt unberührt, axe. Nur Lesezugriffe.
+// Strg-/Mittelklick, Textauswahl, CVE-Zelle mit Filter, CVE-Tabelle (Zeile -> /cves/<ID>, Sterne, Hostlinks, Popover), Agents-/Quellen-Zeile bleibt unberührt, axe. Nur Lesezugriffe.
 //   PW_MODULE=… PW_CHROME=… PW_PWFILE=<Datei> AXE_JS=… node scripts/e2e-rowlink.mjs
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -114,6 +114,97 @@ try {
   await page.waitForTimeout(300);
   await page.keyboard.press("Escape");
 
+  // CVE-Tabelle: ganze Zeile führt zu /cves/<ID>; der Link bleibt echt; Bedienelemente und Textauswahl lösen nichts aus.
+  const cveRows = page.locator("table.tbl tbody tr[data-rowlink]");
+  const openCves = async () => { await page.goto(`${base}/cves`); await cveRows.first().waitFor(); };
+  await openCves();
+  const crow = cveRows.first();
+  const cveId = (await crow.locator("a[href^='/cves/']").first().textContent()).trim();
+  const cTarget = `/cves/${cveId}`;
+  ok((await crow.locator(`a[href="${cTarget}"]`).count()) === 1, "CVE: genau ein Link zur CVE-Seite in der Zeile (echter Link)");
+  ok((await page.locator("a a").count()) === 0, "CVE: kein verschachtelter Link");
+  ok((await crow.evaluate((e) => getComputedStyle(e).cursor)) === "pointer", "CVE: cursor pointer auf der Zeile");
+  const freeCell = crow.locator("td").nth(2); // Beschreibung
+  await freeCell.click({ position: { x: 4, y: 4 } });
+  await page.waitForURL(`**${cTarget}`);
+  ok(path() === cTarget, "CVE: Klick auf freie Zelle führt zur CVE-Seite");
+
+  await openCves();
+  let h1 = await page.evaluate(() => history.length);
+  await page.locator(`a[href="${cTarget}"]`).first().click();
+  await page.waitForURL(`**${cTarget}`);
+  await page.waitForTimeout(400);
+  ok((await page.evaluate(() => history.length)) === h1 + 1, "CVE: Klick auf die CVE-ID ergibt genau eine Navigation");
+
+  await openCves();
+  [tab] = await Promise.all([ctx.waitForEvent("page"), cveRows.first().locator("td").nth(2).click({ modifiers: ["Control"], position: { x: 4, y: 4 } })]);
+  await tab.waitForURL(`**${cTarget}`);
+  ok(path() === "/cves", "CVE: Strg-Klick öffnet neuen Tab, Liste bleibt");
+  await tab.close();
+  [tab] = await Promise.all([ctx.waitForEvent("page"), cveRows.first().locator("td").nth(2).click({ modifiers: ["Shift"], position: { x: 4, y: 4 } })]);
+  await tab.waitForURL(`**${cTarget}`);
+  ok(path() === "/cves", "CVE: Shift-Klick öffnet neuen Tab, Liste bleibt");
+  await tab.close();
+  [tab] = await Promise.all([ctx.waitForEvent("page"), cveRows.first().locator("td").nth(2).click({ button: "middle", position: { x: 4, y: 4 } })]);
+  await tab.waitForURL(`**${cTarget}`);
+  ok(path() === "/cves", "CVE: Mittelklick öffnet neuen Tab, Liste bleibt");
+  await tab.close();
+
+  // Markierter Text: kein Wechsel.
+  await openCves();
+  const cNav = await cveRows.first().locator("td").nth(2).evaluate((td) => {
+    const r = document.createRange();
+    r.selectNodeContents(td);
+    const s = getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    td.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    return new Promise((res) => setTimeout(() => res(location.pathname !== "/cves"), 400));
+  });
+  ok(!cNav, "CVE: markierter Text, Klick navigiert nicht");
+
+  // Stern: schaltet um (und zurück), navigiert nicht. Zeile über die CVE-ID suchen (sie kann beim Umschalten wandern).
+  await openCves();
+  const starOf = () => page.locator("table.tbl tbody tr", { has: page.locator(`a[href="${cTarget}"]`) }).first().locator("button.star-btn");
+  const was = await starOf().getAttribute("aria-label");
+  await starOf().click();
+  await page.waitForTimeout(800);
+  ok(path() === "/cves", "CVE: Stern-Klick navigiert nicht");
+  ok((await starOf().getAttribute("aria-label")) !== was, "CVE: Stern-Klick schaltet um");
+  await starOf().click();
+  await page.waitForTimeout(800);
+  ok(path() === "/cves" && (await starOf().getAttribute("aria-label")) === was, "CVE: zweiter Stern-Klick schaltet zurück, keine Navigation");
+
+  // Hostlink in der Zeile: eine Navigation zur Host-Seite, nicht zur CVE-Seite.
+  await openCves();
+  const hl = page.locator("table.tbl tbody tr[data-rowlink] ul[aria-label='Betroffene Hosts'] a").first();
+  if (await hl.count()) {
+    const want = await hl.getAttribute("href");
+    h1 = await page.evaluate(() => history.length);
+    await hl.click();
+    await page.waitForURL(`**${want}`);
+    await page.waitForTimeout(400);
+    ok(path() === want && (await page.evaluate(() => history.length)) === h1 + 1, "CVE: Hostlink führt zur Host-Seite (eine Navigation)");
+  } else ok(false, "CVE: Zeile mit Hostlink gefunden");
+
+  // „+N“-Popover: öffnet, navigiert nicht; Klick auf freie Fläche im Popover navigiert nicht.
+  await openCves();
+  const more = page.locator("table.tbl tbody tr[data-rowlink] ul[aria-label='Betroffene Hosts'] button").first();
+  if (await more.count()) {
+    await more.click();
+    const pop = page.locator("[role=dialog][aria-label^='Alle betroffenen Hosts']").first();
+    await pop.waitFor();
+    ok(path() === "/cves", "CVE: Klick auf „+N“ öffnet Popover ohne Navigation");
+    await pop.click({ position: { x: 3, y: 3 } });
+    await page.waitForTimeout(400);
+    ok(path() === "/cves", "CVE: Klick auf freie Fläche im Popover navigiert nicht");
+    await page.keyboard.press("Escape");
+  } else ok(false, "CVE: Zeile mit „+N“ gefunden");
+
+  // Quellen-Tabelle: kein Detailziel, Zeilen nicht klickbar.
+  await openCves();
+  ok((await page.locator("table.tbl tbody tr[data-rowlink]").evaluateAll((rs) => rs.filter((r) => r.closest("table").querySelector("th")?.textContent?.includes("Quelle")).length)) === 0, "Quellen: Zeilen nicht klickbar (kein Detailziel)");
+
   // axe auf der Hostliste.
   await open();
   await page.evaluate(axeSrc);
@@ -132,9 +223,11 @@ try {
   const trow = tp.locator("table.tbl tbody tr").first();
   await trow.waitFor();
   ok(!(await tp.evaluate(() => matchMedia("(hover: hover)").matches)), "Touchgerät meldet kein Hover (Hover-Stil greift nicht)");
+  // Die erste Zeile der Liste ist nach Dringlichkeit sortiert und nicht zwingend `hosts[0]` der API: Ziel aus ihrem Link lesen.
+  const touchTarget = await trow.locator("a[href^='/hosts/']").first().getAttribute("href");
   await trow.locator("td").nth(1).tap({ position: { x: 4, y: 4 } });
-  await tp.waitForURL((u) => u.pathname === target);
-  ok(new URL(tp.url()).pathname === target, "Touch: Tippen auf die Zeile führt zur Host-Seite");
+  await tp.waitForURL((u) => u.pathname === touchTarget);
+  ok(new URL(tp.url()).pathname === touchTarget, "Touch: Tippen auf die Zeile führt zur Host-Seite");
   await tctx.close();
 } finally {
   await browser.close();

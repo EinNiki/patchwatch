@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icons";
+import { Button } from "@/components/Controls";
 import { PHASES, PHASE_LABEL, detail, formatDuration, isActive, isFailure, isSlow, runText, stepStates, type FeedRun, type StepState } from "@/lib/feedRuns";
 
 /** Eigene Symbole (SVG, currentColor): Haken, Kreuz, Strich (übersprungen), drehender Ring (aktiv), leerer Kreis (offen). */
@@ -99,14 +100,14 @@ export function RunStepper({ run, label, phaseMedians, onRetry, onClose }: { run
       {!isActive(run) && (onRetry || onClose) ? (
         <div className="mt-2 flex flex-wrap gap-2">
           {failed && onRetry ? (
-            <button type="button" className="min-h-8 rounded-[3px] border border-control bg-surface px-3 text-sm font-semibold hover:bg-sunk max-md:min-h-11" onClick={onRetry}>
+            <Button onClick={onRetry}>
               Erneut versuchen
-            </button>
+            </Button>
           ) : null}
           {onClose ? (
-            <button type="button" className="min-h-8 rounded-[3px] border border-control bg-surface px-3 text-sm hover:bg-sunk max-md:min-h-11" onClick={onClose}>
+            <Button onClick={onClose}>
               Schließen
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}

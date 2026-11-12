@@ -26,12 +26,8 @@ pub async fn upsert_admin(pool: &PgPool, username: &str, password: &str) -> Resu
     upsert_admin_with(pool, username, password, false).await
 }
 
-pub async fn upsert_admin_with(
-    pool: &PgPool,
-    username: &str,
-    password: &str,
-    must_change: bool,
-) -> Result<()> {
+/// Prüft Benutzername und Passwort und liefert den Argon2-Hash.
+fn validated_hash(username: &str, password: &str) -> Result<String> {
     if !(3..=32).contains(&username.len())
         || !username
             .chars()
@@ -40,7 +36,16 @@ pub async fn upsert_admin_with(
         bail!("Benutzername: 3–32 Zeichen aus A–Z, a–z, 0–9, '.', '_', '-'");
     }
     check_new_password(password)?;
-    let hash = security::hash_password(password)?;
+    security::hash_password(password)
+}
+
+pub async fn upsert_admin_with(
+    pool: &PgPool,
+    username: &str,
+    password: &str,
+    must_change: bool,
+) -> Result<()> {
+    let hash = validated_hash(username, password)?;
     sqlx::query(
         "INSERT INTO admin_users (username, password_hash, must_change_password) VALUES ($1, $2, $3) \
          ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, \
@@ -92,17 +97,32 @@ pub async fn bootstrap_admin(pool: &PgPool, env_password: Option<&str>) -> Resul
     if any {
         return Ok(Bootstrap::Existing);
     }
-    match env_password.filter(|p| !p.is_empty()) {
-        Some(pw) => {
-            upsert_admin_with(pool, "admin", pw, false).await?;
-            Ok(Bootstrap::FromEnv)
-        }
+    // Nur anlegen, nie überschreiben: startet ein zweiter Prozess gleichzeitig, gewinnt genau einer, der andere
+    // meldet "schon vorhanden" (sonst zeigten beide ein Start-Passwort, gültig wäre nur das zuletzt geschriebene).
+    let (pw, outcome) = match env_password.filter(|p| !p.is_empty()) {
+        Some(pw) => (pw.to_owned(), Bootstrap::FromEnv),
         None => {
             let pw = random_password();
-            upsert_admin_with(pool, "admin", &pw, true).await?;
-            Ok(Bootstrap::Random(pw))
+            (pw.clone(), Bootstrap::Random(pw))
         }
-    }
+    };
+    let must_change = matches!(outcome, Bootstrap::Random(_));
+    let hash = validated_hash("admin", &pw)?;
+    let inserted = sqlx::query(
+        "INSERT INTO admin_users (username, password_hash, must_change_password) VALUES ('admin', $1, $2) \
+         ON CONFLICT (username) DO NOTHING",
+    )
+    .bind(hash)
+    .bind(must_change)
+    .execute(pool)
+    .await?
+    .rows_affected()
+        > 0;
+    Ok(if inserted {
+        outcome
+    } else {
+        Bootstrap::Existing
+    })
 }
 
 /// Markiert Konten, deren Passwort noch einem bekannten Standardwert entspricht (Altinstallationen), per

@@ -583,6 +583,9 @@ pub async fn watch(
             "Notiz zu lang (max. 500 Zeichen)".into(),
         ));
     }
+    if note.as_deref().is_some_and(super::has_nul) {
+        return Err(ApiError::BadRequest("Notiz: ungültige Zeichen".into()));
+    }
     let mut tx = st.pool.begin().await?;
     sqlx::query("INSERT INTO cves (id) VALUES ($1) ON CONFLICT DO NOTHING")
         .bind(&id)

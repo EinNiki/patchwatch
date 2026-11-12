@@ -296,7 +296,7 @@ export function FeedSources() {
           ) : null}
         </p>
         {/* Knopfreihe: rechts neben dem Text; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eine eigene Zeile, gleich breit. */}
-        <span className="src-actions ml-auto flex shrink-0 items-center gap-2">
+        <span className="src-actions ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
             {allBusy ? null : <NavIcon name="refresh" />}
             <span className={HEAD_TXT}>Alle abrufen</span>
@@ -357,7 +357,7 @@ export function FeedSources() {
                     {errorLine(f) ? <p className="w-full max-w-[28rem] text-xs text-warn">{errorLine(f)}</p> : null}
                     {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}
                   </td>
-                  <td data-label="Letzter Erfolg" className="max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)]">
+                  <td data-label="Zuletzt erfolgreich" className="max-lg:shrink-0 max-lg:grow-0 max-lg:basis-[calc(50%-6px)]">
                     <RelTime iso={f.last_success_at} />
                     {f.last_success_at ? <div className="text-xs text-fg3 max-xl:hidden">{absTime(f.last_success_at)}</div> : null}
                   </td>
@@ -563,6 +563,9 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
     void save(body);
   }
 
+  // Neue Adresse: der gespeicherte Schlüssel wird vom Server entfernt (er gilt nur für die Adresse, für die er gespeichert wurde).
+  const addressChanged = Boolean(feed?.secret_set) && url !== null && url.trim() !== (feed?.base_url ?? "");
+
   return (
     <Dialog open={feed !== null} title={`Quelle „${feed?.label ?? ""}“ bearbeiten`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-3">
@@ -581,9 +584,10 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
         ) : null}
         {feed?.takes_secret ? (
           <>
-            <Field label={feed.secret_set ? "API-Schlüssel ersetzen (der alte wird nie angezeigt)" : "API-Schlüssel (wird nur geschrieben)"}>
+            <Field label={addressChanged ? "API-Schlüssel (neu eingeben)" : feed.secret_set ? "API-Schlüssel ersetzen (der alte wird nie angezeigt)" : "API-Schlüssel (wird nur geschrieben)"}>
               <TextInput type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} maxLength={512} />
             </Field>
+            {addressChanged ? <p className="text-xs text-warn">Mit einer neuen Adresse wird der gespeicherte Schlüssel entfernt. Bitte neu eingeben.</p> : null}
             {feed.secret_set ? (
               <div>
                 <Button className={BTN} variant="danger" onClick={() => void save({ clear_secret: true })} disabled={busy}>

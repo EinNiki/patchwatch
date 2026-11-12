@@ -7,6 +7,7 @@ use super::nvd::Nvd;
 use super::osv::Osv;
 use super::ubuntu::Ubuntu;
 use super::CveSource;
+use crate::notify::secret_target;
 use crate::notify::{crypto, ssrf};
 use crate::state::AppState;
 use anyhow::{anyhow, Result};
@@ -302,6 +303,16 @@ async fn build_one(
         "debian" => Box::new(Debian::new(c)),
         "osv" => Box::new(Osv::with_base(c, base, client).with_ecosystem(ecosystem)),
         "nvd" => {
+            // Defense in depth: auch ein früher gespeicherter Schlüssel geht nie über http:// an einen nicht erlaubten Host.
+            if secret.is_some() {
+                let target = base.as_deref().and_then(secret_target::Target::from_url);
+                if let Some(m) = secret_target::cleartext_problem(
+                    target.as_ref(),
+                    &state.cfg.notify_allowed_hosts,
+                ) {
+                    return Err(anyhow!(m));
+                }
+            }
             let key = match secret {
                 Some(blob) => Some(decrypt_secret(state, id, blob).await?),
                 None => None,

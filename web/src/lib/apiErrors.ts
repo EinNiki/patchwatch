@@ -19,6 +19,12 @@ export function describeApiError(status: number, serverMessage?: string, retryAf
       return "Die Eingabe ist zu groß.";
     case 429:
       return `Zu viele Anfragen. Erneut möglich in ${retryAfter ?? 60} Sek.`;
+    // 502/504: der Reverse-Proxy erreicht den Server nicht. 503: Server oder Datenbank vorübergehend nicht verfügbar.
+    case 502:
+    case 504:
+      return "Server nicht erreichbar. Bitte in einigen Sekunden erneut versuchen.";
+    case 503:
+      return "Server oder Datenbank gerade nicht erreichbar. Bitte in einigen Sekunden erneut versuchen.";
     default:
       return status >= 500 ? `Serverfehler (HTTP ${status}). Details stehen im Server-Log.` : msg || `Unerwarteter Fehler (HTTP ${status}).`;
   }

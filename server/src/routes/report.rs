@@ -75,6 +75,7 @@ struct ProxmoxIn {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(Clone))]
 struct PackageIn {
     name: String,
     version: String,
@@ -188,6 +189,65 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
     Ok(())
 }
 
+/// Höchstgröße des Report-Rests ohne Paketliste (gespeichert in `reports.raw`).
+const MAX_RAW_BYTES: usize = 64 * 1024;
+
+/// Enthält ein Text oder ein Schlüssel im JSON-Wert ein NUL-Zeichen?
+fn json_has_nul(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::String(s) => super::has_nul(s),
+        serde_json::Value::Array(a) => a.iter().any(json_has_nul),
+        serde_json::Value::Object(o) => o.iter().any(|(k, v)| super::has_nul(k) || json_has_nul(v)),
+        _ => false,
+    }
+}
+
+/// Ordering key that makes ties deterministic and independent of the order in the report.
+fn pkg_key(p: &PackageIn) -> (&str, &str, &str) {
+    (
+        p.version.as_str(),
+        p.source.as_deref().unwrap_or(""),
+        p.source_version.as_deref().unwrap_or(""),
+    )
+}
+
+/// Does `new` replace `old` when two entries share one package name? Conservative on purpose: the host counts as
+/// affected if ANY installed copy is affected, so the LOWER dpkg version wins. A version dpkg rules cannot parse
+/// wins over a parsable one (it ends up as "unknown", never as "fixed"). Ties and two unparsable versions are
+/// resolved by text, so the result does not depend on the order of the report.
+fn replaces(old: &PackageIn, new: &PackageIn) -> bool {
+    let parsable = |p: &PackageIn| debversion::compare(&p.version, &p.version).is_ok();
+    match (parsable(old), parsable(new)) {
+        (true, false) => return true,
+        (false, true) => return false,
+        (false, false) => return pkg_key(new) < pkg_key(old),
+        (true, true) => {}
+    }
+    match debversion::compare(&old.version, &new.version) {
+        Ok(std::cmp::Ordering::Greater) => true,
+        Ok(std::cmp::Ordering::Less) => false,
+        _ => pkg_key(new) < pkg_key(old),
+    }
+}
+
+/// One entry per package name; for duplicates (same name on several architectures) the lowest version.
+fn merge_duplicate_packages(all: &[PackageIn]) -> Vec<&PackageIn> {
+    let mut best: std::collections::BTreeMap<&str, &PackageIn> = Default::default();
+    for p in all {
+        match best.entry(p.name.as_str()) {
+            std::collections::btree_map::Entry::Vacant(e) => {
+                e.insert(p);
+            }
+            std::collections::btree_map::Entry::Occupied(mut e) => {
+                if replaces(e.get(), p) {
+                    e.insert(p);
+                }
+            }
+        }
+    }
+    best.into_values().collect()
+}
+
 /// POST /api/v1/report: Authentifizierung per Bearer-Token (nur Hash in der DB), dann Validierung.
 pub async fn post_report(
     State(st): State<AppState>,
@@ -208,6 +268,14 @@ pub async fn post_report(
         if let Some(u) = o.get_mut("updates").and_then(|u| u.as_object_mut()) {
             u.remove("items");
         }
+    }
+    // Der Rest (auch unbekannte Felder) landet als jsonb in `reports.raw`: NUL würde dort einen Datenbankfehler (500)
+    // auslösen, und beliebig große Zusatzfelder blähen die Historie auf.
+    if json_has_nul(&raw) {
+        return Err(bad("ungültige Zeichen im Report"));
+    }
+    if raw.to_string().len() > MAX_RAW_BYTES {
+        return Err(bad("Report enthält zu viele Zusatzdaten"));
     }
     let updates_list = rep
         .updates
@@ -257,7 +325,11 @@ pub async fn post_report(
     .execute(&mut *tx)
     .await?;
 
-    if let Some(pkgs) = &rep.packages {
+    if let Some(all_pkgs) = &rep.packages {
+        // Multiarch hosts list one name once per architecture (the agent omits it, and the key is (host_id, name)).
+        // ON CONFLICT cannot touch a row twice (SQLSTATE 21000), so exactly one entry per name is kept; the rule
+        // never lets a vulnerable version disappear (see `merge_duplicate_packages`).
+        let pkgs = merge_duplicate_packages(all_pkgs);
         let col = |f: fn(&PackageIn) -> Option<&str>| {
             pkgs.iter()
                 .map(|p| f(p).map(str::to_owned))
@@ -307,4 +379,99 @@ pub async fn post_report(
         tracing::error!(host = host_id, error = %e, "CVE-Bewertung nach Report fehlgeschlagen");
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn p(name: &str, version: &str) -> PackageIn {
+        PackageIn {
+            name: name.into(),
+            version: version.into(),
+            source: None,
+            source_version: None,
+        }
+    }
+    fn merged(v: &[PackageIn]) -> Vec<(String, String)> {
+        merge_duplicate_packages(v)
+            .into_iter()
+            .map(|x| (x.name.clone(), x.version.clone()))
+            .collect()
+    }
+    fn one(v: &[PackageIn]) -> String {
+        let m = merged(v);
+        assert_eq!(m.len(), 1);
+        m[0].1.clone()
+    }
+
+    #[test]
+    fn same_version_twice_stays_one_entry() {
+        assert_eq!(one(&[p("libc6", "2.36-9"), p("libc6", "2.36-9")]), "2.36-9");
+    }
+
+    #[test]
+    fn lower_version_wins_in_any_order() {
+        let (lo, hi) = (p("libc6", "2.36-9"), p("libc6", "2.36-10"));
+        assert_eq!(one(&[lo.clone(), hi.clone()]), "2.36-9");
+        assert_eq!(one(&[hi, lo]), "2.36-9");
+    }
+
+    #[test]
+    fn epoch_and_tilde_follow_dpkg_rules_not_text() {
+        // 1:2.0 is NEWER than 2.0 (epoch), so 2.0 is the lower one.
+        assert_eq!(one(&[p("x", "1:2.0"), p("x", "2.0")]), "2.0");
+        assert_eq!(one(&[p("x", "2.0"), p("x", "1:2.0")]), "2.0");
+        // 1.0~rc1 sorts BEFORE 1.0.
+        assert_eq!(one(&[p("x", "1.0"), p("x", "1.0~rc1")]), "1.0~rc1");
+        assert_eq!(one(&[p("x", "1.0~rc1"), p("x", "1.0")]), "1.0~rc1");
+        // 10 > 9 numerically although "10" < "9" as text.
+        assert_eq!(one(&[p("x", "10"), p("x", "9")]), "9");
+    }
+
+    #[test]
+    fn three_entries_keep_the_lowest_and_other_names_stay() {
+        let v = [p("a", "3.0"), p("b", "1.0"), p("a", "1.0"), p("a", "2.0")];
+        let m = merged(&v);
+        assert_eq!(
+            m,
+            vec![("a".into(), "1.0".into()), ("b".into(), "1.0".into())]
+        );
+        let mut r: Vec<PackageIn> = v.iter().cloned().rev().collect();
+        assert_eq!(merged(&r), m);
+        r.rotate_left(1);
+        assert_eq!(merged(&r), m);
+    }
+
+    #[test]
+    fn unparsable_and_empty_versions_never_hide_behind_a_fixed_one() {
+        // An empty or malformed version cannot be compared: it is kept, so the host ends up "unknown", not "fixed".
+        assert_eq!(one(&[p("x", "1.0"), p("x", "")]), "");
+        assert_eq!(one(&[p("x", ""), p("x", "1.0")]), "");
+        assert_eq!(one(&[p("x", "1.0"), p("x", "!!")]), "!!");
+        // Two unparsable ones: deterministic by text.
+        assert_eq!(one(&[p("x", "!!"), p("x", "##")]), "!!");
+        assert_eq!(one(&[p("x", "##"), p("x", "!!")]), "!!");
+    }
+
+    #[test]
+    fn very_long_versions_are_compared_without_panic() {
+        let long = format!("1.{}", "9".repeat(4000));
+        let longer = format!("1.{}", "9".repeat(4001));
+        let r = one(&[p("x", &longer), p("x", &long)]);
+        assert!(r == long || r == longer);
+    }
+
+    #[test]
+    fn ties_with_different_source_are_deterministic() {
+        let mut a = p("x", "1.0");
+        a.source = Some("src-b".into());
+        let mut b = p("x", "1.0");
+        b.source = Some("src-a".into());
+        let m1 = merge_duplicate_packages(&[a.clone(), b.clone()])[0]
+            .source
+            .clone();
+        let m2 = merge_duplicate_packages(&[b, a])[0].source.clone();
+        assert_eq!(m1, m2);
+    }
 }

@@ -84,7 +84,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
         {hosts.length === 0 ? (
           <Empty title="Kein Host betroffen oder bewertet">Für diese CVE liegt keine Bewertung eines Hosts vor.</Empty>
         ) : (
-          <div className="max-xl:overflow-x-auto">
+          <div className="@container/tbl max-xl:overflow-x-auto">
             <table className="tbl stack">
               <caption>Bewertung der Hosts für {cve.id}</caption>
               <thead>
@@ -125,7 +125,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
         {sources.length === 0 ? (
           <p className="text-fg3">Keine.</p>
         ) : (
-          <div className="max-xl:overflow-x-auto">
+          <div className="@container/tbl max-xl:overflow-x-auto">
             <table className="tbl stack">
               <caption>Status je Quelle, Release und Paket (mit Variante: Standard-Kernel, Cloud-, HWE- oder Backport-Serie)</caption>
               <thead>

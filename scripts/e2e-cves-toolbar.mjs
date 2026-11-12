@@ -59,7 +59,7 @@ try {
     await page.goto(`${base}/cves`);
     await page.getByText("CVE-2026-40001").first().waitFor();
     const L = `${w}px`;
-    const want = mobile ? 44 : 36;
+    const want = mobile ? 44 : 32;
     const hs = await heights();
     ok(hs.length === 4 && hs.every((x) => Math.abs(x.h - want) <= 1), `${L}: Suche, Filter, Stern, „CVE beobachten“ sind ${want} px hoch (${hs.map((x) => `${x.n}=${x.h}`).join(", ")})`);
     const rowsTop = new Set(hs.map((x) => x.top));

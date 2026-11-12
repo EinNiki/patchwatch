@@ -113,6 +113,32 @@ curl -b jar -H "x-csrf-token: <csrf_token aus der Antwort>" -H 'content-type: ap
      -d '{"name":"web1"}' https://patchwatch.example.org/api/v1/hosts
 ```
 
+### Aus dem Quellcode starten
+
+`docker-compose.yml` enthält nur `image:`-Zeilen (kein `build:`) und zieht fertige Images aus GHCR
+(`ghcr.io/einniki/patchwatch-server` und `…-web`, gebaut von `.github/workflows/images.yml` und `release.yml`). Es gibt
+keine zweite Compose-Datei für Quellcode-Builds. Um den Stand dieses Checkouts zu betreiben, wird lokal mit den
+Dockerfiles gebaut (Build-Kontext ist das Repo-Root) und mit **genau dem Namen und Tag** versehen, den die Compose-Datei
+verwendet; die Compose-Datei bleibt unverändert:
+
+```sh
+# Server (Rust, ca. 3 Minuten beim ersten Mal) und Web-Oberfläche bauen
+docker build -f server/Dockerfile -t ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest} .
+docker build -f web/Dockerfile    -t ghcr.io/einniki/patchwatch-web:${PATCHWATCH_VERSION:-latest} .
+
+# Neu starten, ohne die lokalen Images durch GHCR-Images zu ersetzen (--pull never); Postgres und seine Daten bleiben unberührt
+docker compose up -d --no-deps --pull never server web
+
+# Prüfen
+docker compose ps                    # server und web "healthy"
+docker compose logs --tail 50 server # Migrationen, "listening"; beim ersten Start das einmalige Admin-Passwort
+docker compose logs --tail 20 web
+```
+
+Nur der Server geändert (z. B. ein Serverfix)? Dann reichen der erste `docker build` und
+`docker compose up -d --no-deps --pull never server`. `docker compose pull` (oder `up` ohne `--pull never` mit fehlendem
+Image) holt wieder das GHCR-Image und überschreibt den lokal gebauten Tag.
+
 ### Agent-Token ändern und prüfen
 
 Der Token steht nie in einem Befehlsargument (sichtbar in `ps` und der Shell-History); `--token <wert>` wird abgelehnt.
@@ -164,6 +190,18 @@ setzen, wenn ein vertrauenswürdiger Proxy davorsteht und den echten Client in `
 Die Feeds der festen Standardquellen (Ubuntu, Debian, OSV, NVD, KEV) und OIDC laufen über den allgemeinen Client und
 folgen den Proxy-Variablen; deren Ziele kommen nicht aus Benutzereingaben. Eine eigene, ebenfalls geprüfte
 Proxy-Einstellung gibt es nicht; sie wäre nur mit Prüfung der Proxy-Adresse selbst sinnvoll.
+
+**Gespeicherte Schlüssel gehören zu ihrer Adresse.** Schlüssel und Adresse einer Quelle (NVD) oder eines Kanals (Gotify, ntfy,
+Webhook mit Bearer-Token, Matrix, SMTP) werden getrennt gespeichert. Ändert ein Admin Adresse, Host oder Port, wird der
+gespeicherte Schlüssel **verworfen** und muss neu eingegeben werden (die Oberfläche weist darauf hin: „Mit einer neuen
+Adresse wird der gespeicherte Schlüssel entfernt. Bitte neu eingeben.“; ein Kanal, der einen Schlüssel braucht, lässt sich
+dann nur mit neuem Schlüssel speichern). So lässt sich ein Schlüssel nicht durch bloßes Umstellen der Adresse an einen
+fremden Server schicken. Gleiches Ziel in anderer Schreibweise (Groß-/Kleinschreibung des Hosts, `:443`, anderer Pfad)
+behält den Schlüssel; ein anderer Host oder Port nicht. Einzige Ausnahme: Die neue Adresse ist exakt der offizielle Host
+des Typs (NVD: `services.nvd.nist.gov`, ntfy: `ntfy.sh`) per `https://`. Ein Schlüssel wird nie über `http://` gespeichert oder
+gesendet, außer der Host steht ausdrücklich in `PATCHWATCH_NOTIFY_ALLOWED_HOSTS`. Weiterleitungen werden nie befolgt.
+Schlüssel erscheinen nie in API-Antworten, Logs oder Fehlermeldungen. Die Regel steht an einer Stelle
+(`server/src/notify/secret_target.rs`) und gilt für CVE-Quellen und alle Kanäle.
 
 ### Profilbild
 
@@ -284,6 +322,15 @@ unter der Fix-Version liegt, ist **verwundbar**, auch wenn die Security-Suite de
 zeigt dann „Fix verfügbar über Security-Updates“, bis der Host die Version installiert hat. Ob ein Host das Security-Archiv
 aktiviert hat, ist nicht bekannt.
 
+**Doppelte Paketnamen im Bericht (Multiarch).** Meldet ein Host denselben Paketnamen mehrfach (z. B. `libc6:amd64` und
+`libc6:i386` ohne Architekturangabe im Bericht), bleibt **die niedrigere Version** (Debian-Regeln aus dem Crate
+`debversion`, nicht Textvergleich: `1:2.0` > `2.0`, `1.0~rc1` < `1.0`). Eine verwundbare Version verschwindet so nie hinter einer
+gefixten; die Reihenfolge im Bericht spielt keine Rolle, bei Gleichstand entscheidet ein fester Vergleich der Quellfelder.
+Eine nicht lesbare (oder leere) Version wird nie von einer lesbaren verdeckt; sie bleibt stehen.
+**Grenze:** Der Bericht enthält keine Architektur und der Schlüssel der Tabelle `host_packages` ist (Host, Name); ohne
+Migration lassen sich beide Architekturen daher nicht getrennt speichern. Der Kernel wird nicht über diese Tabelle bewertet:
+der laufende Kernel kommt aus dem `kernel`-Block des Berichts und wird mit seiner eigenen Version geprüft (getestet).
+
 Grün (kein offener CVE-Befund) zeigt ein Host nur, wenn alle zuständigen Quellen nutzbar sind (siehe nächster
 Abschnitt); sonst „CVE-Lage unbekannt“ mit Begründung.
 
@@ -383,18 +430,20 @@ Feed-Zustand je Quelle („veraltet seit …“).
 
 **UI v2** (Seitenleiste: Hosts · CVEs · Agents · Benachrichtigungen · Einstellungen):
 
-- **Tabellen**: In der Hostliste ist die ganze Zeile klickbar (Maus, Touch; Hostname bleibt der echte Link, Strg/Cmd/Shift und
-  Mittelklick öffnen einen neuen Tab, markierter Text und Bedienelemente in der Zeile lösen nichts aus; die CVE-Zelle öffnet
-  die Host-Seite gefiltert). Die Tabellen (Hosts, Agents, CVEs, CVE-Quellen) füllen die ganze Inhaltsbreite bis 2560 px:
+- **Tabellen**: In der Hostliste und der CVE-Liste (Ziel `/cves/<ID>`) ist die ganze Zeile klickbar (Maus, Touch; Hostname bzw. CVE-ID bleibt der echte Link, Strg/Cmd/Shift und
+  Mittelklick öffnen einen neuen Tab, markierter Text und Bedienelemente in der Zeile (Stern, Hostlinks, „+N“-Popover) lösen nichts aus; die CVE-Zelle der
+  Hostliste öffnet die Host-Seite gefiltert). Agents und CVE-Quellen haben kein Detailziel, ihre Zeilen sind bewusst nicht klickbar. Die Tabellen (Hosts, Agents, CVEs, CVE-Quellen) füllen die ganze Inhaltsbreite bis 2560 px:
   jede Spalte hat einen prozentualen Anteil und eine Mindestbreite, die letzte Spalte endet am rechten Inhaltsrand, freier
   Platz geht an die Textspalten (Host, Beschreibung, Hostname). Text steht linksbündig, Zahlenspalten (Updates, Uptime)
   rechtsbündig samt Kopf; der Zellabstand ist links und rechts gleich (12 px ab 768, 16 px ab 1280, 24 px ab 1600), alle
-  Zellen stehen vertikal mittig. Unter 1024 px entfallen Spalten (Uptime und Agent zuerst, dann Updates), unter 768 px
-  werden Zeilen gestapelt; die Seite scrollt nie waagerecht. In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und
-  darunter die Hostnamen als Links (höchstens 3, der Rest hinter „+N“).
+  Zellen stehen vertikal mittig. Schmalere Fenster blenden Spalten aus (Hosts: Agent unter 1600 px, Uptime unter 1440 px,
+  „Zuletzt gemeldet“ und Updates unter 1280 px), unter 768 px werden Zeilen gestapelt, bei vergrößerter Schrift auch
+  breiter, sobald der Behälter der Tabelle schmaler als 40 rem ist; die Seite scrollt nie waagerecht.
+  In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und darunter die Hostnamen als Links (höchstens 3, der Rest
+  hinter „+N“).
 
 - **CVE-Quellen** (oben auf der CVE-Seite): Die Knopfreihe „Alle abrufen“, „Quelle hinzufügen“ (einziger Primärknopf) und
-  „Verwalten“ steht rechts neben der Textzeile (36 px hoch); unter 1100 px sind es Symbolknöpfe mit Tooltip und `aria-label`,
+  „Verwalten“ steht rechts neben der Textzeile (32 px hoch, wie alle gleichrangigen Knöpfe; mobil 44 px); unter 1100 px sind es Symbolknöpfe mit Tooltip und `aria-label`,
   unter 640 px eine eigene Reihe in gleicher Breite (44 px). Der Zustandschip zeigt nur das Wort, das Datum („seit …“)
   steht klein darunter. Unter 1280 px entfällt die Spalte „Intervall“ (steht in den Details), unter 1024 px werden die
   Quellen zu Karten. Die Aktionen je Quelle stehen ohne Menü nebeneinander: „Jetzt abrufen“ (Akzentrand), „Abschalten“
@@ -407,7 +456,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
   betroffene Hosts.
 - **Host-Detail, CVE-Lage**: ein Satz als Entscheidungshilfe („Nach dem Neustart auf 7.0.0-42.42 sind noch 81 CVEs
   offen, 2894 werden behoben.“; ohne nötigen Neustart „81 CVEs offen, kein Fix installiert.“; ohne offene „Keine
-  offenen CVEs.“), ein gestapelter Balken und vier gleich große Kacheln (ab 1280 px in einer Reihe, 640–1279 px 2×2, darunter eine Spalte): **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
+  offenen CVEs.“), ein gestapelter Balken und vier gleich große Kacheln (ab 1280 px in einer Reihe neben der Spalte „Host-Details“, die bei großer Schrift erst ab 60 rem Inhaltsbreite erscheint; 640–1279 px 2×2, darunter eine Spalte): **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
   Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**, **Unbekannt** (bei 0 gedämpft, aber sichtbar). „Nicht betroffen“ wird in der Host-Ansicht nicht angezeigt (die API liefert die Zahl weiter; eine alte
   URL mit `?cve=not_affected` öffnet die Standardansicht). Jede Kachel zeigt Zahl, Wort, Icon und eine Zeile, die aktive ist per Rahmen und Haken markiert. Es
   steht immer nur **eine** Liste da (Standard „Offen“): nach Level (hoch zuerst), dann Alter sortiert; „Neustart nötig“ und
@@ -418,7 +467,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
   Ist die zuständige Quelle eingeschränkt, steht über der Liste ein Hinweis (z. B. „Ubuntu: Offene Fälle nicht vollständig
   geladen (API überlastet, seit 22:08) …“), die Kachel „Offen“ trägt ein Warnsymbol und „kann unvollständig sein“; nie
   „alles gut“. Proxmox-Hosts bleiben „unbekannt, manuell prüfen“ (nie grün).
-- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, „Zuletzt gemeldet“ und „Zuletzt erreichbar“; „Daten jetzt abrufen“,
+- **Agents**: Tabelle mit Name, Hostname laut Agent, Distribution, „Zuletzt gemeldet“, „Zuletzt erreichbar“, Aktionen und Agent-Version (ab 1024 px alle sieben Spalten ohne waagerechten Überlauf, darunter gestapelte Karten); „Daten jetzt abrufen“,
   „Token erneuern“, Löschen mit Bestätigung. „Agent hinzufügen“ zeigt den Token einmalig und einen Installationsbefehl
   **ohne** Token (`install.sh` fragt ihn ohne Echo ab).
 - **Benachrichtigungen**: ntfy, Matrix, Gotify, Discord und „Live im Browser“, je mit Zugangsdaten (write-only),
@@ -472,6 +521,81 @@ Der Live-WebSocket läuft in der Entwicklung direkt gegen die API (Next.js leite
 
 Tests: `cargo test --workspace` (Integrationstests brauchen `DATABASE_URL` auf eine Postgres-Instanz), im Web
 `npm run lint && npm run typecheck && npm run build`.
+
+## Qualitätsprüfung
+
+`scripts/layout-check.mjs` und `scripts/a11y.mjs` brauchen einen Stack mit Demo-Hosts **und** CVE-Daten, sonst fehlen auf den
+Host-Seiten die CVE-Listen. `scripts/dev-stack.sh` baut den reproduzierbar auf, ohne Anfragen an echte Feed-Quellen:
+
+```sh
+scripts/dev-stack.sh up                # Postgres (pw-night-pg, 127.0.0.1:55440), Server :8091, Mock-Feeds :8190, Seed, ein Feed-Abruf, Web :3300
+scripts/dev-stack.sh status            # was läuft (nie das Passwort)
+scripts/dev-stack.sh restart-server    # setzt das In-Memory-Login-Limit zurück
+scripts/dev-stack.sh restart-web       # startet nur die Web-UI neu (nach npm --prefix web run build)
+scripts/dev-stack.sh down              # stoppt nur die eigenen Prozesse und entfernt den eigenen Container
+
+export PW_MODULE=/pfad/zu/node_modules/playwright PW_CHROME=/pfad/zu/chrome PW_BASE=http://127.0.0.1:3300 \
+       PW_PWFILE=$PW_STACK_DIR/admin.pw AXE_JS=web/node_modules/axe-core/axe.min.js
+node scripts/layout-check.mjs && node scripts/a11y.mjs     # nacheinander, nie zwei Browser gleichzeitig
+```
+
+Zwei weitere Prüfungen, gleiche Umgebung (`scripts/dev-stack.sh restart-server` davor setzt das Login-Limit zurück):
+
+```sh
+# Responsiv: alle Seiten und Zustände x 12 Breiten (320 bis 2560), Querformat, Zoom 200 %, Schriftzoom 200 %, hell/dunkel,
+# reduzierte Bewegung. Prüft Überlauf, abgeschnittenen Text, Fenster im Viewport, Trefferflächen < 768 px, Knopfhöhen,
+# Tabellenrand, axe (serious/critical) und Layoutsprung; schreibt eine Ergebnistabelle. Gruppen einzeln: login, hosts,
+# host-detail, cves, cve-detail, cve-sources, agents, notifications, settings, notfound, sidebar. Keine verändernden Aktionen.
+node scripts/responsive-all.mjs ergebnis.md [gruppe,gruppe]
+# Pixelvergleich mit docs/design/snapshot-2026-11-11/screenshots (1440/390 px, hell/dunkel); Abweichung in %, Schwelle 2 %.
+# Die Demo-Daten unterscheiden sich vom Snapshot, Treffer sind zu deuten (PW_DIFFDIR schreibt Differenzbilder).
+node scripts/snapshot-diff.mjs ergebnis.md
+```
+
+Robustheit (`scripts/fuzz-inputs.mjs`, `scripts/load-test.mjs`, nur fetch, Ergebnis in `docs/overnight/robustness.md`):
+
+```sh
+scripts/dev-stack.sh restart-server && node scripts/fuzz-inputs.mjs   # ungültige Eingaben an alle Routen; Exit 1 bei 5xx oder Antwort über 5 s (~7 min wegen des API-Limits)
+# Last: Wegwerf-Server mit PATCHWATCH_TRUST_PROXY=true starten (sonst greift das Limit von 600 Anfragen/min je IP); für 3.000 CVEs je Host
+# den Mock mit `node scripts/mock-feeds.mjs 8190 --demo-load=3000` starten (erzeugte "[Demo-Last]"-CVEs, nur Wegwerf-Stack) und einen Debian-Abruf auslösen
+PATCHWATCH_TRUST_PROXY=true scripts/dev-stack.sh restart-server && node scripts/load-test.mjs   # 50 gleichzeitig x 10 Runden je Route: Median, p95, Maximum, Server-RSS
+```
+
+Beide Skripte verändern nichts Gültiges (der Fuzz schickt nur abzulehnende Werte); danach für den Seed-Zustand `down && up`.
+
+Ausfall (`scripts/e2e-outage.mjs`, ein Browser): stoppt **nur** den in `PW_PG_CONTAINER` genannten Container (muss mit `pw-night-`
+beginnen) für `PW_OUTAGE_SECS` (30) Sekunden und startet ihn wieder, auch bei Fehlern. Prüft 503 mit deutschem Text und `Retry-After`,
+Fehlerzustand im UI ohne Umleitung zur Anmeldung, die Fehlerseiten bei Render-Fehlern, Erholung ohne Neustart (gleiche PID), gleiche
+Hosts-/CVE-Zahlen, Live-Anzeige und LISTEN/NOTIFY danach. Fordert für zwei Hosts einen Report an, sonst keine Änderung.
+
+```sh
+scripts/dev-stack.sh restart-server && PW_PG_CONTAINER=pw-night-pg PW_SERVER_PIDFILE=$PW_STACK_DIR/server.pid node scripts/e2e-outage.mjs   # Exit 1 bei Fehlern
+```
+
+Ist die Datenbank beim Start des Servers noch nicht erreichbar, versucht er es bis zu 60 s lang erneut (Backoff 1 s bis 5 s); im
+Betrieb antwortet die API bei nicht erreichbarer Datenbank mit 503 (`code: db_unavailable`) und erholt sich ohne Neustart.
+
+Funktionstest Ende-zu-Ende (`scripts/e2e-functional.mjs`: Anmeldung und Sperre, Passwortwechsel mit Rückgabe, Hosts, Token und
+Check-in, auch mit dem echten Agent-Binary, Watchlist, Filter, Suche, Quellenverwaltung, Abruf-Läufe mit Fehlermodi, Kanäle, WebSocket,
+Profilbild). Er **verändert** Daten (Debian-Quelle wird gelöscht, Passwort kurz geändert): nur im Wegwerf-Stack, danach
+`scripts/dev-stack.sh down && scripts/dev-stack.sh up`. Für den vollen Umfang den Server mit `PATCHWATCH_SECRET_KEY` (Geheimnisse der
+Kanäle) und `PATCHWATCH_CONFIG=<toml>` mit `[cve] request_timeout_secs = 2, retries = 2, retry_base_delay_ms = 200` (Zeitüberschreitung)
+starten; die Mock-Feeds nehmen den Fehlermodus per `POST /__mode` (`ok`, `fresh`, `304`, `503`, `503ra`, `422`, `hang`). Ergebnis
+und Abdeckung: `docs/overnight/functional.md`.
+
+```sh
+scripts/dev-stack.sh restart-server && node scripts/e2e-functional.mjs      # Exit 1 bei Fehlern
+```
+
+Das Web-UI kommt aus dem vorhandenen Build (`npm --prefix web run build`). Zustand (PID-Dateien, Logs, zufälliges
+Admin-Passwort mit `chmod 600`) liegt außerhalb des Repos in `PW_STACK_DIR`; Ports, Containername und Passwortdatei sind über
+`PW_*`-Variablen einstellbar (Kopf von `dev-stack.sh`). `scripts/mock-feeds.mjs [Port]` (nur Node-Standardbibliothek) liefert
+auf 127.0.0.1 die Demo-Dateien aus `scripts/fixtures/` in der Form der echten Quellen: Debian-Tracker (`Last-Modified`, 304),
+Ubuntu-API (paginiert, `limit` höchstens 20), Ubuntu-Einzelabruf und die OVAL-Dateien für noble und jammy (beim Start mit
+`bzip2` komprimiert). Die CVE-IDs sind echt, die Statuswerte erfunden („[Demo]“); sie ergeben auf den Seed-Hosts offene,
+„Neustart nötig“-, gefixte und unbekannte CVEs, Proxmox bleibt „unbekannt / manuell prüfen“. Die Adressen der eingebauten
+Quellen stehen in der Konfiguration (`PATCHWATCH_CVE_UBUNTU_URL`, `..._OVAL_URL`, `..._DEBIAN_URL`) und dürfen auf Loopback
+zeigen; der SSRF-Schutz für in der UI angelegte Quellen bleibt unverändert.
 
 ## Anmeldung per OpenID Connect
 

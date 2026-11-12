@@ -38,6 +38,10 @@ pub async fn login(
             })?;
     }
 
+    // Nach dem Rate-Limit: auch Versuche mit NUL werden gezählt. Gleiche Antwort für jeden Namen (verrät kein Konto).
+    if super::has_nul(&body.username) {
+        return Err(ApiError::BadRequest("ungültige Eingabe".into()));
+    }
     let user: Option<(i64, String, bool)> = sqlx::query_as(
         "SELECT id, password_hash, must_change_password FROM admin_users WHERE username = $1",
     )

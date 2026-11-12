@@ -18,8 +18,9 @@ import { Icon, NavIcon } from "@/components/Icons";
 import { CodeField } from "@/components/CopyButton";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
-const ROW_H = 32; // dichte Zeilen (DESIGN.md): 32 px
-const ROW_H_TOUCH = 64; // unter 768 px: zweizeilig
+const ROW_H = 32; // dichte Zeilen (DESIGN.md): 32 px bei 16 px Schrift
+const ROW_H_TOUCH = 64; // schmal (unter 768 px oder Liste unter 40 rem): zweizeilig
+const NARROW_REM = 40; // dieselbe Grenze wie die gestapelten Tabellen (globals.css, Variante stacked)
 const PAGE = 200;
 const GROUP_PAGE = 1000; // Obergrenze der API je Anfrage
 const VIRTUAL_FROM = 60; // ab dieser Zeilenzahl wird nur der sichtbare Ausschnitt gerendert
@@ -38,17 +39,32 @@ const TILE_STATUS: Record<Tile, string> = {
 };
 export { parseCveFilter };
 
-/** Wahr unter 768 px (Touch-Maße). */
-function useNarrow(): boolean {
-  const [narrow, setNarrow] = useState(false);
+/**
+ * Zeilenmaße einer Liste. Schmal (gestapelte Zeile) unter 768 px Fensterbreite oder wenn die Liste schmaler als 40 rem ist:
+ * Media-Queries rechnen in px, bei vergrößerter Schrift (200 % bei 1280 px) passt das feste rem-Raster der breiten Zeile
+ * sonst nicht. Die Zeilenhöhe wächst mit der Schrift (bei 16 px 32 bzw. 64 px). `el` ist der Behälter der Liste; beobachtet
+ * werden Breite und Höhe (die Höhe ändert sich auch, wenn nur die Schrift wächst).
+ */
+function useRows(el: HTMLElement | null): { narrow: boolean; rowH: number } {
+  const [rows, setRows] = useState({ narrow: false, rowH: ROW_H });
   useEffect(() => {
     const m = window.matchMedia("(max-width: 767px)");
-    const on = () => setNarrow(m.matches);
+    const on = () => {
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const narrow = m.matches || (el !== null && el.clientWidth < NARROW_REM * rem);
+      const rowH = Math.round(((narrow ? ROW_H_TOUCH : ROW_H) * rem) / 16);
+      setRows((r) => (r.narrow === narrow && r.rowH === rowH ? r : { narrow, rowH }));
+    };
     on();
     m.addEventListener("change", on);
-    return () => m.removeEventListener("change", on);
-  }, []);
-  return narrow;
+    const ro = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(on) : null;
+    if (el) ro?.observe(el);
+    return () => {
+      m.removeEventListener("change", on);
+      ro?.disconnect();
+    };
+  }, [el]);
+  return rows;
 }
 
 function useDebounced<T>(v: T, ms: number): T {
@@ -209,7 +225,8 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
           <span key={sg.tile} style={{ width: `${sg.pct}%` }} className={`${TONE_BG[TILE_META[sg.tile].tone]} ${sg.tile === "unknown" ? "opacity-60" : ""}`} title={`${TILE_META[sg.tile].word}: ${sg.count}`} />
         ))}
       </div>
-      <div className="mb-2 grid grid-cols-1 gap-2 min-[640px]:grid-cols-2 hd:grid-cols-4" role="group" aria-label="CVE-Zustände">
+      {/* Feste Spaltenzahl je Breite (auto-fit ergäbe bei 768–1279 px drei Spalten statt 2x2); Mindestbreite 200 px, wo sie passt. Mit der 20-rem-Spalte rechts (ab 1280 px, Variante side) sind die Kacheln nur 161–200 px breit: dort minmax(0,1fr), sonst liefe das Raster über. */}
+      <div className="mb-2 grid grid-cols-[minmax(200px,1fr)] gap-2 min-[640px]:grid-cols-[repeat(2,minmax(200px,1fr))] side:grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]" role="group" aria-label="CVE-Zustände">
         {bigTiles.map((t) => (
           <TileButton
             key={t}
@@ -260,7 +277,8 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-xs text-fg2">
+        {/* max-w-full: Das Feld ist 16 rem breit; ohne Grenze am Label wäre max-w-full am Feld wirkungslos (Label wächst mit). */}
+        <label className="flex max-w-full items-center gap-2 text-xs text-fg2">
           <span className="sr-only">CVEs dieses Hosts durchsuchen</span>
           <input
             type="search"
@@ -349,7 +367,7 @@ function TileButton({ t, n, active, loaded, onPick, line, sub, warn }: { t: Tile
       onClick={() => onPick(t)}
       className={`flex min-w-0 flex-col gap-0.5 rounded-xs border bg-surface px-3 py-2 text-left hover:bg-sunk max-md:min-h-11 ${active ? `border-2 ${TONE_BORDER[m.tone]} bg-sunk` : "border-line"}`}
     >
-      <span className={`flex items-center gap-1.5 text-sm font-semibold ${TONE_TEXT[m.tone]}`}>
+      <span className={`flex flex-wrap items-center gap-x-1.5 text-sm font-semibold ${TONE_TEXT[m.tone]}`}>
         <Icon name={warn ? "warn" : m.icon} size={16} />
         {m.word}
         {active ? (
@@ -439,15 +457,16 @@ const LIST_MAX = "clamp(12rem, calc(100dvh - 22rem), 56rem)";
 function CveList({ title, state, proxmox, variant, onOpen, onMore, empty, expected }: { expected: number | null; title: string; state: ReturnType<typeof useApi<HostCvesResponse>>; proxmox: boolean; variant: "open" | "plain"; onOpen: (c: HostCve) => void; onMore: () => void; empty: string }) {
   const items = useMemo(() => state.data?.items ?? [], [state.data]);
   const total = state.data?.total ?? 0;
-  const rowH = useNarrow() ? ROW_H_TOUCH : ROW_H;
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const { narrow, rowH } = useRows(box);
   const rest = total - items.length;
   const loading = !state.data;
   return (
-    <div className="min-w-0">
+    <div ref={setBox} className="min-w-0">
       <h3 className="mb-1 flex items-baseline gap-2 text-sm font-semibold">
         {title} <span className="tabular-nums text-xs font-normal text-fg3">{loading ? "…" : total.toLocaleString("de-DE")}</span>
       </h3>
-      <ListHead variant={variant} />
+      {narrow ? null : <ListHead variant={variant} />}
       {loading ? (
         <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3" style={{ height: expected === null ? "8rem" : `min(${Math.max(expected, 1) * rowH + 2}px, ${LIST_MAX})` }}>
           Lädt …
@@ -459,7 +478,7 @@ function CveList({ title, state, proxmox, variant, onOpen, onMore, empty, expect
           items={items}
           rowH={rowH}
           label={`${title}, Liste`}
-          render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} variant={variant} proxmox={proxmox} onOpen={onOpen} style={style} />}
+          render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} narrow={narrow} variant={variant} proxmox={proxmox} onOpen={onOpen} style={style} />}
         />
       )}
       {rest > 0 ? (
@@ -524,20 +543,21 @@ function GroupItems({ hostId, kind, fix, count, q, lvl, proxmox, onOpen }: { hos
   const fv = fix ? `&fix_version=${encodeURIComponent(fix)}` : "";
   const path = `/hosts/${hostId}/cves?status=${TILE_STATUS[kind]}${fv}&sort=level&dir=desc&limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}${lvl}`;
   const s = useApi<HostCvesResponse>(path, 60_000, LIVE, undefined, { keepPrevious: true });
-  const rowH = useNarrow() ? ROW_H_TOUCH : ROW_H;
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const { narrow, rowH } = useRows(box);
   const items = s.data?.items ?? [];
   const rest = (s.data?.total ?? count) - items.length;
   if (!s.data) return <div className="border-t border-line p-2 text-xs text-fg3">Lädt …</div>;
   const h = `${Math.min(Math.max(items.length, 1), 12) * rowH + 2}px`;
   return (
-    <div className="border-t border-line p-1">
-      <ListHead variant="group" />
+    <div ref={setBox} className="border-t border-line p-1">
+      {narrow ? null : <ListHead variant="group" />}
       <VirtualRows
         items={items}
         rowH={rowH}
         height={h}
         label={`${fix ?? "Ohne Fix-Version"}, Liste`}
-        render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} variant="group" proxmox={proxmox} onOpen={onOpen} style={style} />}
+        render={(c, style) => <Row key={c.cve_id} c={c} h={rowH} narrow={narrow} variant="group" proxmox={proxmox} onOpen={onOpen} style={style} />}
       />
       {rest > 0 ? (
         <button type="button" className="mt-1 text-xs underline max-md:min-h-11 max-md:min-w-11" onClick={() => setLimit((l) => l + GROUP_PAGE)}>
@@ -548,10 +568,9 @@ function GroupItems({ hostId, kind, fix, count, q, lvl, proxmox, onOpen }: { hos
   );
 }
 
-function Row({ c, h, variant, proxmox, onOpen, style }: { c: HostCve; h: number; variant: "open" | "plain" | "group"; proxmox: boolean; onOpen: (c: HostCve) => void; style?: React.CSSProperties }) {
+function Row({ c, h, narrow, variant, proxmox, onOpen, style }: { c: HostCve; h: number; narrow: boolean; variant: "open" | "plain" | "group"; proxmox: boolean; onOpen: (c: HostCve) => void; style?: React.CSSProperties }) {
   const full = c.description ?? c.reason;
   const text = shortText(full) || c.reason;
-  const narrow = h > ROW_H;
   const st = CVE_STATUS[c.status];
   const statusLabel = proxmox && c.status === "unknown" ? (c.reviewed_at ? "Unbekannt: geprüft" : "Unbekannt: manuell prüfen") : c.status === "vulnerable" || c.status === "fix_pending" ? openStatusWord(c) : shortLabel(c.status);
   const lvlTone = c.level >= 8 ? "text-crit" : c.level >= 5 ? "text-warn" : "text-fg2";

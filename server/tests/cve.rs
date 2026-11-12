@@ -6837,3 +6837,120 @@ async fn failed_runs_leave_no_files_behind(pool: PgPool) {
     refresh::refresh_all(&st).await;
     assert_eq!(snapshot(), before, "keine Reste im Temp-Verzeichnis");
 }
+
+// ---------- F3: Schlüssel einer Quelle gehört zur gespeicherten Adresse ----------
+
+#[sqlx::test(migrations = "./migrations")]
+async fn changed_source_address_discards_the_key_and_the_mock_never_sees_it(pool: PgPool) {
+    const KEYTXT: &str = "geheimer-nvd-schluessel";
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup_keyed(pool.clone(), &["ubuntu"], &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    sqlx::query("INSERT INTO cves (id) VALUES ('CVE-2026-3001')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO cve_watchlist (cve_id) VALUES ('CVE-2026-3001')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Schlüssel über http:// einer eigenen Adresse wird abgelehnt (auch ohne dass die Adresse sonst geprüft würde).
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/feeds",
+        &hdr(&h),
+        Some(json!({"type": "nvd", "secret": KEYTXT, "base_url": "http://8.8.8.8/nvd"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    assert!(!r.json.to_string().contains(KEYTXT));
+
+    // Standardadresse + Schlüssel.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/feeds",
+        &hdr(&h),
+        Some(json!({"type": "nvd", "secret": KEYTXT})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let id: String = sqlx::query_scalar("SELECT id FROM cve_sources WHERE kind = 'nvd'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let set = |pool: PgPool, id: String| async move {
+        sqlx::query_scalar::<_, Option<Vec<u8>>>("SELECT secret FROM cve_sources WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .is_some()
+    };
+    let put = |body: Value| {
+        let (app, h, id) = (app.clone(), h.clone(), id.clone());
+        async move {
+            call(
+                &app,
+                Method::PUT,
+                &format!("/api/v1/feeds/{id}"),
+                &hdr(&h),
+                Some(body),
+            )
+            .await
+        }
+    };
+
+    // Nur das Label ändern: Schlüssel bleibt.
+    assert_eq!(
+        put(json!({"label": "NVD 2"})).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(set(pool.clone(), id.clone()).await);
+
+    // Neue fremde Adresse: Schlüssel wird gelöscht, nichts davon in der Antwort.
+    let r = put(json!({"base_url": "https://8.8.8.8/nvd"})).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.json);
+    assert!(!set(pool.clone(), id.clone()).await);
+    let list = feeds(&app, &h).await;
+    assert_eq!(feed(&list, "nvd")["secret_set"], false);
+    assert!(!serde_json::to_string(&list).unwrap().contains(KEYTXT));
+
+    // Neu eingegeben für die neue Adresse; Schreibweise (Großbuchstaben, :443, anderer Pfad) behält ihn, anderer Host nicht.
+    assert_eq!(
+        put(json!({"secret": KEYTXT})).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        put(json!({"base_url": "https://8.8.8.8:443/other"}))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(set(pool.clone(), id.clone()).await);
+    // http:// mit Schlüssel (im selben Aufruf oder für den gespeicherten Schlüssel) wird abgelehnt.
+    let r = put(json!({"base_url": "http://8.8.8.8/nvd", "secret": KEYTXT})).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    assert!(!r.json.to_string().contains(KEYTXT));
+    assert_eq!(
+        put(json!({"base_url": "https://8.8.4.4/nvd"})).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(!set(pool.clone(), id.clone()).await);
+
+    // Zurück auf die Standardadresse (= Mock): der Mock bekommt nie einen Schlüssel.
+    assert_eq!(
+        put(json!({"clear_base_url": true})).await.status,
+        StatusCode::NO_CONTENT
+    );
+    refresh::refresh_all(&st).await;
+    let log = mock.lock().unwrap().log.clone();
+    let calls: Vec<&String> = log.iter().filter(|l| l.starts_with("nvd ")).collect();
+    assert!(!calls.is_empty());
+    assert!(calls.iter().all(|l| l.ends_with("key=-")), "{calls:?}");
+    assert!(log.iter().all(|l| !l.contains(KEYTXT)));
+}

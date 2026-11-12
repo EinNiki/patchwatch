@@ -12,6 +12,7 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { Icon, NavIcon } from "@/components/Icons";
 import { affectedHosts, affectingShort, filterDeviations, hostChips, hostState, statParts, listStats, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
+import { useRowLink } from "@/lib/rowLink";
 import { useFlash } from "@/lib/useFlash";
 import { toast } from "@/lib/toastStore";
 import { Button, Field, TextInput } from "@/components/Controls";
@@ -302,7 +303,8 @@ function CveView() {
   const suggest = CVE_RE.test(qId) && cves.data && !cves.stale && qInput.trim() === q.trim() && !cves.data.some((c) => c.id === qId) ? qId : null;
   const totalLabel = scopeCount.data ? scopeCount.data.all : null;
   const parts = stats ? statParts(stats) : [];
-  const TB = "h-9 min-h-9 max-md:h-11 max-md:min-h-11";
+  // Suchfeld wie die Knöpfe der Leiste: 32 px, mobil 44 px (die Knöpfe kommen aus Controls.tsx).
+  const SEARCH_H = "h-8 min-h-8 max-md:h-11 max-md:min-h-11";
 
   return (
     <>
@@ -338,7 +340,7 @@ function CveView() {
         </h2>
         <div className="sr-only" role="status" aria-live="polite">{announce}</div>
 
-        {/* Werkzeugleiste: Suche, Filter, Watchlist-Stern, „+ CVE beobachten“; alle gleich hoch (36 px, mobil 44 px). */}
+        {/* Werkzeugleiste: Suche, Filter, Watchlist-Stern, „+ CVE beobachten“; alle gleich hoch (32 px, mobil 44 px). */}
         <div id="cve-filters" role="search" aria-label="CVEs suchen und filtern" className="mb-2 flex flex-wrap items-center gap-2">
           <TextInput
             ref={searchRef}
@@ -348,24 +350,23 @@ function CveView() {
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="CVE-ID oder Text (Taste /)"
-            className={`${TB} min-w-0 basis-full md:basis-64 md:flex-1 md:max-w-xl`}
+            className={`${SEARCH_H} min-w-0 basis-full md:basis-64 md:flex-1 md:max-w-xl`}
           />
           <Popover
             label="Filter"
             width={300}
             trigger={(t) => (
-              <button
-                type="button"
+              <Button
                 ref={t.ref}
+                className="min-w-0"
                 aria-haspopup={t["aria-haspopup"]}
                 aria-expanded={t["aria-expanded"]}
                 aria-controls={t["aria-controls"]}
                 onClick={t.toggle}
-                className={`${TB} inline-flex items-center gap-1.5 rounded-[3px] border border-control bg-surface px-3 text-sm font-semibold text-fg hover:bg-sunk`}
               >
                 <NavIcon name="filter" />
                 Filter{deviations > 0 ? <span className="tabular-nums" aria-label={`, ${deviations} aktiv`}> {deviations}</span> : null}
-              </button>
+              </Button>
             )}
           >
             {(close) => (
@@ -384,17 +385,17 @@ function CveView() {
               />
             )}
           </Popover>
-          <button
-            type="button"
+          <Button
+            size="icon"
+            variant={onlyWatch ? "active" : "default"}
             aria-pressed={onlyWatch}
             aria-label="Nur Watchlist"
             title={onlyWatch ? "Nur Watchlist: an (alle CVEs anzeigen)" : "Nur Watchlist anzeigen"}
             onClick={() => setWatchFilter(!onlyWatch)}
-            className={`${TB} inline-flex aspect-square items-center justify-center rounded-[3px] border px-0 ${onlyWatch ? "border-accent bg-accent-soft text-accent" : "border-control bg-surface text-fg2 hover:bg-sunk"}`}
           >
             <NavIcon name={onlyWatch ? "star-fill" : "star"} />
-          </button>
-          <Button className={`${TB} ml-auto min-w-0`} onClick={() => { setWatchKey((k) => k + 1); setWatching(true); }}>
+          </Button>
+          <Button className="ml-auto min-w-0" onClick={() => { setWatchKey((k) => k + 1); setWatching(true); }}>
             <NavIcon name="plus" />
             CVE beobachten
           </Button>
@@ -465,7 +466,7 @@ function CveView() {
           </Empty>
         ) : (
           <>
-            <div className="updatable max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
+            <div className="updatable @container/tbl max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
               <table className="tbl stack dist md:[--tbl-min:45.5rem] xl:[--tbl-min:52.5rem] wide:[--tbl-min:63.5rem]">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
@@ -525,8 +526,9 @@ const CveRow = memo(function CveRow({
   onToggle: (c: CveListItem) => void;
 }) {
   const [pop, setPop] = useState(false);
+  const rowLink = useRowLink(`/cves/${c.id}`);
   return (
-      <tr data-flash={flash ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hide === "fade" ? "" : undefined}>
+      <tr {...rowLink} data-flash={flash ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hide === "fade" ? "" : undefined}>
         <td className="cell-star">
           <button
             type="button"
@@ -559,14 +561,14 @@ const CveRow = memo(function CveRow({
           {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
           {c.level ? <div className="text-xs text-fg3 wide:hidden">Level {c.level}/10</div> : null}
         </td>
-        <td className="max-md:order-0 max-md:flex-[1_0_100%]">
-          {c.description ? <span className="line-clamp-2 max-w-[64rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
+        <td className="stacked:order-0 stacked:flex-[1_0_100%]">
+          {c.description ? <span className="line-clamp-2 max-w-[64rem] [contain:inline-size] stacked:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
           {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
         </td>
-        <td className="cell-status md:max-w-0 max-md:flex-[1_0_100%]">
+        <td className="cell-status tabular:max-w-0 stacked:flex-[1_0_100%]">
           <Distros c={c} />
         </td>
-        <td data-label="Hosts" className="md:max-w-0">
+        <td data-label="Hosts" className="tabular:max-w-0">
           <HostChips c={c} ids={hostIds} />
         </td>
         <td className="max-wide:hidden">
@@ -600,10 +602,10 @@ function Distros({ c }: { c: CveListItem }) {
       ))}
       {more ? <OtherReleases id={c.id} /> : null}
       {c.hidden_releases > 0 ? (
-        <Button aria-expanded={more} onClick={() => setMore(!more)} className="!h-(--chip-h) !min-h-(--chip-h) !rounded-xs !border-line !px-1.5 !py-0 !text-xs !font-normal !text-fg2 max-md:!min-h-11">
+        <button type="button" aria-expanded={more} onClick={() => setMore(!more)} className="inline-flex h-(--chip-h) items-center justify-center gap-1.5 whitespace-nowrap rounded-xs border border-line bg-surface px-1.5 text-xs text-fg2 transition-[background-color] duration-(--dur-1) hover:bg-sunk active:bg-sunk max-md:h-auto max-md:min-h-11">
           {more ? "Weniger anzeigen" : `+ ${c.hidden_releases} weitere Releases`}
           <span className="sr-only"> für {c.id}</span>
-        </Button>
+        </button>
       ) : null}
     </div>
   );

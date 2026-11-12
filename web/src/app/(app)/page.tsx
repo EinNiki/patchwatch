@@ -26,15 +26,16 @@ import { feedSummary } from "@/components/FeedStatus";
 
 type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
 
-/** `cls`: Sichtbarkeit je Breite. Der letzte Report rutscht zwischen 768 und 1439 px unter den Hostnamen, Agent und Uptime kommen ab 1600 px dazu. */
-/** Spaltenanteile (Summe 100 % bei 8 Spalten) und Mindestbreiten (Summe 59 rem). Unter 1280 px entfallen Zuletzt gemeldet, Uptime
- *  und Agent (Meldezeit steht dann im Host-Feld), unter 1024 px zusätzlich Updates. */
+/** `cls`: Sichtbarkeit je Breite. Spaltenanteile (Summe 100 % bei 8 Spalten) und Mindestbreiten (Summe 59 rem). Zwischen 768 und
+ *  1279 px entfallen Zuletzt gemeldet (Meldezeit steht dann im Host-Feld) und Updates: Bei 1024 px brauchen CVE (zwei feste
+ *  Spalten) und Status (längster Chip „Sicherheitsupdates offen“) ihre volle Breite, mit Updates wäre die Tabelle 30 px zu breit.
+ *  Uptime kommt ab 1440 px, Agent ab 1600 px dazu. */
 const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: string }[] = [
   { key: "name", label: "Host", cls: "w-[13%] min-w-28" },
   { key: "kernel", label: "Distribution / Kernel", cls: "w-[17%] min-w-28 hd:min-w-44" },
   { key: "report", label: DATA_LABEL, cls: "w-[10%] min-w-32 md:max-hd:hidden", tip: DATA_TIP },
-  { key: "updates", label: "Updates", num: true, cls: "w-[9%] min-w-28 md:max-lg:hidden" },
-  { key: "cve", label: "CVE", cls: "w-[20%] min-w-60 hd:min-w-64" },
+  { key: "updates", label: "Updates", num: true, cls: "w-[9%] min-w-28 md:max-hd:hidden" },
+  { key: "cve", label: "CVE", cls: "w-[20%] min-w-52 hd:min-w-64" },
   { key: "status", label: "Status", cls: "w-[12%] min-w-26" },
 ];
 
@@ -159,7 +160,7 @@ function HostsView() {
                   disabled={k.count === 0 && !active}
                   onClick={() => setParam(active ? Object.fromEntries(Object.keys(k.param).map((key) => [key, null])) : k.param)}
                   title={active ? "Filter aufheben" : `Nur ${k.label} anzeigen`}
-                  className={`flex min-h-11 flex-col items-start gap-0.5 border-l-2 px-3 py-2 text-left first:border-l-0 hover:bg-sunk disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${
+                  className={`flex min-h-11 min-w-0 flex-col items-start gap-0.5 border-l-2 px-3 py-2 text-left first:border-l-0 hover:bg-sunk disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${
                     active ? "border-accent bg-sunk" : "border-transparent"
                   }`}
                 >
@@ -169,15 +170,15 @@ function HostsView() {
                     </span>
                     <span className="mono text-xl font-semibold leading-none">{k.count}</span>
                   </span>
-                  <span className="text-xs text-fg2">{k.label}</span>
+                  <span className="text-xs text-fg2 [overflow-wrap:anywhere]">{k.label}</span>
                 </button>
               );
             })}
-            <div className="flex min-h-11 flex-col items-start gap-0.5 px-3 py-2">
+            <div className="flex min-h-11 min-w-0 flex-col items-start gap-0.5 px-3 py-2">
               <span className="mono text-sm font-semibold leading-[1.25rem]">
                 <RelTime iso={lastReport} />
               </span>
-              <span className="text-xs text-fg2" title={DATA_TIP}>{DATA_LABEL}</span>
+              <span className="text-xs text-fg2 [overflow-wrap:anywhere]" title={DATA_TIP}>{DATA_LABEL}</span>
             </div>
           </section>
 
@@ -250,8 +251,8 @@ function HostsView() {
           {rows.length === 0 ? (
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
-            <div className="max-hd:overflow-x-auto">
-              <table className="tbl stack dist [&_td]:py-1.5 md:[--tbl-min:34.5rem] lg:[--tbl-min:40.5rem] hd:[--tbl-min:58rem]">
+            <div className="@container/tbl max-hd:overflow-x-auto">
+              <table className="tbl stack dist [&_td]:py-1.5 md:[--tbl-min:34.5rem] hd:[--tbl-min:58rem]">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
@@ -325,7 +326,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           {stale ? <span className="sr-only">: meldet sich nicht mehr</span> : null}
         </span>
       </td>
-      <td data-label="Updates" className="num whitespace-nowrap md:max-lg:hidden">
+      <td data-label="Updates" className="num whitespace-nowrap md:max-hd:hidden">
         {h.updates_pending == null ? (
           <span className="text-fg3">unbekannt</span>
         ) : (

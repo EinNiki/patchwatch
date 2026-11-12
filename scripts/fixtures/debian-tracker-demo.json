@@ -1,0 +1,154 @@
+{
+ "linux": {
+  "CVE-2026-99999": {
+   "description": "[Demo] Demo: Kernel-Schwachstelle mit angekündigtem Fix (Watchlist-Eintrag der Seed-Daten).",
+   "releases": {
+    "trixie": {
+     "status": "open",
+     "urgency": "high",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2025-38250": {
+   "description": "[Demo] Bluetooth: hci_core: Use-after-free in vhci_flush() (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "6.12.50-1",
+     "urgency": "medium",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2024-1086": {
+   "description": "[Demo] netfilter: nf_tables: Use-after-free, lokale Rechteausweitung (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "6.6.15-1",
+     "urgency": "high",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2020-12351": {
+   "description": "[Demo] Bluetooth: Typverwechslung in l2cap_data_channel_rx (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "5.10.1-1",
+     "urgency": "high",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2020-12352": {
+   "description": "[Demo] Bluetooth: Informationsleck in a2mp (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "5.10.1-1",
+     "urgency": "medium",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2012-4542": {
+   "description": "[Demo] block: Befehlsfilter für Partitionen unvollständig (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "3.2.1-1",
+     "urgency": "low",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2004-0230": {
+   "description": "[Demo] TCP: Sequenznummern-Prüfung bei RST erlaubt Verbindungsabbruch (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "open",
+     "urgency": "unimportant",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2005-3660": {
+   "description": "[Demo] Speicherauslastung durch fehlende Begrenzung (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "open",
+     "urgency": "unimportant",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2020-0347": {
+   "description": "[Demo] Android-Kernel: Detailangaben fehlen, Bewertung offen (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "undetermined",
+     "urgency": "not yet assigned",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2015-8787": {
+   "description": "[Demo] netfilter: nf_nat_redirect: NULL-Dereferenz (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "0",
+     "urgency": "unimportant",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  },
+  "CVE-2003-1604": {
+   "description": "[Demo] Ältere Schwachstelle, für aktuelle Kernel nicht relevant (Kurzfassung).",
+   "releases": {
+    "trixie": {
+     "status": "resolved",
+     "fixed_version": "0",
+     "urgency": "unimportant",
+     "repositories": {
+      "trixie": "6.12.57-1",
+      "trixie-security": "6.12.57-1"
+     }
+    }
+   }
+  }
+ }
+}

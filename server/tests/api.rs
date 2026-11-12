@@ -279,6 +279,69 @@ async fn package_list_is_replaced_and_kept_out_of_history(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn duplicate_package_names_in_report_are_merged(pool: PgPool) {
+    // Multiarch: the agent reports the same name once per architecture.
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    let mut r = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+    r["packages"] = json!([
+        {"name": "libc6", "version": "2.39-0ubuntu8.2", "source": "glibc", "source_version": "2.39-0ubuntu8.2"},
+        {"name": "bash", "version": "5.2-1", "source": null, "source_version": null},
+        {"name": "libc6", "version": "2.39-0ubuntu8.10", "source": "glibc", "source_version": "2.39-0ubuntu8.10"},
+        {"name": "libc6", "version": "2.39-0ubuntu8.3", "source": "glibc", "source_version": "2.39-0ubuntu8.3"}]);
+    let resp = call(&app, Method::POST, "/api/v1/report", &h, Some(r)).await;
+    assert_eq!(resp.status, StatusCode::NO_CONTENT);
+    let pk: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, version FROM host_packages WHERE host_id = $1 ORDER BY name")
+            .bind(id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    // Exactly one row per name; the LOWEST version wins regardless of order (a vulnerable copy must never vanish).
+    assert_eq!(
+        pk,
+        vec![
+            ("bash".to_owned(), "5.2-1".to_owned()),
+            ("libc6".to_owned(), "2.39-0ubuntu8.2".to_owned())
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn merging_duplicate_packages_does_not_touch_the_kernel_evaluation(pool: PgPool) {
+    // The running kernel is judged by its own version from the report's kernel block, not by host_packages: two
+    // copies of the same kernel package in the list (here a newer one first) change neither the host's kernel
+    // version nor what is stored for the package list beyond "lowest wins".
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web2", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    let mut r = report("web2", "6.8.0-31.31", "6.8.0-35.35", 0, 0);
+    r["packages"] = json!([
+        {"name": "linux-image-6.8.0-31-generic", "version": "6.8.0-99.99", "source": "linux-signed", "source_version": "6.8.0-99.99"},
+        {"name": "linux-image-6.8.0-31-generic", "version": "6.8.0-31.31", "source": "linux-signed", "source_version": "6.8.0-31.31"}]);
+    let resp = call(&app, Method::POST, "/api/v1/report", &h, Some(r)).await;
+    assert_eq!(resp.status, StatusCode::NO_CONTENT);
+    let kv: Option<String> =
+        sqlx::query_scalar("SELECT kernel_package_version FROM hosts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kv.as_deref(), Some("6.8.0-31.31"));
+    let pv: String = sqlx::query_scalar(
+        "SELECT version FROM host_packages WHERE host_id = $1 AND name = 'linux-image-6.8.0-31-generic'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pv, "6.8.0-31.31");
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn auth_csrf_and_host_management(pool: PgPool) {
     let app = router(state(pool.clone(), &[]));
 
@@ -1095,4 +1158,215 @@ async fn long_poll_checkin_answers_as_soon_as_a_report_is_requested(pool: PgPool
     .await;
     assert_eq!(none.json["report_requested"], false);
     assert!(t.elapsed() >= std::time::Duration::from_millis(900));
+}
+
+/// NUL (\u0000) in JSON-Textfeldern kann Postgres (text und jsonb) nicht speichern: das muss 400 ergeben, nie 500.
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_login_username_is_400_and_still_rate_limited(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    admin::upsert_admin(&pool, "admin", PASSWORD).await.unwrap();
+    let try_login = |name: &'static str| {
+        let app = app.clone();
+        async move {
+            call(
+                &app,
+                Method::POST,
+                "/api/v1/auth/login",
+                &[],
+                Some(json!({"username": name, "password": PASSWORD})),
+            )
+            .await
+        }
+    };
+    // Gleiche Antwort für existierenden und nicht existierenden Namen.
+    let a = try_login("ad\u{0}min").await;
+    let b = try_login("gibt-es-nicht\u{0}").await;
+    assert_eq!(a.status, StatusCode::BAD_REQUEST);
+    assert_eq!(b.status, StatusCode::BAD_REQUEST);
+    // Versuche mit NUL zählen gegen das Rate-Limit je IP (8 weitere: insgesamt 10 erlaubt).
+    let mut last = StatusCode::OK;
+    for _ in 0..12 {
+        last = try_login("ad\u{0}min").await.status;
+        if last == StatusCode::TOO_MANY_REQUESTS {
+            break;
+        }
+        assert_eq!(last, StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_watchlist_note_is_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, csrf) = login(&app, &pool).await;
+    let h = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/watchlist/CVE-2024-1234",
+        &h,
+        Some(json!({"note": "a\u{0}b"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "Watchlist-Notiz");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_feed_interval_key_is_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, csrf) = login(&app, &pool).await;
+    let h = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings",
+        &h,
+        Some(json!({"feed_intervals": {"x\u{0}y": 60}})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "feed_intervals");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_oidc_settings_is_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, csrf) = login(&app, &pool).await;
+    let h = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/oidc",
+        &h,
+        Some(json!({"enabled": false, "issuer": "https://i.example\u{0}", "client_id": "c", "redirect_url": "https://r.example/cb"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "OIDC");
+}
+
+/// Unbekannte Felder landen in `reports.raw` (jsonb): NUL darin ergab einen Datenbankfehler (500). Muss 400 sein, und es
+/// darf nichts gespeichert werden. Vom Fuzz-Skript nicht erreichbar (braucht ein gültiges Host-Token).
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_and_oversize_unknown_report_fields_are_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let host = add_host(&pool, "nul-host", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    for (name, mutate) in [
+        ("Zusatzfeld", json!({"x": "a\u{0}b"})),
+        ("verschachtelt", json!({"x": {"y": ["a\u{0}"]}})),
+        ("Schlüssel", json!({"k\u{0}": 1})),
+    ] {
+        let mut rep = report("nul-host", "6.8.0-31.31", "6.8.0-35.35", 0, 0);
+        for (k, v) in mutate.as_object().unwrap() {
+            rep[k] = v.clone();
+        }
+        let r = call(&app, Method::POST, "/api/v1/report", &h, Some(rep)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{name}");
+    }
+    // Beliebig große Zusatzfelder (hier 100 KB; das Body-Limit liegt bei 4 MiB) werden nicht in die Historie geschrieben.
+    let mut big = report("nul-host", "6.8.0-31.31", "6.8.0-35.35", 0, 0);
+    big["x"] = json!("y".repeat(100_000));
+    let r = call(&app, Method::POST, "/api/v1/report", &h, Some(big)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "großes Zusatzfeld");
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM reports WHERE host_id = $1")
+        .bind(host)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "abgelehnte Reports werden nicht gespeichert");
+}
+
+/// Datenbank nicht erreichbar (Pool gegen einen geschlossenen Port): 503 mit deutschem Text, `Retry-After` und
+/// eigenem Code statt 500 "interner Fehler"; nie interne Details. Gilt auch für die Anmeldeprüfung und den Login.
+#[tokio::test]
+async fn database_outage_is_503_without_details() {
+    // Port 1 auf Loopback: Verbindungsaufbau scheitert sofort, der Pool gibt nach `acquire_timeout` auf.
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .acquire_timeout(std::time::Duration::from_millis(300))
+        .connect_lazy("postgres://patchwatch:x@127.0.0.1:1/patchwatch")
+        .unwrap();
+    let app = router(state(pool, &[]));
+    let session = "pw_session=abcdef0123456789";
+    for (method, uri, headers, body) in [
+        (
+            Method::GET,
+            "/api/v1/hosts",
+            vec![("cookie", session)],
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v1/auth/me",
+            vec![("cookie", session)],
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v1/auth/login",
+            vec![],
+            Some(json!({"username": "admin", "password": PASSWORD})),
+        ),
+    ] {
+        let r = call(&app, method, uri, &headers, body).await;
+        assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+        assert_eq!(r.json["code"], "db_unavailable", "{uri}");
+        let msg = r.json["error"].as_str().unwrap();
+        assert!(msg.contains("Datenbank"), "{uri}: {msg}");
+        let lower = msg.to_lowercase();
+        for internal in ["sqlx", "pool", "postgres", "127.0.0.1", "timed out"] {
+            assert!(!lower.contains(internal), "{uri}: interne Details: {msg}");
+        }
+        assert!(
+            r.headers
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .is_some_and(|s| s > 0),
+            "{uri}: Retry-After fehlt"
+        );
+    }
+}
+
+/// Agent-Uhr eine Stunde falsch (vor oder nach): "Zuletzt gemeldet" ist die Serverzeit beim Empfang, der Host wird
+/// weder "meldet sich nicht" noch bekommt er einen Zeitpunkt in der Zukunft.
+#[sqlx::test(migrations = "./migrations")]
+async fn wrong_agent_clock_does_not_matter(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let auth = bearer(TOKEN);
+    for skew in [3600_i64, -3600, -27 * 3600] {
+        let mut body = report("web1", "6.8.0-35.35", "6.8.0-35.35", 0, 0);
+        body["collected_at_unix"] = json!(Utc::now().timestamp() + skew);
+        let before = Utc::now();
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/report",
+            &[("authorization", &auth)],
+            Some(body),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "Abweichung {skew} s");
+        let after = Utc::now();
+        let (last, status): (chrono::DateTime<Utc>, String) =
+            sqlx::query_as("SELECT last_report_at, status FROM hosts WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            last >= before - Duration::seconds(1) && last <= after + Duration::seconds(1),
+            "Abweichung {skew} s: {last}"
+        );
+        assert_ne!(status, "stale", "Abweichung {skew} s");
+    }
 }

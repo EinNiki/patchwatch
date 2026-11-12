@@ -29,7 +29,7 @@ export default function NotificationsPage() {
         n.error ? null : <Loading what="Kanäle" />
       ) : (
         <>
-        <div>
+        <div className="@container/tbl">
           <table className="tbl stack">
             <caption>Benachrichtigungskanäle mit Zustand</caption>
             <thead>

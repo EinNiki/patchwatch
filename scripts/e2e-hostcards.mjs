@@ -1,4 +1,4 @@
-// E2E: Host-Seite – vier gleich große CVE-Kacheln (Raster 4 / 2×2 / 1 Spalte), keine abgeschnittenen Texte, Spalte „Host-Details“
+// E2E: Host-Seite – vier gleich große CVE-Kacheln (Raster 4 / 2×2 / 1 Spalte), keine abgeschnittenen Texte, Mindestbreite 200 px unter 1280 px, Spalte „Host-Details“
 // am Inhaltsrand, kein Seitenüberlauf, kein „sudo reboot“, axe.
 //   PW_MODULE=… PW_CHROME=… PW_PWFILE=<Datei mit Admin-Passwort> AXE_JS=… node scripts/e2e-hostcards.mjs
 import { createRequire } from "node:module";
@@ -41,6 +41,18 @@ try {
       ok(Math.max(...m.map((t) => t.w)) - Math.min(...m.map((t) => t.w)) <= 1, `${tag}: gleich breit (${m.map((t) => Math.round(t.w))})`);
       for (const r of rows.values()) ok(Math.max(...r.map((t) => t.h)) - Math.min(...r.map((t) => t.h)) <= 1, `${tag}: gleich hoch je Reihe`);
       ok(m.every((t) => t.right <= w), `${tag}: Kacheln im Fenster`);
+      // Mindestbreite 200 px unter 1280 px: Raster in einen schmalen Container zwingen; die Spalten dürfen nicht unter 200 px schrumpfen.
+      if (w < 1280) {
+        const narrow = await page.evaluate(() => {
+          const g = document.querySelector('[role="group"][aria-label^="CVE"]');
+          const old = g.style.width;
+          g.style.width = "300px";
+          const ws = [...g.children].map((c) => c.getBoundingClientRect().width);
+          g.style.width = old;
+          return Math.min(...ws);
+        });
+        ok(narrow >= 199.5, `${tag}: Kacheln nie schmaler als 200 px (${Math.round(narrow)})`);
+      }
       ok(m.some((t) => t.text.includes("Unbekannt")), `${tag}: Kachel „Unbekannt“ vorhanden`);
       const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
       ok(over <= 0, `${tag}: kein Seitenüberlauf (${over})`);

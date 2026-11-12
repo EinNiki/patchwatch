@@ -18,7 +18,8 @@ function infoFrom(e: MouseEvent<HTMLElement>): ClickInfo {
     button: e.button,
     defaultPrevented: e.defaultPrevented,
     modifier: e.ctrlKey || e.metaKey || e.shiftKey,
-    onControl: control !== null && e.currentTarget.contains(control),
+    // Ereignisse aus einem Portal (z. B. Popover „+N“) erreichen die Zeile nur über den React-Baum, nicht über das DOM: kein Zeilenklick.
+    onControl: (control !== null && e.currentTarget.contains(control)) || (target !== null && !e.currentTarget.contains(target)),
     selecting: !!sel && !sel.isCollapsed && sel.toString().trim() !== "",
     overlayOpen: overlayOpen(),
   };

@@ -40,7 +40,12 @@ fn run(args: &[&str], stdin: Option<&str>, env: &[(&str, &str)]) -> Output {
     }
     let mut child = c.spawn().unwrap();
     if let Some(s) = stdin {
-        child.stdin.take().unwrap().write_all(s.as_bytes()).unwrap();
+        // A child that refuses the input may exit before reading it; the write then fails
+        // with EPIPE. That is the behaviour under test, not an error of the harness.
+        match child.stdin.take().unwrap().write_all(s.as_bytes()) {
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+            r => r.unwrap(),
+        }
     } else {
         drop(child.stdin.take());
     }

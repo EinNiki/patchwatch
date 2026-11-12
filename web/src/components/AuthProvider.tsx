@@ -1,11 +1,13 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setCsrf } from "@/lib/api";
 import { clearApiCache } from "@/lib/apiCache";
 import type { Me } from "@/lib/types";
 import { ForcedPasswordChange } from "@/components/ForcedPasswordChange";
+import { ErrorScreen } from "@/components/ErrorScreen";
+import { sessionFailure } from "@/lib/session";
 
 interface AuthValue {
   me: Me;
@@ -22,11 +24,21 @@ export function useAuth(): AuthValue {
   return v;
 }
 
-/** Prüft die Sitzung; ohne gültige Sitzung geht es zur Anmeldung. */
+/**
+ * Prüft die Sitzung. Nur ohne gültige Sitzung (401) geht es zur Anmeldung; ist Server oder Datenbank nicht erreichbar,
+ * erscheint ein Fehlerzustand mit „Erneut versuchen“ (die Sitzung kann weiter gelten).
+ */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setFailure(null);
+    setChecked(false);
+    setAttempt((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -37,8 +49,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setCsrf(m.csrf_token);
         setMe(m);
       })
-      .catch(() => {
-        if (alive) router.replace("/login");
+      .catch((e: unknown) => {
+        if (!alive) return;
+        const f = sessionFailure(e);
+        if (f.kind === "login") router.replace("/login");
+        else setFailure(f.message);
       })
       .finally(() => {
         if (alive) setChecked(true);
@@ -49,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       alive = false;
       window.removeEventListener("pw:unauthorized", onUnauthorized);
     };
-  }, [router]);
+  }, [router, attempt]);
 
   if (!checked) {
     return (
@@ -58,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       </p>
     );
   }
+  if (failure) return <ErrorScreen page title="Anmeldung kann gerade nicht geprüft werden" message={failure} onRetry={retry} />;
   if (!me) return null;
 
   const logout = async () => {

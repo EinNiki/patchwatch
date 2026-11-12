@@ -67,7 +67,7 @@ try {
   await stepper.waitFor();
   ok((await stepper.getByRole("listitem").count()) === 6, "Stepper hat sechs Schritte");
   ok((await stepper.locator('[aria-current="step"]').count()) <= 1, "höchstens ein aktueller Schritt (aria-current)");
-  ok(await start.isDisabled(), "Knopf ist während des Laufs gesperrt");
+  ok((await page.getByRole("button", { name: "Debian: Abruf läuft" }).getAttribute("aria-busy")) === "true", "Knopf ist während des Laufs beschäftigt (aria-busy, nicht bedienbar; Name „Debian: Abruf läuft“)");
   if (shots) await page.screenshot({ path: `${shots}/run-1440-active.png` });
   await page.waitForFunction(() => document.body.innerText.includes("Hosts prüfen"), null, { timeout: 20000 });
   await region.getByText(/Debian: aktualisiert/).waitFor({ timeout: 20000 });

@@ -208,6 +208,15 @@ pub async fn settings_put(
     Json(b): Json<SettingsBody>,
 ) -> ApiResult<Json<Value>> {
     let bad = |m: &str| ApiError::BadRequest(m.to_owned());
+    // Die Werte landen in einem jsonb-Wert; NUL würde dort einen Datenbankfehler (500) auslösen.
+    let has_nul = [&b.issuer, &b.client_id, &b.redirect_url, &b.name, &b.scopes]
+        .into_iter()
+        .chain(&b.allowed_emails)
+        .chain(&b.allowed_domains)
+        .any(|s| super::has_nul(s));
+    if has_nul {
+        return Err(bad("ungültige Zeichen in den Einstellungen"));
+    }
     let issuer = b.issuer.trim().trim_end_matches('/').to_owned();
     let allowed_emails = clean_list(&b.allowed_emails);
     let allowed_domains = clean_list(&b.allowed_domains);

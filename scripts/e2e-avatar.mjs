@@ -33,13 +33,13 @@ try {
   // Ausgangslage: kein eigenes Bild (Wegwerf-Datenbank).
   await page.evaluate(async () => { const me = await (await fetch("/api/v1/auth/me")).json(); await fetch("/api/v1/auth/avatar", { method: "DELETE", headers: { "x-csrf-token": me.csrf_token } }); });
   await page.goto(`${base}/settings`);
-  const dot = page.locator('[title="admin"]:visible > span[aria-hidden="true"]').first();
+  const dot = page.locator('[title="admin"]:visible span[aria-hidden="true"]').first();
   await dot.waitFor();
 
   // Initialen, Größe, Kontrast in beiden Modi.
   ok((await dot.innerText()) === "A", "Initialen „A“ für „admin“");
   const box = await dot.boundingBox();
-  ok(Math.round(box.width) === 28 && Math.round(box.height) === 28, `Kreis 28 px (${box.width}×${box.height})`);
+  ok(Math.round(box.width) === 20 && Math.round(box.height) === 20, `Kreis 20 px (Seitenleiste, Raster der Navigation) (${box.width}×${box.height})`);
   for (const scheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: scheme });
     const [bg, fg] = await dot.evaluate((e) => { const s = getComputedStyle(e); const p = (c) => c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number); return [p(s.backgroundColor), p(s.color)]; });
@@ -103,7 +103,7 @@ try {
     if (w < 768) await page.getByRole("button", { name: /Menü/ }).click();
     await img.waitFor();
     const r = await img.boundingBox();
-    ok(r && Math.round(r.width) === 28 && (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 0, `${scheme} ${w}px: Bild 28 px, kein Überlauf`);
+    ok(r && Math.round(r.width) === 20 && (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 0, `${scheme} ${w}px: Bild 20 px, kein Überlauf`);
     if (shots && (w === 390 || w === 1920)) await page.screenshot({ path: `${shots}/avatar-${w}-${scheme}.png` });
   }
 

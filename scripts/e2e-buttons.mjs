@@ -1,4 +1,4 @@
-// E2E: gleich große Knöpfe in Aktionsreihen (CVE-Quellen: Zeile und Kopfzeile). Prüft Breite/Höhe in Ruhe, „Läuft“, deaktiviert, Fokus, Hover,
+// E2E: gleich große Knöpfe in Aktionsreihen (CVE-Quellen: Zeile und Kopfzeile) sowie CVE-Werkzeugleiste und Ablauf-Knöpfe (RunStepper): 32 px, mobil 44 px. Prüft Breite/Höhe in Ruhe, „Läuft“, deaktiviert, Fokus, Hover,
 // kein Sprung der Nachbarzellen beim Wechsel zu „Läuft“, 44 px mobil, axe. Quellen und Läufe per page.route nachgestellt; keine Schreibzugriffe.
 //   PW_MODULE=… PW_CHROME=… PW_PWFILE=<Datei mit Admin-Passwort> AXE_JS=… node scripts/e2e-buttons.mjs
 import { createRequire } from "node:module";
@@ -94,6 +94,75 @@ try {
       const moved = rest.cells.some((c, i) => run.cells[i] && (Math.abs(c[0] - run.cells[i][0]) > 0.5 || Math.abs(c[2] - run.cells[i][2]) > 0.5));
       ok(!moved || w < 1024, `${tag}: Nachbarzellen bleiben stehen`);
       if (w === 1280 || w === 390) await axeRun(tag);
+    }
+  }
+
+  // ---- Gemeinsame Knopfgröße außerhalb der Quellenzeile: CVE-Werkzeugleiste und Ablauf-Anzeige (RunStepper). ----
+  // Gleichrangige Knöpfe 32 px (mobil 44 px) ±0,5 in Ruhe, Hover, Fokus, gedrückt/eingeschaltet; kein Sprung der Nachbarn.
+  // Lagen relativ zum ersten Element (Scrollen beim Fokussieren zählt nicht als Sprung).
+  const rects = (sel) => page.evaluate((q) => { const l = typeof q === "string" ? [...document.querySelectorAll(q)] : [...document.querySelectorAll("button")].filter((b) => q.includes(b.textContent.trim())); const o = l[0].getBoundingClientRect(); return l.map((e) => { const r = e.getBoundingClientRect(); return [r.x - o.x, r.y - o.y, r.width, r.height]; }); }, sel);
+  const near = (a, b) => a.length === b.length && a.every((r, i) => r.every((v, j) => Math.abs(v - b[i][j]) <= 0.5));
+  for (const scheme of ["light", "dark"]) {
+    for (const w of [390, 1024, 1440]) {
+      const tag = `Werkzeugleiste ${w}px ${scheme}`;
+      const want = w < 768 ? 44 : 32;
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+      await page.setViewportSize({ width: w, height: 900 });
+      state.runs = [];
+      await page.goto(`${base}/cves`);
+      await page.locator("#cve-filters").waitFor();
+      await page.waitForTimeout(500);
+      const bar = "#cve-filters > *";
+      const rest = await rects(bar);
+      ok(rest.length === 4 && rest.every((r) => Math.abs(r[3] - want) <= 0.5), `${tag}: Suche, Filter, Stern, „CVE beobachten“ ${want} px hoch (${rest.map((r) => r[3])})`);
+      const filter = page.locator("#cve-filters button[aria-haspopup]");
+      const star = page.getByRole("button", { name: "Nur Watchlist" });
+      const add = page.getByRole("button", { name: "CVE beobachten" });
+      for (const [name, el] of [["Filter", filter], ["Stern", star], ["CVE beobachten", add]]) {
+        await el.hover();
+        ok(near(await rects(bar), rest), `${tag}: ${name} Hover, kein Sprung`);
+        await page.mouse.move(2, 2);
+        await el.focus();
+        ok(near(await rects(bar), rest), `${tag}: ${name} Fokus, kein Sprung`);
+        await el.blur();
+      }
+      // Stern gedrückt und eingeschaltet (aria-pressed): Größe und Nachbarn bleiben.
+      await star.click();
+      await page.waitForTimeout(600);
+      ok((await star.getAttribute("aria-pressed")) === "true" && near(await rects(bar), rest), `${tag}: Stern eingeschaltet, keine Größenänderung`);
+      await star.click();
+      await page.waitForTimeout(600);
+      ok(near(await rects(bar), rest), `${tag}: Stern wieder aus, keine Größenänderung`);
+      // Deaktiviert: derselbe Knopf mit disabled behält die Größe.
+      const dis = await add.evaluate((e) => { const b = e.getBoundingClientRect(); e.disabled = true; const a = e.getBoundingClientRect(); e.disabled = false; return [b.width, b.height, a.width, a.height]; });
+      ok(Math.abs(dis[0] - dis[2]) <= 0.5 && Math.abs(dis[1] - dis[3]) <= 0.5, `${tag}: deaktiviert gleich groß`);
+      // Filterknopf mit Popover offen: Größe unverändert.
+      await filter.click();
+      await page.waitForTimeout(300);
+      ok(near(await rects(bar), rest), `${tag}: Filter geöffnet, keine Größenänderung`);
+      await page.keyboard.press("Escape");
+
+      // RunStepper: „Erneut versuchen“ und „Schließen“ nach einem fehlgeschlagenen Lauf.
+      const t2 = `Ablauf-Knöpfe ${w}px ${scheme}`;
+      const now = new Date().toISOString();
+      state.runs = [mkRun({ id: 9, source: "debian", status: "failed", phase: "download", finished_at: now, error: "HTTP 503" })];
+      await page.reload();
+      await page.locator(".feed-actions").first().waitFor();
+      await page.waitForTimeout(800);
+      const retry = page.getByRole("button", { name: "Erneut versuchen" });
+      if ((await retry.count()) === 0) {
+        const mini = page.locator("tr", { hasText: "Debian" }).first().locator("button[aria-expanded][aria-label^='Abruf-Details']").first();
+        if (await mini.count()) await mini.click();
+        await page.waitForTimeout(400);
+      }
+      const rb = await page.locator("button", { hasText: /^(Erneut versuchen|Schließen)$/ }).evaluateAll((l) => l.map((e) => { const r = e.getBoundingClientRect(); return [r.width, r.height]; }));
+      ok(rb.length === 2 && rb.every((r) => Math.abs(r[1] - want) <= 0.5), `${t2}: „Erneut versuchen“ und „Schließen“ ${want} px hoch (${JSON.stringify(rb)})`);
+      if (rb.length === 2) {
+        const q = ["Erneut versuchen", "Schließen"];
+        const before = await rects(q);
+        await page.getByRole("button", { name: "Schließen", exact: true }).first().hover();
+        ok(near(await rects(q), before), `${t2}: Hover, kein Sprung`);
+      }
     }
   }
 } finally {
