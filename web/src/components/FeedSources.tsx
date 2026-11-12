@@ -296,7 +296,7 @@ export function FeedSources() {
           ) : null}
         </p>
         {/* Knopfreihe: rechts neben dem Text; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eine eigene Zeile, gleich breit. */}
-        <span className="src-actions ml-auto flex shrink-0 items-center gap-2">
+        <span className="src-actions ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
             {allBusy ? null : <NavIcon name="refresh" />}
             <span className={HEAD_TXT}>Alle abrufen</span>
