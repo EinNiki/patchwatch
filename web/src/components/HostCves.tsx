@@ -277,7 +277,8 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-xs text-fg2">
+        {/* max-w-full: Das Feld ist 16 rem breit; ohne Grenze am Label wäre max-w-full am Feld wirkungslos (Label wächst mit). */}
+        <label className="flex max-w-full items-center gap-2 text-xs text-fg2">
           <span className="sr-only">CVEs dieses Hosts durchsuchen</span>
           <input
             type="search"
