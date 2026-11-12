@@ -473,6 +473,32 @@ Der Live-WebSocket läuft in der Entwicklung direkt gegen die API (Next.js leite
 Tests: `cargo test --workspace` (Integrationstests brauchen `DATABASE_URL` auf eine Postgres-Instanz), im Web
 `npm run lint && npm run typecheck && npm run build`.
 
+## Qualitätsprüfung
+
+`scripts/layout-check.mjs` und `scripts/a11y.mjs` brauchen einen Stack mit Demo-Hosts **und** CVE-Daten, sonst fehlen auf den
+Host-Seiten die CVE-Listen. `scripts/dev-stack.sh` baut den reproduzierbar auf, ohne Anfragen an echte Feed-Quellen:
+
+```sh
+scripts/dev-stack.sh up                # Postgres (pw-night-pg, 127.0.0.1:55440), Server :8091, Mock-Feeds :8190, Seed, ein Feed-Abruf, Web :3300
+scripts/dev-stack.sh status            # was läuft (nie das Passwort)
+scripts/dev-stack.sh restart-server    # setzt das In-Memory-Login-Limit zurück
+scripts/dev-stack.sh down              # stoppt nur die eigenen Prozesse und entfernt den eigenen Container
+
+export PW_MODULE=/pfad/zu/node_modules/playwright PW_CHROME=/pfad/zu/chrome PW_BASE=http://127.0.0.1:3300 \
+       PW_PWFILE=$PW_STACK_DIR/admin.pw AXE_JS=web/node_modules/axe-core/axe.min.js
+node scripts/layout-check.mjs && node scripts/a11y.mjs     # nacheinander, nie zwei Browser gleichzeitig
+```
+
+Das Web-UI kommt aus dem vorhandenen Build (`npm --prefix web run build`). Zustand (PID-Dateien, Logs, zufälliges
+Admin-Passwort mit `chmod 600`) liegt außerhalb des Repos in `PW_STACK_DIR`; Ports, Containername und Passwortdatei sind über
+`PW_*`-Variablen einstellbar (Kopf von `dev-stack.sh`). `scripts/mock-feeds.mjs [Port]` (nur Node-Standardbibliothek) liefert
+auf 127.0.0.1 die Demo-Dateien aus `scripts/fixtures/` in der Form der echten Quellen: Debian-Tracker (`Last-Modified`, 304),
+Ubuntu-API (paginiert, `limit` höchstens 20), Ubuntu-Einzelabruf und die OVAL-Dateien für noble und jammy (beim Start mit
+`bzip2` komprimiert). Die CVE-IDs sind echt, die Statuswerte erfunden („[Demo]“); sie ergeben auf den Seed-Hosts offene,
+„Neustart nötig“-, gefixte und unbekannte CVEs, Proxmox bleibt „unbekannt / manuell prüfen“. Die Adressen der eingebauten
+Quellen stehen in der Konfiguration (`PATCHWATCH_CVE_UBUNTU_URL`, `..._OVAL_URL`, `..._DEBIAN_URL`) und dürfen auf Loopback
+zeigen; der SSRF-Schutz für in der UI angelegte Quellen bleibt unverändert.
+
 ## Anmeldung per OpenID Connect
 
 Zusätzlich zum Passwort lässt sich ein OIDC-Provider (Authentik, Keycloak, Google, Entra ...) einrichten. Variablen siehe

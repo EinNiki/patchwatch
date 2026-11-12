@@ -1,0 +1,57 @@
+<oval_definitions xmlns="http://oval.mitre.org/XMLSchema/oval-definitions-5" xmlns:oval="http://oval.mitre.org/XMLSchema/oval-common-5">
+  <!-- DEMO-DATEN für scripts/mock-feeds.mjs: erfundene Statuswerte zu echten öffentlichen CVE-IDs, keine Abbildung der echten Quellen. -->
+  <generator>
+    <oval:product_name>Demo OVAL Generator</oval:product_name>
+    <oval:timestamp>2026-11-11T00:00:00</oval:timestamp>
+  </generator>
+  <definitions>
+    <definition id="oval:com.ubuntu.noble:def:9001" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2025-38250 on Ubuntu 24.04 LTS (noble) - medium</title>
+        <reference source="CVE" ref_id="CVE-2025-38250" ref_url="https://www.cve.org/CVERecord?id=CVE-2025-38250" />
+        <description>[Demo] Bluetooth: hci_core: Use-after-free in vhci_flush() (Kurzfassung).</description>
+        <advisory from="security@ubuntu.com">
+          <severity>Medium</severity>
+          <cve href="https://ubuntu.com/security/CVE-2025-38250" priority="medium" public="20260115">CVE-2025-38250</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <criteria operator="OR">
+          <criterion test_ref="oval:com.ubuntu.noble:tst:9001" comment="'linux' kernel in noble was vulnerable but has been fixed (note: '6.8.0-100.100')." />
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:9002" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2024-1086 on Ubuntu 24.04 LTS (noble) - high</title>
+        <reference source="CVE" ref_id="CVE-2024-1086" ref_url="https://www.cve.org/CVERecord?id=CVE-2024-1086" />
+        <description>[Demo] netfilter: nf_tables: Use-after-free, lokale Rechteausweitung (Kurzfassung).</description>
+        <advisory from="security@ubuntu.com">
+          <severity>High</severity>
+          <cve href="https://ubuntu.com/security/CVE-2024-1086" priority="high" public="20260115">CVE-2024-1086</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <criteria operator="OR">
+          <criterion test_ref="oval:com.ubuntu.noble:tst:9002" comment="'linux' kernel in noble was vulnerable but has been fixed (note: '6.8.0-31.31')." />
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:9003" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2012-4542 on Ubuntu 24.04 LTS (noble) - low</title>
+        <reference source="CVE" ref_id="CVE-2012-4542" ref_url="https://www.cve.org/CVERecord?id=CVE-2012-4542" />
+        <description>[Demo] block: Befehlsfilter für Partitionen unvollständig (Kurzfassung).</description>
+        <advisory from="security@ubuntu.com">
+          <severity>Low</severity>
+          <cve href="https://ubuntu.com/security/CVE-2012-4542" priority="low" public="20260115">CVE-2012-4542</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <criteria operator="OR">
+          <criterion test_ref="oval:com.ubuntu.noble:tst:9003" comment="'linux' kernel in noble was vulnerable but has been fixed (note: '6.5.0-9.9')." />
+        </criteria>
+      </criteria>
+    </definition>
+  </definitions>
+</oval_definitions>
