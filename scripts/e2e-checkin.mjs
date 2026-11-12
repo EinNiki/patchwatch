@@ -1,4 +1,4 @@
-// E2E: Check-in und „Jetzt aktualisieren“ gegen einen laufenden Stack (Server :8080, Web :3100, Docker-Postgres `pw-pg`).
+// E2E: Check-in und „Jetzt aktualisieren“ gegen einen laufenden Stack (Standard: Seed-Stack, Web PW_BASE, Docker-Postgres PW_PG_NAME, Standard `pw-night-pg`).
 //
 // Voraussetzung: Agent `e2e-agent` existiert (UI „Agent hinzufügen“), sein Token liegt in der Datei aus AGENT_CONF (token_file).
 //   PW_MODULE=… PW_CHROME=… PW_PWFILE=<Datei mit Admin-Passwort> AGENT=target/debug/patchwatch-agent \
@@ -11,7 +11,8 @@ import { execFileSync } from "node:child_process";
 const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE);
 const pw = readFileSync(process.env.PW_PWFILE, "utf8").trim();
 const { AGENT, CONF, STATE } = process.env;
-const sql = (q) => execFileSync("docker", ["exec", "pw-pg", "psql", "-U", "patchwatch", "-d", "patchwatch", "-tAc", q]).toString().trim();
+const base = process.env.PW_BASE ?? "http://127.0.0.1:3100";
+const sql = (q) => execFileSync("docker", ["exec", process.env.PW_PG_NAME ?? "pw-night-pg", "psql", "-U", "patchwatch", "-d", "patchwatch", "-tAc", q]).toString().trim();
 const reports = () => Number(sql("select count(*) from reports r join hosts h on h.id=r.host_id where h.name='e2e-agent'"));
 const agent = (...args) => { try { return execFileSync(AGENT, [...args, "--config", CONF], { env: { ...process.env, STATE_DIRECTORY: STATE } }).toString(); } catch (e) { return `exit ${e.status}: ${e.stderr}`; } };
 const ok = (c, m) => { console.log(c ? "OK  " : "FAIL", m); if (!c) process.exitCode = 1; };
@@ -22,12 +23,12 @@ console.log("Reports nach erstem Lauf:", base);
 
 const b = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });
 const page = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
-await page.goto("http://127.0.0.1:3100/login");
+await page.goto(`${base}/login`);
 await page.getByLabel("Benutzername").fill("admin");
 await page.getByLabel("Passwort").fill(pw);
 await page.getByRole("button", { name: "Anmelden" }).click();
 await page.waitForURL((u) => !u.pathname.startsWith("/login"));
-await page.goto("http://127.0.0.1:3100/agents");
+await page.goto(`${base}/agents`);
 await page.locator("span:visible", { hasText: /^Live$/ }).first().waitFor();
 await page.evaluate(() => (window.__noReload = true));
 const row = page.getByRole("row").filter({ hasText: "e2e-agent" });
