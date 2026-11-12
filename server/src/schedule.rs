@@ -2,7 +2,7 @@
 //! Report-Anforderung auf Serverseite, "meldet sich nicht"-Schwelle. Validierung und Fälligkeit liegen hier,
 //! damit sie ohne Datenbank testbar sind.
 
-use chrono::{DateTime, Duration, LocalResult, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, LocalResult, NaiveDate, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -70,15 +70,7 @@ impl ReportSchedule {
                 let today = now.with_timezone(&tz).date_naive();
                 [today, today.succ_opt()?, today.succ_opt()?.succ_opt()?]
                     .into_iter()
-                    .find_map(|d| {
-                        let local = match tz.from_local_datetime(&d.and_time(t)) {
-                            LocalResult::Single(x) => x,
-                            LocalResult::Ambiguous(first, _) => first,
-                            LocalResult::None => return None,
-                        };
-                        let utc = local.with_timezone(&Utc);
-                        (utc > now).then_some(utc)
-                    })
+                    .find_map(|d| local_to_utc(&tz, d, t).filter(|utc| *utc > now))
             }
         }
     }
@@ -101,16 +93,9 @@ impl ReportSchedule {
             Self::Daily { at, tz } => {
                 let (t, tz) = (parse_hhmm(at).ok()?, parse_tz(tz).ok()?);
                 let today = now.with_timezone(&tz).date_naive();
-                let latest = [today, today.pred_opt()?].into_iter().find_map(|d| {
-                    let local = match tz.from_local_datetime(&d.and_time(t)) {
-                        LocalResult::Single(x) => x,
-                        LocalResult::Ambiguous(first, _) => first,
-                        // Lücke der Sommerzeit-Umstellung: die Uhrzeit existiert nicht, der Tag entfällt.
-                        LocalResult::None => return None,
-                    };
-                    let utc = local.with_timezone(&Utc);
-                    (utc <= now).then_some(utc)
-                })?;
+                let latest = [today, today.pred_opt()?]
+                    .into_iter()
+                    .find_map(|d| local_to_utc(&tz, d, t).filter(|utc| *utc <= now))?;
                 // Schon ausgeführt, wenn der letzte Lauf nicht vor dem fälligen Zeitpunkt liegt.
                 match last_run {
                     Some(l) if l >= latest => None,
@@ -119,6 +104,23 @@ impl ReportSchedule {
             }
         }
     }
+}
+
+/// Lokale Uhrzeit `t` am Tag `d` als UTC. Doppelte Stunde (Ende der Sommerzeit): das erste Vorkommen. Lücke (Beginn
+/// der Sommerzeit, z. B. 02:30 in Berlin am letzten Sonntag im März): der erste gültige Zeitpunkt danach (03:00),
+/// damit der Lauf an diesem Tag nicht ausfällt.
+fn local_to_utc(tz: &Tz, d: NaiveDate, t: NaiveTime) -> Option<DateTime<Utc>> {
+    let mut local = d.and_time(t);
+    // Lücken dauern höchstens wenige Stunden; minutenweise bis zu ihrem Ende, begrenzt auf einen Tag.
+    for _ in 0..=24 * 60 {
+        match tz.from_local_datetime(&local) {
+            LocalResult::Single(x) | LocalResult::Ambiguous(x, _) => {
+                return Some(x.with_timezone(&Utc))
+            }
+            LocalResult::None => local += Duration::minutes(1),
+        }
+    }
+    None
 }
 
 pub fn parse_hhmm(s: &str) -> Result<NaiveTime, String> {
@@ -434,16 +436,54 @@ mod tests {
     }
 
     #[test]
-    fn daily_skips_nonexistent_dst_time() {
-        // 29.03.2026: in Berlin springt die Uhr von 02:00 auf 03:00; 02:30 existiert nicht.
+    fn daily_fires_after_nonexistent_dst_time() {
+        // 29.03.2026: in Berlin springt die Uhr von 02:00 auf 03:00; 02:30 existiert nicht. Der Lauf fällt nicht aus,
+        // sondern kommt zum ersten gültigen Zeitpunkt danach: 03:00 Sommerzeit = 01:00 UTC.
         let s = ReportSchedule::Daily {
             at: "02:30".into(),
             tz: "Europe/Berlin".into(),
         };
-        // Am Umstelltag fällt der Lauf aus; letzter fälliger Lauf bleibt der des Vortags.
         assert_eq!(
             s.last_due(None, at("2026-03-29T12:00:00Z")),
-            Some(at("2026-03-28T01:30:00Z"))
+            Some(at("2026-03-29T01:00:00Z"))
+        );
+        // Vortag gelaufen (02:30 Winterzeit = 01:30 UTC): nächster Lauf am Umstelltag, nicht erst am 30.03.
+        let prev = at("2026-03-28T01:30:05Z");
+        assert_eq!(
+            s.next_due(Some(prev), at("2026-03-28T12:00:00Z")),
+            Some(at("2026-03-29T01:00:00Z"))
+        );
+        assert_eq!(s.last_due(Some(prev), at("2026-03-29T00:59:00Z")), None);
+        assert_eq!(
+            s.last_due(Some(prev), at("2026-03-29T01:00:00Z")),
+            Some(at("2026-03-29T01:00:00Z"))
+        );
+        // Genau einmal: nach dem Lauf um 01:00:30 UTC ist am Umstelltag nichts mehr fällig.
+        let ran = at("2026-03-29T01:00:30Z");
+        assert_eq!(s.last_due(Some(ran), at("2026-03-29T23:00:00Z")), None);
+        // Folgetag wieder 02:30 Sommerzeit = 00:30 UTC.
+        assert_eq!(
+            s.next_due(Some(ran), at("2026-03-29T12:00:00Z")),
+            Some(at("2026-03-30T00:30:00Z"))
+        );
+    }
+
+    #[test]
+    fn daily_runs_once_on_repeated_dst_hour() {
+        // 25.10.2026: 02:00 bis 03:00 kommt in Berlin zweimal vor (UTC+2, dann UTC+1); es gilt das erste Vorkommen.
+        let s = ReportSchedule::Daily {
+            at: "02:30".into(),
+            tz: "Europe/Berlin".into(),
+        };
+        let first = at("2026-10-25T00:30:00Z");
+        assert_eq!(s.last_due(None, at("2026-10-25T00:30:00Z")), Some(first));
+        // Gelaufen um 00:30:05 UTC: beim zweiten 02:30 (01:30 UTC) nicht noch einmal.
+        let ran = at("2026-10-25T00:30:05Z");
+        assert_eq!(s.last_due(Some(ran), at("2026-10-25T01:30:00Z")), None);
+        assert_eq!(s.last_due(Some(ran), at("2026-10-25T23:59:00Z")), None);
+        assert_eq!(
+            s.next_due(Some(ran), at("2026-10-25T12:00:00Z")),
+            Some(at("2026-10-26T01:30:00Z"))
         );
     }
 }
