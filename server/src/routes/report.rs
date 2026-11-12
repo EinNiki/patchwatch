@@ -257,7 +257,29 @@ pub async fn post_report(
     .execute(&mut *tx)
     .await?;
 
-    if let Some(pkgs) = &rep.packages {
+    if let Some(all_pkgs) = &rep.packages {
+        // Multiarch hosts list one name once per architecture (the agent omits it).
+        // ON CONFLICT cannot touch a row twice (SQLSTATE 21000), so keep one entry
+        // per name: the highest dpkg version, ties and unparsable versions resolved
+        // in favour of the last entry. Deterministic and independent of dpkg order.
+        let mut best: std::collections::BTreeMap<&str, &PackageIn> = Default::default();
+        for p in all_pkgs {
+            match best.entry(p.name.as_str()) {
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    e.insert(p);
+                }
+                std::collections::btree_map::Entry::Occupied(mut e) => {
+                    let keep_old = matches!(
+                        debversion::compare(&e.get().version, &p.version),
+                        Ok(std::cmp::Ordering::Greater)
+                    );
+                    if !keep_old {
+                        e.insert(p);
+                    }
+                }
+            }
+        }
+        let pkgs: Vec<&PackageIn> = best.into_values().collect();
         let col = |f: fn(&PackageIn) -> Option<&str>| {
             pkgs.iter()
                 .map(|p| f(p).map(str::to_owned))

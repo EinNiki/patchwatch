@@ -279,6 +279,37 @@ async fn package_list_is_replaced_and_kept_out_of_history(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn duplicate_package_names_in_report_are_merged(pool: PgPool) {
+    // Multiarch: the agent reports the same name once per architecture.
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    let mut r = report("web1", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+    r["packages"] = json!([
+        {"name": "libc6", "version": "2.39-0ubuntu8.2", "source": "glibc", "source_version": "2.39-0ubuntu8.2"},
+        {"name": "bash", "version": "5.2-1", "source": null, "source_version": null},
+        {"name": "libc6", "version": "2.39-0ubuntu8.10", "source": "glibc", "source_version": "2.39-0ubuntu8.10"},
+        {"name": "libc6", "version": "2.39-0ubuntu8.3", "source": "glibc", "source_version": "2.39-0ubuntu8.3"}]);
+    let resp = call(&app, Method::POST, "/api/v1/report", &h, Some(r)).await;
+    assert_eq!(resp.status, StatusCode::NO_CONTENT);
+    let pk: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, version FROM host_packages WHERE host_id = $1 ORDER BY name")
+            .bind(id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    // Exactly one row per name; the highest version wins regardless of order.
+    assert_eq!(
+        pk,
+        vec![
+            ("bash".to_owned(), "5.2-1".to_owned()),
+            ("libc6".to_owned(), "2.39-0ubuntu8.10".to_owned())
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn auth_csrf_and_host_management(pool: PgPool) {
     let app = router(state(pool.clone(), &[]));
 
