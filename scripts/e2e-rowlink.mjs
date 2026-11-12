@@ -132,9 +132,11 @@ try {
   const trow = tp.locator("table.tbl tbody tr").first();
   await trow.waitFor();
   ok(!(await tp.evaluate(() => matchMedia("(hover: hover)").matches)), "Touchgerät meldet kein Hover (Hover-Stil greift nicht)");
+  // Die erste Zeile der Liste ist nach Dringlichkeit sortiert und nicht zwingend `hosts[0]` der API: Ziel aus ihrem Link lesen.
+  const touchTarget = await trow.locator("a[href^='/hosts/']").first().getAttribute("href");
   await trow.locator("td").nth(1).tap({ position: { x: 4, y: 4 } });
-  await tp.waitForURL((u) => u.pathname === target);
-  ok(new URL(tp.url()).pathname === target, "Touch: Tippen auf die Zeile führt zur Host-Seite");
+  await tp.waitForURL((u) => u.pathname === touchTarget);
+  ok(new URL(tp.url()).pathname === touchTarget, "Touch: Tippen auf die Zeile führt zur Host-Seite");
   await tctx.close();
 } finally {
   await browser.close();
