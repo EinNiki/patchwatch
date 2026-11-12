@@ -465,6 +465,7 @@ details[open] > :not(summary) {
     display: inline-flex;
     align-items: center;
     min-height: var(--touch);
+    min-width: var(--touch);
   }
   .tbl.stack tbody tr[data-watched] {
     margin: 4px 0;
@@ -586,6 +587,7 @@ details[open] > :not(summary) {
     display: inline-flex;
     align-items: center;
     min-height: var(--touch);
+    min-width: var(--touch);
   }
   .tbl.stack-lg tbody tr[data-watched] {
     margin: 4px 0;
