@@ -103,13 +103,13 @@ bleibt offen; das Design setzt weiter genau einen Server je Datenbank voraus.
 
 `scripts/e2e-outage.mjs` gegen den Seed-Stack (:8091, :3300): `pw-night-pg` 30 s gestoppt (`docker stop`/`docker start`, nur dieser
 Container), ein Playwright-Lauf. Vor den Fixes 10 FAIL (frühe Fassung des Skripts, ohne die Render-Fehler-Prüfung), mit neuem
-Server und altem Web 9 FAIL (Render-Fehler, UI, Umleitung), nach allen Fixes **27 von 27 OK**.
+Server und altem Web 9 FAIL (Render-Fehler, UI, Umleitung), nach allen Fixes **29 von 29 OK** (mit Seitentitel der Fehlerseiten).
 
 | Hypothese | Befund vorher | Ergebnis |
 | --- | --- | --- |
 | N2: API im Ausfall 500 statt 503 | `GET /hosts` 500 „interner Fehler“ nach 5,0 s, Login 500, `/readyz` 503 | **Behoben** in `fa6a75a`: 503 „Die Datenbank ist gerade nicht erreichbar. Bitte in einigen Sekunden erneut versuchen.“, `code: db_unavailable`, `Retry-After: 5`, auch Login und Anmeldeprüfung; keine internen Details; Rust-Test `database_outage_is_503_without_details` (vorher rot: 500) |
 | N3: jeder Fehler von `/auth/me` führt zur Anmeldung | Neuladen im Ausfall landete auf `/login` | **Behoben** in `3dda8ab`: nur 401 leitet um, sonst Fehlerseite „Anmeldung kann gerade nicht geprüft werden“ mit „Erneut versuchen“; bleibt im Ausfall im Fehlerzustand, lädt nach der Erholung die Host-Liste ohne neue Anmeldung; Test `web/tests/session.test.mts` |
-| N4: keine `error.tsx`/`global-error.tsx` | Render-Fehler (nachgestellte unerwartete API-Antwort) ergab die englische Next-Seite „This page couldn’t load“ | **Behoben** in `1ad84bc`: Fehler einer Seite (CVE-Liste) im App-Rahmen mit Navigation, Fehler im Rahmen (Host-Liste der Seitenleiste) als ganze Seite, beide deutsch mit „Erneut versuchen“ |
+| N4: keine `error.tsx`/`global-error.tsx` | Render-Fehler (nachgestellte unerwartete API-Antwort) ergab die englische Next-Seite „This page couldn’t load“ | **Behoben** in `1ad84bc`: Fehler einer Seite (CVE-Liste) im App-Rahmen mit Navigation, Fehler im Rahmen (Host-Liste der Seitenleiste) als ganze Seite, beide deutsch mit „Erneut versuchen“; Seitentitel der ganzseitigen Fehlerseite in `81ba2a9` |
 
 Erholung ohne Neustart (gleiche PID): `/readyz` 200 0,5 bis 0,6 s nach `docker start`, die alte Sitzung gilt, 7 Hosts und 9 CVEs vorher
 wie nachher, Live-Anzeige wieder „Live“. LISTEN/NOTIFY: eine Report-Anforderung kommt vor und nach dem Ausfall per WebSocket an; der
@@ -124,6 +124,10 @@ Phase 5): beide verbinden neu, Jobs nach 72 und 99 ms, keine Schleife, CPU 0 %.
 M4 (Hintergrund-Tasks nach Fehlstart): Die Erholung **im Betrieb** ist bestätigt (Worker, Live-Listener). Ein Fehlstart des Listeners
 direkt nach den Migrationen und Panics in den Hintergrund-Tasks wurden **nicht nachgestellt**; M4 bleibt offen.
 Hinweis: Im Ausfall wartet jede Anfrage bis zum `acquire_timeout` (5 s), bevor 503 kommt; nicht geändert.
+
+Stichprobe der drei neuen Fehlerzustände (Anmeldeprüfung 503, Render-Fehler der Seite und des Rahmens) bei 320, 390 und 1440 px,
+hell und dunkel, Schrift 100 % und 200 %: kein waagrechter Überlauf, axe ohne serious/critical (36 Prüfungen, nach dem Titel-Fix;
+davor fehlte der Seitentitel der ganzseitigen Fehlerseite). `responsive-all` nicht gelaufen: bestehende Seitenlayouts unverändert.
 
 ## Zeit
 
