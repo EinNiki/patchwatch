@@ -7,9 +7,9 @@ und `scripts/snapshot-diff.mjs`. Keine verändernden Aktionen; die Fehlermeldung
 
 ## Zusammenfassung
 
-Erster Lauf: 287 Verstöße (103 verschiedene). Nach den Korrekturen dieser Phase: 33 Verstöße (26 verschiedene), alle bei Schriftzoom 200 %
-(F1280) oder bei genau 1024 px (Hosts-Tabelle). Bestanden bei allen 22 Varianten: Login, Einstellungen, 404, CVE-Quellen (Überlauf, Fenster),
-Knopfhöhen (Prüfung 5), axe serious/critical (Prüfung 9), Layoutsprung (Prüfung 10), Trefferflächen < 768 px (Prüfung 4).
+Erster Lauf: 287 Verstöße (103 verschiedene). Nach der ersten Korrekturrunde: 33 Verstöße (26 verschiedene), alle bei Schriftzoom 200 %
+(F1280, F390) oder bei genau 1024 px (Hosts-Tabelle). Nach der zweiten Runde (Eskalation): **0 Verstöße**, `responsive-all.mjs` endet mit
+Exit 0 (voller Lauf, 638 Zustände x Varianten, 1154 s).
 
 ### Behoben (je ein Commit)
 - Popover/Filter/„…“-Menü ragten bei niedrigem Viewport (844x390, Zoom 200 %) heraus: klappt nach oben, scrollt innen, Höhe mit endgültiger Breite gemessen.
@@ -20,49 +20,69 @@ Knopfhöhen (Prüfung 5), axe serious/critical (Prüfung 9), Layoutsprung (Prüf
 - Hosts-Kennzahlen (Sicherheitsupdates) überliefen bei F390; CVE-Spalte der Hosts-Tabelle min-w 13 rem; Kacheln der Host-Seite brechen um (Text 3 px abgeschnitten bei 1280 px).
 - Checkbox-Beschriftung („Tageszusammenfassung“) überlief bei F390.
 
+Zweite Runde:
+- F1280, Tabellen (Hosts 2175 px, Agents 2220 px, eingeklappte Seitenleiste 2011 px, CVEs bis 1724, CVE-Detail bis 1464,6 statt 1232):
+  Ursache waren px-Media-Queries als Umschaltpunkte, während die Mindestbreiten in rem mit der Schrift wachsen. Tabellen stapeln jetzt
+  zusätzlich, wenn ihr Behälter (`@container/tbl`) schmaler als 40 rem ist; Container-Queries rechnen rem mit der tatsächlichen
+  Schriftgröße. Bei 16 px ist der Behälter ab 768 px mindestens 664 px breit, dort ändert sich nichts (Geometrievergleich aller
+  Elemente in `main` bei 390 bis 2560 px, Seitenleiste offen und eingeklappt: gleich bis auf Zeitangaben). Kein `overflow-x` ab 1280 px,
+  der feste Tabellenkopf bleibt.
+- F1280, Host-Seite (CVE-Zeilen 1301 bis 1612 px, Verlauf bis 1289 statt 544): rechte Spalte „Host-Details“ nur noch, wenn der Inhalt
+  mindestens 60 rem breit ist (`side`/`no-side`); die CVE-Liste nutzt die gestapelte Zeile auch unter 40 rem Listenbreite, Zeilenhöhe
+  wächst mit der Schrift; Verlauf stapelt wie die übrigen Tabellen.
+- 1024 px, Hosts-Tabelle (letzte Spalte bei 1029,8 statt 1000, Status-Chip abgeschnitten): Updates entfällt wie „Zuletzt gemeldet“
+  zwischen 768 und 1279 px (vorher nur bis 1023). CVE (zwei feste Spalten) und Status (längster Chip) brauchen ihre Breite, Host und
+  Distribution standen schon auf ihrer Mindestbreite.
+- F1280, Benachrichtigungen (1249,7 statt 1232): Tabelle im Behälter `@container/tbl`, stapelt wie die übrigen.
+- F390, Host-Seite (Seite 544 px breit): CVE-Suchfeld (16 rem) durch das Label auf die Zeilenbreite begrenzt.
+
 ### Korrigierte Prüfungen (falsch positiv)
 - Versteckter Tabellenkopf der gestapelten Ansicht (sr-only) und geschlossenes Off-Canvas zählen nicht (A2, A3).
 - Icon-Rail (768 bis 1023 px): Beschriftung mit opacity 0 ist gewollt unsichtbar (A6, „Abmelden“).
+- Prüfung 6 bei gestapelten Tabellen ab 1024 px (gibt es erst seit dieser Runde, bei großer Schrift): Die Kopfzellen liegen in einem
+  1-px-Ausschnitt nur für Screenreader und sind keine Spalten. Gemessen werden dann die sichtbaren Einträge (Zeilen), die ebenfalls am
+  Inhaltsrand enden müssen (±1 px). Für Tabellen mit sichtbarem Kopf ist die Prüfung unverändert.
 
 ### Begründete Ausnahmen (im Skriptkopf)
 A1 Inline-Textlinks außerhalb von nav/aside, A2 Sortierknöpfe im ausgeblendeten Tabellenkopf, A3 inert/aria-hidden/sr-only, A4 Ellipsen-Absicht
 oder title, A6 Rail-Beschriftung.
 
-### Offen (Skript bleibt rot)
-1. Schriftzoom 200 % bei 1280 px (F1280): Seitenüberlauf durch Tabellen ohne Scroll-Container ab 1280 px (Hosts 2175 px, Agents 2220 px,
-   Sidebar eingeklappt/Hosts 2011 px; CVEs endet bei 1724 statt 1232; CVE-Detail 1464,6). Grund: Tabellen scrollen nur unter `hd`
-   (1280) in ihrem Container, weil `overflow-x: auto` den fixen Tabellenkopf (sticky) bricht; die rem-Mindestbreiten wachsen mit der
-   Schrift, die Breakpoints (Media Queries) nicht. Lösung wäre Container-Queries oder ein Scroll-Container, der nur bei Bedarf greift.
-2. F1280 Host-Detail: Zeilenraster der CVE-Liste (feste rem-Spalten, 33 rem) 1301 bis 1612 px bei 1280 px Fenster, Tabelle „Verlauf der letzten Datenmeldungen“ endet bei 1151 bis 1289 px.
-3. 1024 px Hosts-Tabelle: letzte Spalte endet bei 1029,8 statt 1000 (30 px innerer Scroll). Ursache: Spaltenbreiten richten sich nach Inhalt
-   (CVE 260 px, Status 185 px, Summe 786 px bei 756 px Platz); Fix-Versuch (min-w CVE 13 rem) ohne Wirkung. Alle Breiten ≥ 1180 px bestehen.
-4. F1280 Benachrichtigungen: Tabelle endet bei 1249,7 statt 1232 (18 px).
+### Offen
+Keine Verstöße in den 22 Varianten. Außerhalb der Varianten (einzeln gemessen, Fenster 1280 px, Seitenleiste offen):
+- Schrift 125 %: Hosts 1471 px, Agents 1470 px Seitenbreite; 150 %: Hosts 1700 px, Agents 1720 px (Seitenüberlauf). 175 % und 200 %:
+  kein Überlauf. Ursache: Die Grenze von 40 rem greift bei 1012 px Behälter erst ab etwa 158 % Schrift; darunter gilt die
+  Tabellenansicht mit den `hd`-Mindestbreiten (Hosts 58 rem, Agents 61 rem) ohne Scroll-Behälter. Unverändert gegenüber vorher (die neue
+  Bedingung greift dort nicht). Möglicher Weg: je Umschaltpunkt eine eigene Container-Grenze (z. B. ab 1280 px stapeln unter 62 rem);
+  nicht umgesetzt, weil es die Prüfvarianten nicht verlangen und die Grenze bei 16 px nur 5 px Abstand zur Fensterbreite 1280 mit
+  klassischer Bildlaufleiste hätte.
+- Auffällig, nicht Teil der Prüfungen: Chip-Höhe (`--chip-h` 22 px) und die CVE-Zelle der Hostliste (`text-[13px]`) sind in px und
+  wachsen bei großer Schrift nicht mit (Text höher als die Chip-Fläche); „Keine Antwort seit …“ in der Agents-Tabelle bricht bei 1024 px
+  Buchstabe für Buchstabe um (schmale Spalte, schon vorher so).
 
 ## Ergebnistabelle (letzter vollständiger Lauf, 638 Zustände x Varianten)
-
 
 | Seite / Zustand | 320 | 360 | 390 | 430 | 768 | 820 | 1024 | 1180 | 1280 | 1440 | 1920 | 2560 | 390d | 1024d | 1440d | 390rm | 1440rm | L844 | L1024 | Z200 | F1280 | F390 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | login / Login | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | login / Login mit Fehlermeldung | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| hosts / Hosts | ok | ok | ok | ok | ok | ok | 1 | ok | ok | ok | ok | ok | ok | 1 | ok | ok | ok | ok | 1 | ok | 2 | ok |
-| host-detail / Host Ubuntu (offene CVEs, web-02) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 2 | 1 |
-| host-detail / Host mit Neustart (db-02) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 2 | 1 |
-| host-detail / Host Proxmox (pve-01) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 2 | 1 |
-| host-detail / Host ohne Daten (neu-01) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | 1 |
-| cves / CVEs Liste | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| cves / CVEs Filter-Fenster offen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| cves / CVEs nur Watchlist | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| cves / CVEs aktiver Filter | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
+| hosts / Hosts | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| host-detail / Host Ubuntu (offene CVEs, web-02) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| host-detail / Host mit Neustart (db-02) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| host-detail / Host Proxmox (pve-01) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| host-detail / Host ohne Daten (neu-01) | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cves / CVEs Liste | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cves / CVEs Filter-Fenster offen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cves / CVEs nur Watchlist | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cves / CVEs aktiver Filter | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | cves / CVEs leeres Ergebnis | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| cve-detail / CVE-Detail | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| cve-sources / Quellen eingeklappt | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| cve-sources / Quellen Verwalten aufgeklappt | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| cve-sources / Dialog Quelle hinzufügen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
-| agents / Agents Liste | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 2 | ok |
-| agents / Agents …-Menü offen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 2 | ok |
-| agents / Dialog Agent hinzufügen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 2 | ok |
-| notifications / Benachrichtigungen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | 1 | ok |
+| cve-detail / CVE-Detail | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cve-sources / Quellen eingeklappt | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cve-sources / Quellen Verwalten aufgeklappt | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| cve-sources / Dialog Quelle hinzufügen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| agents / Agents Liste | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| agents / Agents …-Menü offen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| agents / Dialog Agent hinzufügen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
+| notifications / Benachrichtigungen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | notifications / Kanal ntfy | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | notifications / Kanal matrix | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | notifications / Kanal gotify | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
@@ -70,73 +90,12 @@ oder title, A6 Rail-Beschriftung.
 | notifications / Kanal browser | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | settings / Einstellungen | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
 | notfound / 404-Seite | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok | ok |
-| sidebar / Sidebar eingeklappt | – | – | – | – | – | – | ok | ok | ok | ok | ok | ok | – | ok | ok | – | ok | – | ok | – | 2 | – |
+| sidebar / Sidebar eingeklappt | – | – | – | – | – | – | ok | ok | ok | ok | ok | ok | – | ok | ok | – | ok | – | ok | – | ok | – |
 | sidebar / Sidebar Off-Canvas offen | ok | ok | ok | ok | – | – | – | – | – | – | – | – | ok | – | – | ok | – | – | – | ok | – | ok |
-
 
 ## Verstöße
 
-- **hoch** (Prüfung 1) Hosts: Seitenüberlauf
-  - F1280: scrollWidth 2175 > clientWidth 1280; z. B. table "Hosts mit Distribution, Kernel, Zeitpunk", thead "HostDistribution / KernelZuletzt gemelde", tr "HostDistribution / KernelZuletzt gemelde"
-- **hoch** (Prüfung 1) Host Ubuntu (offene CVEs, web-02): Seitenüberlauf
-  - F1280: scrollWidth 1340 > clientWidth 1280; z. B. span "Seit", table "Verlauf der letzten DatenmeldungenZeitpu", thead "ZeitpunktLaufender KernelUpdatesNeustart"
-  - F390: scrollWidth 544 > clientWidth 390; z. B. label "CVEs dieses Hosts durchsuchen", input "CVEs dieses Hosts durchsuchen"
-- **hoch** (Prüfung 1) Host mit Neustart (db-02): Seitenüberlauf
-  - F1280: scrollWidth 1301 > clientWidth 1280; z. B. span "Seit"
-  - F390: scrollWidth 544 > clientWidth 390; z. B. label "CVEs dieses Hosts durchsuchen", input "CVEs dieses Hosts durchsuchen"
-- **hoch** (Prüfung 1) Host Proxmox (pve-01): Seitenüberlauf
-  - F1280: scrollWidth 1612 > clientWidth 1280; z. B. span "Fix-Version", span "Seit", table "Verlauf der letzten DatenmeldungenZeitpu"
-  - F390: scrollWidth 544 > clientWidth 390; z. B. label "CVEs dieses Hosts durchsuchen", input "CVEs dieses Hosts durchsuchen"
-- **hoch** (Prüfung 1) Host ohne Daten (neu-01): Seitenüberlauf
-  - F1280: scrollWidth 1340 > clientWidth 1280; z. B. span "Seit"
-  - F390: scrollWidth 544 > clientWidth 390; z. B. label "CVEs dieses Hosts durchsuchen", input "CVEs dieses Hosts durchsuchen"
-- **hoch** (Prüfung 1) Agents Liste: Seitenüberlauf
-  - F1280: scrollWidth 2220 > clientWidth 1280; z. B. table "Agents mit Zeitpunkt der letzten Daten, ", thead "NameHostname laut AgentDistributionZulet", tr "NameHostname laut AgentDistributionZulet"
-- **hoch** (Prüfung 1) Agents …-Menü offen: Seitenüberlauf
-  - F1280: scrollWidth 2220 > clientWidth 1280
-- **hoch** (Prüfung 1) Dialog Agent hinzufügen: Seitenüberlauf
-  - F1280: scrollWidth 2220 > clientWidth 1280; z. B. table "Agents mit Zeitpunkt der letzten Daten, ", thead "NameHostname laut AgentDistributionZulet", tr "NameHostname laut AgentDistributionZulet"
-- **hoch** (Prüfung 1) Sidebar eingeklappt: Seitenüberlauf
-  - F1280: scrollWidth 2011 > clientWidth 1280; z. B. table "Hosts mit Distribution, Kernel, Zeitpunk", thead "HostDistribution / KernelZuletzt gemelde", tr "HostDistribution / KernelZuletzt gemelde"
-- **niedrig** (Prüfung 6) Hosts: Tabelle Hosts mit Distribution, Kernel: letzte Spalte
-  - 1024: endet bei 1029.8, Rand 1000.0
-  - 1024d: endet bei 1029.8, Rand 1000.0
-  - L1024: endet bei 1029.8, Rand 1000.0
-  - F1280: endet bei 2174.9, Rand 1232.0
-- **niedrig** (Prüfung 6) Host Ubuntu (offene CVEs, web-02): Tabelle Verlauf der letzten Datenmeldu: letzte Spalte
-  - F1280: endet bei 1288.6, Rand 544.0
-- **niedrig** (Prüfung 6) Host mit Neustart (db-02): Tabelle Verlauf der letzten Datenmeldu: letzte Spalte
-  - F1280: endet bei 1151.7, Rand 544.0
-- **niedrig** (Prüfung 6) Host Proxmox (pve-01): Tabelle Verlauf der letzten Datenmeldu: letzte Spalte
-  - F1280: endet bei 1288.6, Rand 544.0
-- **niedrig** (Prüfung 6) CVEs Liste: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) CVEs Filter-Fenster offen: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) CVEs nur Watchlist: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) CVEs aktiver Filter: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) CVE-Detail: Tabelle Bewertung der Hosts für CVE-20: letzte Spalte
-  - F1280: endet bei 1464.6, Rand 1232.0
-- **niedrig** (Prüfung 6) Quellen eingeklappt: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) Quellen Verwalten aufgeklappt: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) Dialog Quelle hinzufügen: Tabelle CVEs mit Distributionen, betro: letzte Spalte
-  - F1280: endet bei 1724.0, Rand 1232.0
-- **niedrig** (Prüfung 6) Agents Liste: Tabelle Agents mit Zeitpunkt der letzt: letzte Spalte
-  - F1280: endet bei 2220.0, Rand 1232.0
-- **niedrig** (Prüfung 6) Agents …-Menü offen: Tabelle Agents mit Zeitpunkt der letzt: letzte Spalte
-  - F1280: endet bei 1280.0, Rand 292.0
-- **niedrig** (Prüfung 6) Dialog Agent hinzufügen: Tabelle Agents mit Zeitpunkt der letzt: letzte Spalte
-  - F1280: endet bei 2220.0, Rand 1232.0
-- **niedrig** (Prüfung 6) Benachrichtigungen: Tabelle Benachrichtigungskanäle mit Zu: letzte Spalte
-  - F1280: endet bei 1249.7, Rand 1232.0
-- **niedrig** (Prüfung 6) Sidebar eingeklappt: Tabelle Hosts mit Distribution, Kernel: letzte Spalte
-  - F1280: endet bei 2010.9, Rand 1232.0
-
-638 Zustände x Varianten geprüft, 33 Verstöße.
+Keine. 638 Zustände x Varianten geprüft, 0 Verstöße (Exit 0).
 
 # Vergleich mit dem Design-Snapshot 2026-11-11
 

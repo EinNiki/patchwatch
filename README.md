@@ -390,7 +390,8 @@ Feed-Zustand je Quelle („veraltet seit …“).
   Platz geht an die Textspalten (Host, Beschreibung, Hostname). Text steht linksbündig, Zahlenspalten (Updates, Uptime)
   rechtsbündig samt Kopf; der Zellabstand ist links und rechts gleich (12 px ab 768, 16 px ab 1280, 24 px ab 1600), alle
   Zellen stehen vertikal mittig. Schmalere Fenster blenden Spalten aus (Hosts: Agent unter 1600 px, Uptime unter 1440 px,
-  „Zuletzt gemeldet“ und Updates unter 1280 px), unter 768 px werden Zeilen gestapelt; die Seite scrollt nie waagerecht.
+  „Zuletzt gemeldet“ und Updates unter 1280 px), unter 768 px werden Zeilen gestapelt, bei vergrößerter Schrift auch
+  breiter, sobald der Behälter der Tabelle schmaler als 40 rem ist; die Seite scrollt nie waagerecht.
   In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und darunter die Hostnamen als Links (höchstens 3, der Rest
   hinter „+N“).
 
@@ -408,7 +409,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
   betroffene Hosts.
 - **Host-Detail, CVE-Lage**: ein Satz als Entscheidungshilfe („Nach dem Neustart auf 7.0.0-42.42 sind noch 81 CVEs
   offen, 2894 werden behoben.“; ohne nötigen Neustart „81 CVEs offen, kein Fix installiert.“; ohne offene „Keine
-  offenen CVEs.“), ein gestapelter Balken und vier gleich große Kacheln (ab 1280 px in einer Reihe, 640–1279 px 2×2, darunter eine Spalte): **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
+  offenen CVEs.“), ein gestapelter Balken und vier gleich große Kacheln (ab 1280 px in einer Reihe neben der Spalte „Host-Details“, die bei großer Schrift erst ab 60 rem Inhaltsbreite erscheint; 640–1279 px 2×2, darunter eine Spalte): **Offen** (kein Fix installiert; darunter, wie viele einen Fix im
   Archiv haben), **Neustart nötig** (Fix installiert, läuft erst nach dem Neustart), **Gefixt**, **Unbekannt** (bei 0 gedämpft, aber sichtbar). „Nicht betroffen“ wird in der Host-Ansicht nicht angezeigt (die API liefert die Zahl weiter; eine alte
   URL mit `?cve=not_affected` öffnet die Standardansicht). Jede Kachel zeigt Zahl, Wort, Icon und eine Zeile, die aktive ist per Rahmen und Haken markiert. Es
   steht immer nur **eine** Liste da (Standard „Offen“): nach Level (hoch zuerst), dann Alter sortiert; „Neustart nötig“ und

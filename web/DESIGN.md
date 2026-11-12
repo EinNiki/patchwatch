@@ -48,6 +48,10 @@ Apple-Muster (Tab-Bars, SF Symbols, Systemfarben, Kapsel-Buttons), „mutige“ 
   - < 768: Off-Canvas mit Kopfzeile (48 px); Fokusfalle, `Esc`, Klick auf den Hintergrund und Navigieren schließen; Fokus kehrt zum Menü-Button zurück.
   - Tabellen < 768: gestapelte Einträge (Name oben, Status-Chips darunter, Nebenwerte klein). Zu breite Tabellen scrollen in
     ihrem Container, nie die Seite (`scrollWidth ≤ innerWidth` ist ein Test).
+  - Große Schrift: Media-Queries rechnen rem immer mit 16 px, Container-Queries mit der tatsächlichen Schriftgröße. Tabellen
+    stapeln deshalb zusätzlich, wenn ihr Behälter (`@container/tbl`) schmaler als 40 rem ist (Varianten `stacked`,
+    `stacked-lg`, `tabular` in `globals.css`); bei 16 px Schrift ist der Behälter ab 768 px immer breiter, dort ändert sich nichts.
+    Bei 200 % Schrift und 1280 px verhalten sich Tabellen und Host-Seite so wie in einem schmalen Fenster.
   - Touch (< 768): Trefferflächen ≥ 44 px, Filterleiste hinter „Filter (n)“, Dialoge als Bottom-Sheet.
 - **Flächen:** `bg` Seite, `surface` Tabellen/Inhalt, `sunk` eingelassen (Tabellenkopf, Eingaben, Code). Kein Rahmen-Kasten um Tabellen
   (nur Linien oben/unten und zwischen Zeilen); Gruppierung zuerst über Abstand.
@@ -174,11 +178,13 @@ und ein kleiner Hook genügen (Messung: First-Load-JS +0,4 KB gegenüber +30–4
 - Die CVE-Liste ist so hoch wie ihr Inhalt (Zeilenhöhe × Anzahl), höchstens Fensterhöhe minus Kopf und Kacheln
   (`clamp(12rem, 100dvh − 22rem, 56rem)`); erst darüber scrollt sie innen (ab 60 Zeilen virtualisiert). Der Platzhalter beim
   Laden nutzt die Zahl aus den Kopfzahlen, damit nichts springt.
-- Ab 1280 px (Breakpoint `hd`) steht rechts die mitlaufende Spalte „Host-Details“ (20 rem), darunter derselbe Inhalt als
+- Ab 1280 px (Breakpoint `hd`; bei großer Schrift erst, wenn der Inhalt mindestens 60 rem breit ist: Variante `side`) steht
+  rechts die mitlaufende Spalte „Host-Details“ (20 rem), darunter derselbe Inhalt als
   aufklappbarer Abschnitt unter den Kacheln. Die vier Kacheln (Offen, Neustart nötig, Gefixt, Unbekannt) sind gleich groß: ab 1280 px vier in einer Reihe,
   640–1279 px 2×2, darunter eine Spalte; „Unbekannt“ bleibt bei 0 sichtbar, aber gedämpft.
 - Ab 1600 px (`wide`) kommen Fix-Version (Offen), Paket und Quelle als Spalten dazu; die Beschreibung behält `1fr`.
-  Unter 768 px bleibt die Zeile gestapelt.
+  Unter 768 px oder wenn die Liste schmaler als 40 rem ist (große Schrift) ist die Zeile gestapelt; die Zeilenhöhe wächst
+  mit der Schriftgröße (bei 16 px 32 bzw. 64 px).
 - „Fix im Archiv“: Tooltip und Detaildialog nennen den Weg (`sudo apt update && sudo apt upgrade`, danach Neustart bei
   Kernel); es wird nichts ausgeführt. Die Daten nennen das Quell-Paket (z. B. `linux`) und die Fix-Version je Quelle, nicht aber
   den Namen des Binär-Kernelpakets im Archiv.
