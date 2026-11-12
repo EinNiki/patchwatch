@@ -34,7 +34,7 @@ const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: 
   { key: "kernel", label: "Distribution / Kernel", cls: "w-[17%] min-w-28 hd:min-w-44" },
   { key: "report", label: DATA_LABEL, cls: "w-[10%] min-w-32 md:max-hd:hidden", tip: DATA_TIP },
   { key: "updates", label: "Updates", num: true, cls: "w-[9%] min-w-28 md:max-lg:hidden" },
-  { key: "cve", label: "CVE", cls: "w-[20%] min-w-60 hd:min-w-64" },
+  { key: "cve", label: "CVE", cls: "w-[20%] min-w-52 hd:min-w-64" },
   { key: "status", label: "Status", cls: "w-[12%] min-w-26" },
 ];
 
@@ -159,7 +159,7 @@ function HostsView() {
                   disabled={k.count === 0 && !active}
                   onClick={() => setParam(active ? Object.fromEntries(Object.keys(k.param).map((key) => [key, null])) : k.param)}
                   title={active ? "Filter aufheben" : `Nur ${k.label} anzeigen`}
-                  className={`flex min-h-11 flex-col items-start gap-0.5 border-l-2 px-3 py-2 text-left first:border-l-0 hover:bg-sunk disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${
+                  className={`flex min-h-11 min-w-0 flex-col items-start gap-0.5 border-l-2 px-3 py-2 text-left first:border-l-0 hover:bg-sunk disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${
                     active ? "border-accent bg-sunk" : "border-transparent"
                   }`}
                 >
@@ -169,15 +169,15 @@ function HostsView() {
                     </span>
                     <span className="mono text-xl font-semibold leading-none">{k.count}</span>
                   </span>
-                  <span className="text-xs text-fg2">{k.label}</span>
+                  <span className="text-xs text-fg2 [overflow-wrap:anywhere]">{k.label}</span>
                 </button>
               );
             })}
-            <div className="flex min-h-11 flex-col items-start gap-0.5 px-3 py-2">
+            <div className="flex min-h-11 min-w-0 flex-col items-start gap-0.5 px-3 py-2">
               <span className="mono text-sm font-semibold leading-[1.25rem]">
                 <RelTime iso={lastReport} />
               </span>
-              <span className="text-xs text-fg2" title={DATA_TIP}>{DATA_LABEL}</span>
+              <span className="text-xs text-fg2 [overflow-wrap:anywhere]" title={DATA_TIP}>{DATA_LABEL}</span>
             </div>
           </section>
 
