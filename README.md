@@ -490,6 +490,19 @@ export PW_MODULE=/pfad/zu/node_modules/playwright PW_CHROME=/pfad/zu/chrome PW_B
 node scripts/layout-check.mjs && node scripts/a11y.mjs     # nacheinander, nie zwei Browser gleichzeitig
 ```
 
+Zwei weitere Prüfungen, gleiche Umgebung (`scripts/dev-stack.sh restart-server` davor setzt das Login-Limit zurück):
+
+```sh
+# Responsiv: alle Seiten und Zustände x 12 Breiten (320 bis 2560), Querformat, Zoom 200 %, Schriftzoom 200 %, hell/dunkel,
+# reduzierte Bewegung. Prüft Überlauf, abgeschnittenen Text, Fenster im Viewport, Trefferflächen < 768 px, Knopfhöhen,
+# Tabellenrand, axe (serious/critical) und Layoutsprung; schreibt eine Ergebnistabelle. Gruppen einzeln: login, hosts,
+# host-detail, cves, cve-detail, cve-sources, agents, notifications, settings, notfound, sidebar. Keine verändernden Aktionen.
+node scripts/responsive-all.mjs ergebnis.md [gruppe,gruppe]
+# Pixelvergleich mit docs/design/snapshot-2026-11-11/screenshots (1440/390 px, hell/dunkel); Abweichung in %, Schwelle 2 %.
+# Die Demo-Daten unterscheiden sich vom Snapshot, Treffer sind zu deuten (PW_DIFFDIR schreibt Differenzbilder).
+node scripts/snapshot-diff.mjs ergebnis.md
+```
+
 Das Web-UI kommt aus dem vorhandenen Build (`npm --prefix web run build`). Zustand (PID-Dateien, Logs, zufälliges
 Admin-Passwort mit `chmod 600`) liegt außerhalb des Repos in `PW_STACK_DIR`; Ports, Containername und Passwortdatei sind über
 `PW_*`-Variablen einstellbar (Kopf von `dev-stack.sh`). `scripts/mock-feeds.mjs [Port]` (nur Node-Standardbibliothek) liefert
