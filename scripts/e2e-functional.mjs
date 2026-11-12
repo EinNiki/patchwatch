@@ -30,7 +30,7 @@ const WEB = process.env.PW_BASE ?? "http://127.0.0.1:3300";
 const API = process.env.PW_API ?? "http://127.0.0.1:8091";
 const MOCK = process.env.PW_MOCK ?? "http://127.0.0.1:8190";
 const PG = process.env.PW_PG_NAME ?? "pw-night-pg";
-const AGENT = process.env.PW_AGENT ?? "/home/claude/patchwatch/target/debug/patchwatch-agent";
+const AGENT = process.env.PW_AGENT ?? new URL("../target/debug/patchwatch-agent", import.meta.url).pathname;
 const USER = process.env.PW_USER ?? "admin";
 
 let fails = 0;

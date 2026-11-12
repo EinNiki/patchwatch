@@ -12,7 +12,7 @@
 #
 # Umgebung (Standardwerte in Klammern):
 #   PW_STACK_DIR     Zustand: PID-Dateien, Logs, Passwortdateien, außerhalb des Repos
-#                    (/tmp/claude-1000/-home-claude/a359cb9c-b0b4-531f-91ea-b29c52746ff1/scratchpad/night/stack)
+#                    (${TMPDIR:-/tmp}/patchwatch-dev-stack)
 #   PW_PG_NAME       Containername, muss mit "pw-night-" beginnen (pw-night-pg)
 #   PW_PG_PORT       Postgres auf 127.0.0.1 (55440)
 #   PW_SERVER_PORT   API (8091)     PW_WEB_PORT  UI (3300)     PW_MOCK_PORT  Mock-Feeds (8190)
@@ -27,7 +27,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-STACK=${PW_STACK_DIR:-/tmp/claude-1000/-home-claude/a359cb9c-b0b4-531f-91ea-b29c52746ff1/scratchpad/night/stack}
+STACK=${PW_STACK_DIR:-${TMPDIR:-/tmp}/patchwatch-dev-stack}
 PG_NAME=${PW_PG_NAME:-pw-night-pg}
 PG_PORT=${PW_PG_PORT:-55440}
 SERVER_PORT=${PW_SERVER_PORT:-8091}
@@ -140,14 +140,14 @@ server_env() {
 }
 
 server_bin() {
-  tdir=${CARGO_TARGET_DIR:-/home/claude/patchwatch/target}
+  tdir=${CARGO_TARGET_DIR:-$ROOT/target}
   echo "$tdir/debug/patchwatch-server"
 }
 
 server_build() {
   [ "${PW_SKIP_BUILD:-0}" = 1 ] && return 0
   CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-2}
-  CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/home/claude/patchwatch/target}
+  CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/target}
   PATH=$HOME/.cargo/bin:$PATH
   export CARGO_BUILD_JOBS CARGO_TARGET_DIR PATH
   echo "dev-stack: baue Server (cargo build -p patchwatch-server) ..."
