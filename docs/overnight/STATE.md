@@ -31,15 +31,15 @@ Entscheidungen beim Warten:
 |---|---|---|---|---|---|---|
 | 0 Sicherung und Branch | fertig | 00:00 | 00:01 | - | - | - |
 | Umgebung, Modelltest | fertig | 00:01 | 00:25 | - | - | - |
-| 1 UI-Restarbeiten | teilweise: nur am Code geprüft, Tests und Restarbeiten offen (Speicherregel) | 00:20 | 04:12 | 8 | 0 | 8 |
-| 2 Qualitätsschranken | teilweise: fmt, lint, typecheck grün; Rest übersprungen (Speicherregel) | 00:05 | 00:10 | 0 | 0 | 0 |
-| 3 Responsiv | übersprungen (Speicherregel, Browser) | | | | | |
-| 4 Funktionstests | übersprungen (Speicherregel) | | | | | |
-| 5 Daten, Zeit, Robustheit | teilweise: nur Code-Review; Läufe offen | 04:12 | 04:25 | 13 | 0 | 13 |
-| 6 Agent und Deployment | teilweise: nur Dateiprüfung; Builds und Tests offen | 04:11 | 04:15 | 20 | 0 | 20 |
+| 1 UI-Restarbeiten | teilweise: am Code und mit 11 E2E-Skripten geprüft; Restarbeiten offen | 00:20 | 05:20 | 9 | 1 | 8 |
+| 2 Qualitätsschranken | fertig außer Docker-Builds; alles grün | 00:05 | 04:50 | 0 | 0 | 0 |
+| 3 Responsiv | offen (nur layout-check ohne Host-Seiten grün) | | | | | |
+| 4 Funktionstests | offen | | | | | |
+| 5 Daten, Zeit, Robustheit | teilweise: Code-Review, 2 Fixes mit Test; Läufe offen | 04:12 | 05:29 | 13 | 2 | 11 |
+| 6 Agent und Deployment | teilweise: Dateiprüfung, musl-Build und Agent-Tests grün; Docker offen | 04:11 | 04:48 | 20 | 0 | 20 |
 | 7 Sicherheit | fertig (nur lesend) | 00:05 | 04:20 | 21 | 0 | 21 |
-| 8 Aufräumen und Push | Push von der Rechteprüfung abgelehnt, Branch nur lokal | 04:27 | 04:35 | | | |
-| 9 Bericht | fertig (REPORT.md) | 04:27 | 04:35 | | | |
+| 8 Aufräumen und Push | aufgeräumt; Stand fb0215b ist gepusht, die späteren Commits siehe Verlauf | 05:29 | 05:45 | | | |
+| 9 Bericht | fertig (REPORT.md) | 05:31 | 05:45 | | | |
 
 Phase 0: Tag before-overnight-2026-11-12 auf 8cf3064 angelegt und gepusht. Tag
 design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung).
@@ -78,14 +78,28 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
 | 10 | sonnet | Phase 6 Dateiprüfung | 1 hoch, 4 mittel, 9 niedrig, 6 Hinweise |
 | 11 | opus | Phase 5 Code-Review | 4 mittel, 9 niedrig |
 
+| 12 | sonnet | Phase 2 Rust und Agent | fmt, clippy, 330 Tests, musl 2,1 MiB, install_test 58: grün |
+| 13 | sonnet | Seed-Stack, Browser-Tests | 11 von 13 Skripten grün; layout-check und a11y ohne CVE-Daten unvollständig; Commit 3a97664 |
+| 14 | sonnet | Fix doppelte Paketnamen | Commit 53f1304, Test schlug ohne Fix fehl |
+| 15 | sonnet | Fix NUL-Zeichen | Commit 1870417, 4 Tests schlugen ohne Fix fehl |
+
 ## Verlauf
+- 04:43 UTC: Nach Freigabe des Besitzers ("alles selber beenden, starten") Prozesse der UI-Sitzung beendet (Server
+  8080/8081, Web 3100/4100/3200/4200), Container pw-ui-pg und pw-snap-pg gestoppt (nicht gelöscht). Danach 4,3 GB
+  verfügbar, Swap 7 %. Branch mit Stand fb0215b gepusht.
+- 04:48 UTC: npm test (100) und npm build vom Dirigenten ausgeführt, grün.
+- 05:29 UTC: Dirigent hat fmt, clippy und cargo test --workspace (335 bestanden) selbst wiederholt; Web seit den
+  grünen Läufen unverändert. Eigener Stack beendet, pw-night-pg entfernt, Zugangsdateien gelöscht.
+- 05:30 UTC: Zeitgrenze, keine neue Phase.
 - 00:19 bis 04:10 UTC: Nutzungslimit erreicht, Lauf stand (STATE.md konnte in dem Moment nicht fortgeschrieben werden).
 - 04:10 und 04:25 UTC: Speicher erneut geprüft, Swap 53 %: schwere Schritte weiter übersprungen.
 - Phase 8: Der Push des Branches (nur docs/overnight/, kein Code) wurde von der Rechteprüfung der Umgebung abgelehnt
   ("Out-of-Place Publication"). Kein zweiter Versuch, kein Umweg. Der Branch liegt lokal im Worktree.
 
 ## Offene Punkte
-- Wiederaufnahme ("Mach bei der Zustandsdatei weiter"), sobald Speicher frei ist: Phase 1 (Tests, Restarbeiten laut
-  phase1.md), 2 (clippy, Tests, Builds), 3, 4, ausführende Teile von 5 und 6.
-- Alle Funde aus security.md, phase5.md, phase6.md, phase1.md sind offen.
+- Wiederaufnahme ("Mach bei der Zustandsdatei weiter"): Phase 1 Restarbeiten laut phase1.md, Phase 3, Phase 4,
+  Läufe aus Phase 5 (Migration, Last, Ausfall), Docker-Builds, Seed mit CVE-Daten aus Mock-Feeds,
+  scripts/responsive-all.mjs, README-Abschnitt "Qualitätsprüfung".
+- Offene Funde: security.md (21), phase5.md (11), phase6.md (20), phase1.md (8).
+- Beobachtung: RSS der alten Debug-Server wuchs im Leerlauf auf 1,3 bis 1,6 GB (nicht untersucht).
 - Worktree /home/claude/patchwatch-night bleibt für die Wiederaufnahme bestehen.
