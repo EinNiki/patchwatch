@@ -88,7 +88,7 @@ export function Checkbox({ label, hint, className = "", ...props }: Omit<InputHT
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-xs font-semibold text-fg2">
+    <label className="flex max-w-full flex-col gap-1 text-xs font-semibold text-fg2">
       {label}
       {children}
     </label>

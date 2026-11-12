@@ -33,6 +33,16 @@ html {
   line-height: 1.45;
   -webkit-text-size-adjust: 100%;
 }
+/* Ein <fieldset> ist standardmäßig mindestens so breit wie sein breitester Inhalt (min-width: min-content) und sprengt die Seite. */
+fieldset {
+  min-width: 0;
+}
+/* Felder haben eine Eigenbreite (size=20, längste Option) und wachsen bei großer Schrift über die Spalte hinaus. */
+input,
+select,
+textarea {
+  max-width: 100%;
+}
 
 body {
   background: var(--bg);
