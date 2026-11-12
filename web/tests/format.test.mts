@@ -58,3 +58,26 @@ test("fehlende oder unsinnige Angaben: keine Uhrzeit erfinden", () => {
 test("Prozess-Zeitzone ist egal", () => {
   assert.equal(shortDateTime(Date.parse("2026-11-06T21:27:00Z")), "06.11. 22:27");
 });
+test("relative Tage über den Zeitwechsel im Oktober (25-Stunden-Tag) und „vor n Tagen“", () => {
+  // 25.10.2026 hat 25 Stunden. 26 h zurück ist zwei Berliner Kalendertage früher, nicht „gestern“ (gerundete 24-h-Tage).
+  assert.equal(relTime("2026-10-25T22:30:00Z", Date.parse("2026-10-27T00:30:00Z")), "vorgestern");
+  // 24,5 h zurück am 25-Stunden-Tag selbst: derselbe Kalendertag, also „heute“.
+  assert.equal(relTime("2026-10-24T22:00:00Z", Date.parse("2026-10-25T22:30:00Z")), "heute");
+  // Mehrere Tage über beide Wechsel: zählt Kalendertage.
+  assert.equal(relTime("2026-10-24T21:30:00Z", Date.parse("2026-10-27T12:00:00Z")), "vor 3 Tagen");
+  assert.equal(relTime("2026-03-28T10:00:00Z", Date.parse("2026-03-31T10:00:00Z")), "vor 3 Tagen");
+  assert.equal(relTime("2026-03-28T22:30:00Z", Date.parse("2026-03-30T10:00:00Z")), "vorgestern");
+});
+test("Bootzeit nach Neustart: verschiebt sich nur um die Sendedauer, Anzeige in Minuten (N8)", () => {
+  // Zwei Reports desselben Laufs, Uptime jeweils beim Sammeln gelesen; der zweite kommt 3 s später an als gesammelt.
+  const boot1 = bootTime("2026-11-06T12:00:10Z", 3_600)!;
+  const boot2 = bootTime("2026-11-07T12:00:13Z", 3_600 + 86_400)!;
+  assert.equal(boot2 - boot1, 3_000, "Drift = Zeit zwischen Lesen der Uptime und Empfang");
+  assert.equal(bootLabel("2026-11-06T12:00:10Z", 3_600), bootLabel("2026-11-07T12:00:13Z", 3_600 + 86_400));
+  // An einer Minutengrenze springt die Anzeige um eine Minute (bekannt, niedrig): Boot 12:00:58 -> 12:01:01 (Berlin).
+  assert.equal(bootLabel("2026-11-06T12:00:58Z", 3_600), "gestartet 06.11. 12:00");
+  assert.equal(bootLabel("2026-11-07T12:01:01Z", 3_600 + 86_400), "gestartet 06.11. 12:01");
+  // Nach einem Neustart gilt die neue Uptime sofort, nie negativ.
+  assert.equal(bootLabel("2026-11-08T08:00:00Z", 120), "gestartet 08.11. 08:58");
+  assert.equal(bootTime("2026-11-08T08:00:00Z", -5), null);
+});
