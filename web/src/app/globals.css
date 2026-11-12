@@ -54,6 +54,26 @@
   }
 }
 
+/* Host-Seite: rechte Spalte „Host-Details“ (`side`) ab 1280 px Fensterbreite, aber nur, wenn der Inhalt (Behälter
+   @container/hd) mindestens 60 rem breit ist; sonst einspaltig (`no-side`). Bei 16 px Schrift ist der Inhalt ab 1280 px
+   mindestens 1012 px (63 rem) breit, es bleibt bei 1280 px als Umschaltpunkt. Bei 200 % Schrift und 1280 px (1012 px < 60 rem
+   = 1920 px) bleibt die Seite einspaltig wie in einem schmalen Fenster. */
+@custom-variant side {
+  @media (min-width: 1280px) {
+    @container hd (width >= 60rem) {
+      @slot;
+    }
+  }
+}
+@custom-variant no-side {
+  @media (max-width: 1279px) {
+    @slot;
+  }
+  @container hd (width < 60rem) {
+    @slot;
+  }
+}
+
 /* Basisstile und Komponenten liegen in Layern, damit Tailwind-Utilities (z. B. text-fg, no-underline) sie überschreiben können. */
 @layer base {
 html {

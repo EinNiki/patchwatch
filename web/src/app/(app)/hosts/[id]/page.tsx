@@ -54,15 +54,17 @@ export default function HostDetailPage() {
         ) : null}
       </div>
 
-      {/* Ab 1280 px: CVE-Lage links, Host-Details rechts (mitlaufend). Darunter stehen die Details aufklappbar unter den Kacheln. */}
-      <div className="hd:grid hd:grid-cols-[minmax(0,1fr)_20rem] hd:items-start hd:gap-x-6">
+      {/* Ab 1280 px (Variante side, bei großer Schrift erst ab 60 rem Inhaltsbreite): CVE-Lage links, Host-Details rechts
+          (mitlaufend). Sonst stehen die Details aufklappbar unter den Kacheln. */}
+      <div className="@container/hd">
+      <div className="side:grid side:grid-cols-[minmax(0,1fr)_20rem] side:items-start side:gap-x-6">
       <div className="min-w-0">
       <HostCves
         host={h}
         initialFilter={initialFilter}
         notice={notice}
         details={
-          <details className="mb-2 rounded-xs border border-line bg-surface hd:hidden">
+          <details className="mb-2 rounded-xs border border-line bg-surface side:hidden">
             <summary className="flex min-h-8 cursor-pointer items-center px-3 text-sm font-semibold max-md:min-h-11">Host-Details</summary>
             <div className="border-t border-line px-3 py-2">
               <HostDetails host={h} feeds={feeds.data} notice={notice} />
@@ -81,7 +83,7 @@ export default function HostDetailPage() {
         {!history.data ? null : history.data.length === 0 ? (
           <Empty title="Noch keine Daten gemeldet">Der Verlauf füllt sich, sobald der Agent Daten gemeldet hat (täglich um 12:00).</Empty>
         ) : (
-          <div className="max-lg:overflow-x-auto">
+          <div className="@container/tbl max-lg:overflow-x-auto">
             <table className="tbl stack">
               <caption>Verlauf der letzten Datenmeldungen</caption>
               <thead>
@@ -119,12 +121,13 @@ export default function HostDetailPage() {
       </section>
       </div>
       </div>
-      <aside aria-labelledby="facts" className="max-hd:hidden hd:sticky hd:top-4 hd:max-h-[calc(100dvh-2rem)] hd:overflow-y-auto rounded-xs border border-line bg-surface p-3">
+      <aside aria-labelledby="facts" className="no-side:hidden side:sticky side:top-4 side:max-h-[calc(100dvh-2rem)] side:overflow-y-auto rounded-xs border border-line bg-surface p-3">
         <h2 id="facts" className="mb-2 text-base font-semibold">
           Host-Details
         </h2>
         <HostDetails host={h} feeds={feeds.data} notice={notice} />
       </aside>
+      </div>
       </div>
     </>
   );
