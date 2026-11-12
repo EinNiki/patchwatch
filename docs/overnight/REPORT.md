@@ -18,7 +18,7 @@ Rechteprüfung der Umgebung abgelehnt. Dazu kam ein Nutzungslimit (00:19 bis 04:
 | 5 Daten, Zeit, Robustheit | nur Code-Review (docs/overnight/phase5.md) |
 | 6 Agent, Deployment | nur Dateiprüfung (docs/overnight/phase6.md) |
 | 7 Sicherheit | fertig, nur lesend (docs/overnight/security.md) |
-| 8 Push | fertig: nur docs/overnight/ auf overnight/2026-11-12 |
+| 8 Push | NICHT gepusht: Die Rechteprüfung der Umgebung hat den Push abgelehnt. Der Branch liegt nur lokal. |
 
 ## 2 Zuerst lesen
 
@@ -69,9 +69,10 @@ Phase 1, am Code: Zeilenklick fehlt in CVE-, Agents- und Quellen-Tabelle; Kachel
    3100/4100 und pw-ui-pg; Server 8081 mit Web 3200/4200 und pw-snap-pg). Beende, was du nicht brauchst, und schreibe
    "Mach bei der Zustandsdatei weiter". Offen sind dann Phase 1 (Tests und Restarbeiten), 2, 3, 4 und die
    ausführenden Teile von 5 und 6.
-2. Branch `overnight/2026-11-12` ansehen: Er enthält nur `docs/overnight/`. Mergen nach dev ist optional. Kein
-   Neubau, keine Migration, kein Neustart, kein Schlüssel nötig.
-3. Entscheiden, ob `docs/overnight/security.md` (offene Funde) im privaten Repo liegen bleiben soll.
+2. Branch `overnight/2026-11-12` selbst pushen, wenn gewünscht: `git -C /home/claude/patchwatch-night push -u origin
+   overnight/2026-11-12`. Er liegt nur lokal und enthält nur `docs/overnight/`. Kein Neubau, keine Migration, kein
+   Neustart, kein Schlüssel nötig. Das Tag `before-overnight-2026-11-12` ist gepusht.
+3. Vor dem Push entscheiden, ob `docs/overnight/security.md` (offene Funde) ins private Repo soll.
 4. Die mittleren Funde einplanen, zuerst die drei aus Abschnitt 4 und `refresh?wait=true`.
 5. Aufräumen, wenn nicht fortgesetzt wird: `git worktree remove /home/claude/patchwatch-night` (ca. 620 MB
    node_modules). Die Stashes der UI-Sitzung (stash@{0}, stash@{1}) sind unberührt; stash@{0} ist ein überholter

@@ -38,7 +38,7 @@ Entscheidungen beim Warten:
 | 5 Daten, Zeit, Robustheit | teilweise: nur Code-Review; Läufe offen | 04:12 | 04:25 | 13 | 0 | 13 |
 | 6 Agent und Deployment | teilweise: nur Dateiprüfung; Builds und Tests offen | 04:11 | 04:15 | 20 | 0 | 20 |
 | 7 Sicherheit | fertig (nur lesend) | 00:05 | 04:20 | 21 | 0 | 21 |
-| 8 Aufräumen und Push | fertig: nur docs/overnight/ gepusht | 04:27 | 04:35 | | | |
+| 8 Aufräumen und Push | Push von der Rechteprüfung abgelehnt, Branch nur lokal | 04:27 | 04:35 | | | |
 | 9 Bericht | fertig (REPORT.md) | 04:27 | 04:35 | | | |
 
 Phase 0: Tag before-overnight-2026-11-12 auf 8cf3064 angelegt und gepusht. Tag
@@ -81,8 +81,8 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
 ## Verlauf
 - 00:19 bis 04:10 UTC: Nutzungslimit erreicht, Lauf stand (STATE.md konnte in dem Moment nicht fortgeschrieben werden).
 - 04:10 und 04:25 UTC: Speicher erneut geprüft, Swap 53 %: schwere Schritte weiter übersprungen.
-- Phase 8: Push trotz nicht ausgeführter Tests, weil der Branch gegenüber dev nur docs/overnight/ enthält (kein Code);
-  fmt, lint, typecheck grün. security.md wird als verlangter Befund mitgepusht (privates Repo).
+- Phase 8: Der Push des Branches (nur docs/overnight/, kein Code) wurde von der Rechteprüfung der Umgebung abgelehnt
+  ("Out-of-Place Publication"). Kein zweiter Versuch, kein Umweg. Der Branch liegt lokal im Worktree.
 
 ## Offene Punkte
 - Wiederaufnahme ("Mach bei der Zustandsdatei weiter"), sobald Speicher frei ist: Phase 1 (Tests, Restarbeiten laut
