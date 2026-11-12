@@ -87,7 +87,11 @@ try {
     await dlg().waitFor({ state: "hidden" });
     ok(true, `${L}: Klick/Tipp auf den Hintergrund schließt`);
     ok(!(await locked()), `${L}: Scrollsperre freigegeben`);
-    ok(await focusIsTrigger(), `${L}: Fokus kehrt zur Schaltfläche zurück`);
+    // Die Fokusrückgabe läuft im `close`-Ereignis des Dialogs, das der Browser erst als eigene Aufgabe nach dem Schließen
+    // auslöst. "hidden" kann also schon erfüllt sein, bevor der Fokus zurück ist (Race im Test, nicht im Web: mit
+    // Wartezeit stets korrekt). Darum auf den Zustand warten statt auf feste Pausen; bleibt er aus, schlägt der Test fehl.
+    const focusBack = await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Details zu CVE-2026-10000", null, { timeout: 2000 }).then(() => true, () => false);
+    ok(focusBack, `${L}: Fokus kehrt zur Schaltfläche zurück`);
 
     // Escape schließt (Tastatur öffnet mit Enter).
     await trigger().focus();
@@ -99,6 +103,7 @@ try {
     ok(await page.evaluate(() => document.querySelector("dialog[open]").contains(document.activeElement)), `${L}: Fokusfalle hält den Fokus im Fenster`);
     await page.keyboard.press("Escape");
     await dlg().waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Details zu CVE-2026-10000", null, { timeout: 2000 }).catch(() => {}); // gleiche Race wie oben
     ok(!(await locked()) && (await focusIsTrigger()), `${L}: Escape schließt, Sperre frei, Fokus zurück`);
     // Der Hintergrund hat danach keinen Fokusverlust: Tastatur arbeitet weiter auf der Seite.
     await page.keyboard.press("Tab");
