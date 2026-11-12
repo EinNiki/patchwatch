@@ -418,7 +418,7 @@ Feed-Zustand je Quelle („veraltet seit …“).
   Ist die zuständige Quelle eingeschränkt, steht über der Liste ein Hinweis (z. B. „Ubuntu: Offene Fälle nicht vollständig
   geladen (API überlastet, seit 22:08) …“), die Kachel „Offen“ trägt ein Warnsymbol und „kann unvollständig sein“; nie
   „alles gut“. Proxmox-Hosts bleiben „unbekannt, manuell prüfen“ (nie grün).
-- **Agents**: Tabelle mit Hostname, Distribution, Agent-Version, „Zuletzt gemeldet“ und „Zuletzt erreichbar“; „Daten jetzt abrufen“,
+- **Agents**: Tabelle mit Name, Hostname laut Agent, Distribution, „Zuletzt gemeldet“, „Zuletzt erreichbar“, Aktionen und Agent-Version (ab 1024 px alle sieben Spalten ohne waagerechten Überlauf, darunter gestapelte Karten); „Daten jetzt abrufen“,
   „Token erneuern“, Löschen mit Bestätigung. „Agent hinzufügen“ zeigt den Token einmalig und einen Installationsbefehl
   **ohne** Token (`install.sh` fragt ihn ohne Echo ab).
 - **Benachrichtigungen**: ntfy, Matrix, Gotify, Discord und „Live im Browser“, je mit Zugangsdaten (write-only),

@@ -1,4 +1,4 @@
-// E2E: Agents-Tabelle – Spaltenreihenfolge, Aktionen direkt nach „Zuletzt erreichbar“ (linksbündig, nicht am Rand), Agent-Version zuletzt,
+// E2E: Agents-Tabelle – Spaltenreihenfolge (ab 1024 px alle sieben Spalten, ohne Überlauf und Überlappung), Aktionen direkt nach „Zuletzt erreichbar“ (linksbündig, nicht am Rand), Agent-Version zuletzt,
 // kein Überlauf, Tastaturbedienung des Menüs, unter 1024 px gestapelte Karten, axe. Nur lesend.
 //   PW_MODULE=… PW_CHROME=… PW_PWFILE=<Datei mit Admin-Passwort> AXE_JS=… node scripts/e2e-agents-columns.mjs
 import { createRequire } from "node:module";
@@ -19,7 +19,7 @@ try {
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   for (const scheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
-    for (const w of [390, 768, 1024, 1280, 1440, 1920, 2560]) {
+    for (const w of [390, 768, 1024, 1180, 1280, 1440, 1920, 2560]) {
       const tag = `${w}px ${scheme}`;
       await page.setViewportSize({ width: w, height: 900 });
       await page.goto(`${base}/agents`);
@@ -34,17 +34,26 @@ try {
         const btn = act.querySelector("button");
         const menu = act.querySelectorAll("button")[1];
         const tr = r(t);
-        return { ths, stacked: getComputedStyle(t.querySelector("tbody")).display === "block", over: document.documentElement.scrollWidth - innerWidth,
+        // Waagerechter Überlauf der Tabelle in ihrem Rahmen und Überlappung/Abschneiden der Zellen.
+        const wrap = t.parentElement;
+        const rects = [...row.children].filter((c) => r(c).width > 0).map((c) => r(c));
+        const overlap = rects.some((a, i) => i > 0 && a.left < rects[i - 1].right - 0.5);
+        const clipped = [...t.querySelectorAll("th, td")].filter((c) => r(c).width > 0 && c.scrollWidth > c.clientWidth + 1).map((c) => c.textContent.trim().slice(0, 20));
+        return { wrapOver: wrap.scrollWidth - wrap.clientWidth, overlap, clipped, ths, stacked: getComputedStyle(t.querySelector("tbody")).display === "block", over: document.documentElement.scrollWidth - innerWidth,
           btnLeft: r(btn).left, actLeft: r(act).left, padL: parseFloat(getComputedStyle(act).paddingLeft), btnW: r(btn).width, btnH: r(btn).height, menuW: r(menu).width, menuH: r(menu).height,
           menuRight: r(menu).right, tblRight: tr.right, tblLeft: tr.left,
           cells: [...row.children].filter((c) => r(c).width > 0).map((c) => c.getAttribute("data-label") ?? (c.classList.contains("cell-actions") ? "Aktionen" : "Name")) };
       });
       if (w >= 1024) {
+        const all7 = ["Name", "Hostname laut Agent", "Distribution", "Zuletzt gemeldet", "Zuletzt erreichbar", "Aktionen", "Agent-Version"];
+        ok(m.ths.length === 7 && all7.every((x, i) => m.ths[i]?.startsWith(x)), `${tag}: alle sieben Spalten in der Vorgabe-Reihenfolge (${m.ths.join(" | ")})`);
+        ok(m.wrapOver <= 0, `${tag}: Tabelle ohne waagerechten Überlauf im Rahmen (${m.wrapOver})`);
+        ok(!m.overlap && m.clipped.length === 0, `${tag}: keine Überlappung, nichts abgeschnitten (${m.clipped.join(", ")})`);
         const want = ["Name", "Hostname laut Agent", "Distribution", "Zuletzt gemeldet"];
         ok(want.every((x, i) => m.ths[i]?.startsWith(x)), `${tag}: Spaltenfolge beginnt mit ${want.join(", ")} (${m.ths.join(" | ")})`);
         const iA = m.ths.indexOf("Aktionen");
-        ok(m.ths[m.ths.length - 1] === "Agent-Version" || w < 1280, `${tag}: Agent-Version zuletzt`);
-        if (w >= 1280) ok(m.ths[iA - 1].startsWith("Zuletzt erreichbar") && iA === m.ths.length - 2, `${tag}: Aktionen direkt nach „Zuletzt erreichbar“`);
+        ok(m.ths[m.ths.length - 1] === "Agent-Version", `${tag}: Agent-Version zuletzt`);
+        ok(m.ths[iA - 1].startsWith("Zuletzt erreichbar") && iA === m.ths.length - 2, `${tag}: Aktionen direkt nach „Zuletzt erreichbar“`);
         ok(Math.abs(m.btnLeft - m.actLeft - m.padL) <= 8, `${tag}: Knopf linksbündig in der Zelle (${(m.btnLeft - m.actLeft).toFixed(1)} / ${m.padL})`);
         ok(m.tblRight - m.menuRight > 16, `${tag}: Knopfreihe nicht am rechten Rand (${(m.tblRight - m.menuRight).toFixed(1)} px Abstand)`);
         ok(Math.abs(m.btnH - 32) <= 0.5 && Math.abs(m.menuH - 32) <= 0.5 && Math.abs(m.menuW - 32) <= 0.5, `${tag}: Knöpfe 32 px (${m.btnH}, Menü ${m.menuW}×${m.menuH})`);
