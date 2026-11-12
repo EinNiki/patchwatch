@@ -109,6 +109,21 @@ mod tests {
     }
 
     #[test]
+    fn stale_boundary_is_strict() {
+        // Genau 26 h: noch nicht "meldet sich nicht"; 26 h + 1 s: schon.
+        let now: DateTime<Utc> = "2026-11-12T12:00:00Z".parse().unwrap();
+        let (mut s, _) = snap(Some(0));
+        s.last_report_at = Some(now - Duration::hours(26));
+        assert_eq!(st(&s, now), HostStatus::Ok);
+        s.last_report_at = Some(now - Duration::hours(26) - Duration::seconds(1));
+        assert_eq!(st(&s, now), HostStatus::Stale);
+        // Über den Zeitwechsel im Oktober (25-Stunden-Tag) zählt die echte Zeitspanne, nicht die Wanduhr.
+        let now: DateTime<Utc> = "2026-10-25T12:00:00Z".parse().unwrap();
+        s.last_report_at = Some("2026-10-24T10:00:00Z".parse().unwrap()); // 12:00 Sommerzeit am Vortag = 26 h
+        assert_eq!(st(&s, now), HostStatus::Ok);
+    }
+
+    #[test]
     fn priority_order() {
         let (mut s, now) = snap(Some(1));
         s.updates_pending = 3;

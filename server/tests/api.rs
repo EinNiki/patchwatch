@@ -1304,3 +1304,37 @@ async fn database_outage_is_503_without_details() {
     }
 }
 
+/// Agent-Uhr eine Stunde falsch (vor oder nach): "Zuletzt gemeldet" ist die Serverzeit beim Empfang, der Host wird
+/// weder "meldet sich nicht" noch bekommt er einen Zeitpunkt in der Zukunft.
+#[sqlx::test(migrations = "./migrations")]
+async fn wrong_agent_clock_does_not_matter(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web1", TOKEN).await;
+    let auth = bearer(TOKEN);
+    for skew in [3600_i64, -3600, -27 * 3600] {
+        let mut body = report("web1", "6.8.0-35.35", "6.8.0-35.35", 0, 0);
+        body["collected_at_unix"] = json!(Utc::now().timestamp() + skew);
+        let before = Utc::now();
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/report",
+            &[("authorization", &auth)],
+            Some(body),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "Abweichung {skew} s");
+        let after = Utc::now();
+        let (last, status): (chrono::DateTime<Utc>, String) =
+            sqlx::query_as("SELECT last_report_at, status FROM hosts WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            last >= before - Duration::seconds(1) && last <= after + Duration::seconds(1),
+            "Abweichung {skew} s: {last}"
+        );
+        assert_ne!(status, "stale", "Abweichung {skew} s");
+    }
+}

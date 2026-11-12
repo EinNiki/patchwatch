@@ -254,6 +254,19 @@ pub async fn scheduler(state: AppState) {
     }
 }
 
+/// Dedupe-Schlüssel der Tageszusammenfassung, sobald die lokale Uhrzeit `at` erreicht ist (sonst `None`). Der
+/// Schlüssel enthält das lokale Datum: der Minuten-Scheduler stellt den Job beliebig oft ein, versendet wird je Kanal
+/// und Kalendertag genau einmal (`ON CONFLICT (dedupe_key) DO NOTHING`), auch an 23- und 25-Stunden-Tagen.
+pub fn daily_summary_key(
+    kind: &str,
+    now: chrono::DateTime<Utc>,
+    tz: chrono_tz::Tz,
+    at: chrono::NaiveTime,
+) -> Option<String> {
+    let local = now.with_timezone(&tz);
+    (local.time() >= at).then(|| format!("daily:{kind}:{}", local.date_naive()))
+}
+
 pub async fn schedule_once(state: &AppState) -> anyhow::Result<()> {
     let stale_after = crate::schedule::stale_after(&state.pool, state.cfg.stale_after_hours).await;
     hostops::mark_stale_hosts(&state.pool, stale_after).await?;
@@ -280,9 +293,8 @@ pub async fn schedule_once(state: &AppState) -> anyhow::Result<()> {
             .as_deref()
             .and_then(|t| t.parse::<chrono_tz::Tz>().ok())
             .unwrap_or_else(|| state.cfg.tz());
-        let local = now.with_timezone(&tz);
-        if local.time() >= ch.summary_time.unwrap_or_else(|| state.cfg.summary_time()) {
-            let key = format!("daily:{}:{}", ch.kind, local.date_naive());
+        let at = ch.summary_time.unwrap_or_else(|| state.cfg.summary_time());
+        if let Some(key) = daily_summary_key(&ch.kind, now, tz, at) {
             jobs::enqueue(
                 &mut conn,
                 "daily_summary",
@@ -294,4 +306,67 @@ pub async fn schedule_once(state: &AppState) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::daily_summary_key;
+    use chrono::{DateTime, Duration, NaiveTime, Utc};
+    use std::collections::BTreeMap;
+
+    /// Minuten-Scheduler über den Berliner Kalendertag simulieren: Schlüssel je lokalem Datum mit dem ersten
+    /// Zeitpunkt, an dem er entsteht (ein Schlüssel = ein Versand).
+    fn keys_for(from: &str, to: &str, at: &str) -> BTreeMap<String, DateTime<Utc>> {
+        let tz: chrono_tz::Tz = "Europe/Berlin".parse().unwrap();
+        let at = NaiveTime::parse_from_str(at, "%H:%M").unwrap();
+        let (mut t, end) = (
+            from.parse::<DateTime<Utc>>().unwrap(),
+            to.parse::<DateTime<Utc>>().unwrap(),
+        );
+        let mut out = BTreeMap::new();
+        while t < end {
+            if let Some(k) = daily_summary_key("email", t, tz, at) {
+                out.entry(k).or_insert(t);
+            }
+            t += Duration::minutes(1);
+        }
+        out
+    }
+
+    #[test]
+    fn daily_summary_once_on_spring_forward_day() {
+        // 29.03.2026 (letzter Sonntag im März, 23-Stunden-Tag): Berliner Tag = 28.03. 23:00Z bis 29.03. 22:00Z.
+        // 08:00 existiert: genau ein Versand um 08:00 Sommerzeit = 06:00 UTC.
+        let k = keys_for("2026-03-28T23:00:00Z", "2026-03-29T22:00:00Z", "08:00");
+        assert_eq!(k.len(), 1, "{k:?}");
+        assert_eq!(
+            k["daily:email:2026-03-29"],
+            "2026-03-29T06:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        // 02:30 existiert an diesem Tag nicht: genau ein Versand zum ersten Zeitpunkt danach (03:00 = 01:00 UTC).
+        let k = keys_for("2026-03-28T23:00:00Z", "2026-03-29T22:00:00Z", "02:30");
+        assert_eq!(k.len(), 1, "{k:?}");
+        assert_eq!(
+            k["daily:email:2026-03-29"],
+            "2026-03-29T01:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    #[test]
+    fn daily_summary_once_on_fall_back_day() {
+        // 25.10.2026 (letzter Sonntag im Oktober, 25-Stunden-Tag): Berliner Tag = 24.10. 22:00Z bis 25.10. 23:00Z.
+        let k = keys_for("2026-10-24T22:00:00Z", "2026-10-25T23:00:00Z", "08:00");
+        assert_eq!(k.len(), 1, "{k:?}");
+        assert_eq!(
+            k["daily:email:2026-10-25"],
+            "2026-10-25T07:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        // 02:30 kommt zweimal vor: der Schlüssel entsteht beim ersten (00:30 UTC), das zweite ergibt denselben Schlüssel.
+        let k = keys_for("2026-10-24T22:00:00Z", "2026-10-25T23:00:00Z", "02:30");
+        assert_eq!(k.len(), 1, "{k:?}");
+        assert_eq!(
+            k["daily:email:2026-10-25"],
+            "2026-10-25T00:30:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
 }
