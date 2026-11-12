@@ -23,6 +23,37 @@
   }
 }
 
+/* Gestapelte Tabellen (.tbl.stack unter 768 px, .tbl.stack-lg unter 1024 px Fensterbreite) stapeln zusätzlich, wenn ihr
+   Behälter (Klasse @container/tbl) schmaler als 40 rem ist. rem folgt in Container-Queries der Schriftgröße der Seite, in
+   Media-Queries nicht: Bei 16 px Schrift ist der Behälter ab 768 px Fensterbreite mindestens 664 px (41,5 rem) breit, die
+   Bedingung greift also nur bei vergrößerter Schrift (200 % bei 1280 px: Behälter 1012 px < 40 rem = 1280 px). Dann
+   stapelt die Tabelle wie in einem schmalen Fenster, statt die Seite zu verbreitern. `stacked`/`tabular` gelten auch für
+   Zell-Utilities, die sich zwischen gestapelter Ansicht und Tabellenansicht unterscheiden. */
+@custom-variant stacked {
+  @media (max-width: 767px) {
+    @slot;
+  }
+  @container tbl (width < 40rem) {
+    @slot;
+  }
+}
+@custom-variant stacked-lg {
+  @media (max-width: 1023px) {
+    @slot;
+  }
+  @container tbl (width < 40rem) {
+    @slot;
+  }
+}
+/* Gegenstück zu `stacked`: Tabellenansicht (ab 768 px und Behälter mindestens 40 rem). */
+@custom-variant tabular {
+  @media (min-width: 768px) {
+    @container tbl (width >= 40rem) {
+      @slot;
+    }
+  }
+}
+
 /* Basisstile und Komponenten liegen in Layern, damit Tailwind-Utilities (z. B. text-fg, no-underline) sie überschreiben können. */
 @layer base {
 html {
@@ -407,9 +438,10 @@ details[open] > :not(summary) {
   }
 }
 
-/* Mobil (< 768 px): gestapelte Einträge. Name oben, Status-Chips darunter, Nebenwerte klein in einer Zeile.
-   Zellklassen: cell-primary (Name), cell-status (Chips), alles andere ist Nebenwert und trägt sein Label per data-label. */
-@media (max-width: 767px) {
+/* Mobil (< 768 px) und bei großer Schrift (Variante `stacked`, oben): gestapelte Einträge. Name oben, Status-Chips darunter,
+   Nebenwerte klein in einer Zeile. Zellklassen: cell-primary (Name), cell-status (Chips), alles andere ist Nebenwert und trägt
+   sein Label per data-label. */
+@variant stacked {
   .tbl.stack thead {
     position: absolute;
     width: 1px;
@@ -420,6 +452,10 @@ details[open] > :not(summary) {
   .tbl.stack,
   .tbl.stack tbody {
     display: block;
+  }
+  /* Die Mindestbreite der Tabellenansicht (.dist, ab 768 px) gilt für die gestapelte Liste nicht. */
+  .tbl.stack {
+    min-width: 0;
   }
   .tbl.stack tr {
     display: flex;
@@ -515,8 +551,9 @@ details[open] > :not(summary) {
 
 /* Wie oben, aber schon unter 1024 px (Tabelle „CVE-Quellen“: Karten je Quelle). Gleiche Regeln, anderer Umschaltpunkt.
    Hier ist der Rest des ursprünglichen Kommentars: gestapelte Einträge. Name oben, Status-Chips darunter, Nebenwerte klein in einer Zeile.
-   Zellklassen: cell-primary (Name), cell-status (Chips), alles andere ist Nebenwert und trägt sein Label per data-label. */
-@media (max-width: 1023px) {
+   Zellklassen: cell-primary (Name), cell-status (Chips), alles andere ist Nebenwert und trägt sein Label per data-label.
+   Bei großer Schrift auch ab 1024 px (Variante `stacked-lg`, oben). */
+@variant stacked-lg {
   .tbl.stack-lg thead {
     position: absolute;
     width: 1px;
@@ -527,6 +564,10 @@ details[open] > :not(summary) {
   .tbl.stack-lg,
   .tbl.stack-lg tbody {
     display: block;
+  }
+  /* Die Mindestbreite der Tabellenansicht (.dist1024, ab 1024 px) gilt für die gestapelte Liste nicht. */
+  .tbl.stack-lg {
+    min-width: 0;
   }
   .tbl.stack-lg tr {
     display: flex;

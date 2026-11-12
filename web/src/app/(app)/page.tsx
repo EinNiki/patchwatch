@@ -250,7 +250,7 @@ function HostsView() {
           {rows.length === 0 ? (
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
-            <div className="max-hd:overflow-x-auto">
+            <div className="@container/tbl max-hd:overflow-x-auto">
               <table className="tbl stack dist [&_td]:py-1.5 md:[--tbl-min:34.5rem] lg:[--tbl-min:40.5rem] hd:[--tbl-min:58rem]">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>

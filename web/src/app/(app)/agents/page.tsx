@@ -316,7 +316,7 @@ export default function AgentsPage() {
           </div>
         </Empty>
       ) : (
-        <div className="max-hd:overflow-x-auto">
+        <div className="@container/tbl max-hd:overflow-x-auto">
           {/* Reihenfolge: Name, Hostname, Distribution, Zuletzt gemeldet, Zuletzt erreichbar, Aktionen, Agent-Version (grau, schmal).
               Überschüssige Breite geht an die Datenspalten; die Aktionsspalte hat eine feste Breite und sitzt direkt nach „Zuletzt erreichbar“. */}
           <table className="tbl stack-lg dist1024 lg:max-hd:[--col-pad:10px] lg:[--tbl-min:46.5rem] hd:[--tbl-min:61rem]">

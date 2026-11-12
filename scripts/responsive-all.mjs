@@ -16,7 +16,8 @@
 //  3 offene Popover/Dialoge/Menüs vollständig im Viewport
 //  4 unter 768 px: Trefferflächen >= 44x44 (Knöpfe, Links außerhalb von Fließtext, Formularfelder)
 //  5 gleichrangige Knöpfe einer Zeile gleich hoch (±0,5 px)
-//  6 Tabellen ab 1024 px: letzte Spalte endet am rechten Inhaltsrand (±1 px)
+//  6 Tabellen ab 1024 px: letzte Spalte endet am rechten Inhaltsrand (±1 px); gestapelte Tabellen (Kopf nur für Screenreader,
+//    bei großer Schrift): die Einträge enden am rechten Inhaltsrand (±1 px)
 //  9 axe: keine Verstöße der Stufen serious/critical (bei 390 und 1440, hell und dunkel)
 // 10 Layoutsprung: Position der Hauptüberschrift 500 ms nach ihrem Erscheinen unverändert (±0,5 px)
 //
@@ -152,13 +153,18 @@ function inspect({ narrow, wide1024 }) {
       const tr = rectOf(t);
       if (!tr || !main) continue;
       const contentRight = main.getBoundingClientRect().right - 24;
-      const ths = [...t.querySelectorAll("thead th")].filter((h) => h.getBoundingClientRect().width > 0);
-      if (!ths.length) continue;
-      const last = ths[ths.length - 1].getBoundingClientRect().right;
+      const head = [...t.querySelectorAll("thead th")];
+      // Gestapelte Ansicht (bei großer Schrift auch ab 1024 px): der Kopf ist nur für Screenreader da (A3), seine Zellen liegen
+      // in einem 1-px-Ausschnitt und sind keine Spalten. Dann müssen die sichtbaren Einträge (Zeilen) am Rand enden.
+      const stacked = head.length > 0 && head.every((h) => hidden(h));
+      const ths = head.filter((h) => h.getBoundingClientRect().width > 0);
+      const rows = [...t.querySelectorAll("tbody tr")].map((r) => r.getBoundingClientRect()).filter((r) => r.width > 0);
+      if (stacked ? !rows.length : !ths.length) continue;
+      const last = stacked ? Math.max(...rows.map((r) => r.right)) : ths[ths.length - 1].getBoundingClientRect().right;
       // Tabellen in schmalen Spalten (z. B. neben der Host-Details-Leiste) enden am Rand ihrer Spalte, nicht der Seite.
       const col = t.closest("section, div")?.getBoundingClientRect().right ?? contentRight;
       const edge = Math.min(contentRight, col);
-      if (Math.abs(last - edge) > 1) add(6, 3, `Tabelle ${t.querySelector("caption")?.textContent.trim().slice(0, 30) ?? "?"}: letzte Spalte`, `endet bei ${last.toFixed(1)}, Rand ${edge.toFixed(1)}`);
+      if (Math.abs(last - edge) > 1) add(6, 3, `Tabelle ${t.querySelector("caption")?.textContent.trim().slice(0, 30) ?? "?"}: ${stacked ? "gestapelte Einträge" : "letzte Spalte"}`, `endet bei ${last.toFixed(1)}, Rand ${edge.toFixed(1)}`);
     }
   }
   return out;

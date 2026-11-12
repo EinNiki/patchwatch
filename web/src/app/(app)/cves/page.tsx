@@ -466,7 +466,7 @@ function CveView() {
           </Empty>
         ) : (
           <>
-            <div className="updatable max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
+            <div className="updatable @container/tbl max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
               <table className="tbl stack dist md:[--tbl-min:45.5rem] xl:[--tbl-min:52.5rem] wide:[--tbl-min:63.5rem]">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
@@ -561,14 +561,14 @@ const CveRow = memo(function CveRow({
           {c.exploited ? <div className="text-xs font-semibold text-crit">Aktiv ausgenutzt (CISA KEV)</div> : null}
           {c.level ? <div className="text-xs text-fg3 wide:hidden">Level {c.level}/10</div> : null}
         </td>
-        <td className="max-md:order-0 max-md:flex-[1_0_100%]">
-          {c.description ? <span className="line-clamp-2 max-w-[64rem] [contain:inline-size] max-md:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
+        <td className="stacked:order-0 stacked:flex-[1_0_100%]">
+          {c.description ? <span className="line-clamp-2 max-w-[64rem] [contain:inline-size] stacked:[contain:none]">{c.description}</span> : <span className="text-fg3">Noch nicht in den Feeds</span>}
           {c.note ? <div className="text-xs text-accent">Notiz: {c.note}</div> : null}
         </td>
-        <td className="cell-status md:max-w-0 max-md:flex-[1_0_100%]">
+        <td className="cell-status tabular:max-w-0 stacked:flex-[1_0_100%]">
           <Distros c={c} />
         </td>
-        <td data-label="Hosts" className="md:max-w-0">
+        <td data-label="Hosts" className="tabular:max-w-0">
           <HostChips c={c} ids={hostIds} />
         </td>
         <td className="max-wide:hidden">
