@@ -505,6 +505,17 @@ node scripts/responsive-all.mjs ergebnis.md [gruppe,gruppe]
 node scripts/snapshot-diff.mjs ergebnis.md
 ```
 
+Robustheit (`scripts/fuzz-inputs.mjs`, `scripts/load-test.mjs`, nur fetch, Ergebnis in `docs/overnight/robustness.md`):
+
+```sh
+scripts/dev-stack.sh restart-server && node scripts/fuzz-inputs.mjs   # ungültige Eingaben an alle Routen; Exit 1 bei 5xx oder Antwort über 5 s (~7 min wegen des API-Limits)
+# Last: Wegwerf-Server mit PATCHWATCH_TRUST_PROXY=true starten (sonst greift das Limit von 600 Anfragen/min je IP); für 3.000 CVEs je Host
+# den Mock mit `node scripts/mock-feeds.mjs 8190 --demo-load=3000` starten (erzeugte "[Demo-Last]"-CVEs, nur Wegwerf-Stack) und einen Debian-Abruf auslösen
+PATCHWATCH_TRUST_PROXY=true scripts/dev-stack.sh restart-server && node scripts/load-test.mjs   # 50 gleichzeitig x 10 Runden je Route: Median, p95, Maximum, Server-RSS
+```
+
+Beide Skripte verändern nichts Gültiges (der Fuzz schickt nur abzulehnende Werte); danach für den Seed-Zustand `down && up`.
+
 Funktionstest Ende-zu-Ende (`scripts/e2e-functional.mjs`: Anmeldung und Sperre, Passwortwechsel mit Rückgabe, Hosts, Token und
 Check-in, auch mit dem echten Agent-Binary, Watchlist, Filter, Suche, Quellenverwaltung, Abruf-Läufe mit Fehlermodi, Kanäle, WebSocket,
 Profilbild). Er **verändert** Daten (Debian-Quelle wird gelöscht, Passwort kurz geändert): nur im Wegwerf-Stack, danach
