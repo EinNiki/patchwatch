@@ -1252,3 +1252,55 @@ async fn nul_and_oversize_unknown_report_fields_are_400(pool: PgPool) {
         .unwrap();
     assert_eq!(n, 0, "abgelehnte Reports werden nicht gespeichert");
 }
+
+/// Datenbank nicht erreichbar (Pool gegen einen geschlossenen Port): 503 mit deutschem Text, `Retry-After` und
+/// eigenem Code statt 500 "interner Fehler"; nie interne Details. Gilt auch für die Anmeldeprüfung und den Login.
+#[tokio::test]
+async fn database_outage_is_503_without_details() {
+    // Port 1 auf Loopback: Verbindungsaufbau scheitert sofort, der Pool gibt nach `acquire_timeout` auf.
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .acquire_timeout(std::time::Duration::from_millis(300))
+        .connect_lazy("postgres://patchwatch:x@127.0.0.1:1/patchwatch")
+        .unwrap();
+    let app = router(state(pool, &[]));
+    let session = "pw_session=abcdef0123456789";
+    for (method, uri, headers, body) in [
+        (
+            Method::GET,
+            "/api/v1/hosts",
+            vec![("cookie", session)],
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v1/auth/me",
+            vec![("cookie", session)],
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v1/auth/login",
+            vec![],
+            Some(json!({"username": "admin", "password": PASSWORD})),
+        ),
+    ] {
+        let r = call(&app, method, uri, &headers, body).await;
+        assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+        assert_eq!(r.json["code"], "db_unavailable", "{uri}");
+        let msg = r.json["error"].as_str().unwrap();
+        assert!(msg.contains("Datenbank"), "{uri}: {msg}");
+        let lower = msg.to_lowercase();
+        for internal in ["sqlx", "pool", "postgres", "127.0.0.1", "timed out"] {
+            assert!(!lower.contains(internal), "{uri}: interne Details: {msg}");
+        }
+        assert!(
+            r.headers
+                .get(header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .is_some_and(|s| s > 0),
+            "{uri}: Retry-After fehlt"
+        );
+    }
+}
+
