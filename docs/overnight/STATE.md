@@ -112,6 +112,8 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
   responsive-all: alle Exit 0. Im ersten Durchgang war ein Agent-Test rot (EPIPE im Testhelfer, flackernd); behoben,
   fünfmal wiederholt, danach ganze Rust-Suite grün. Web-Build und Browserläufe liefen nach dem letzten Web-Commit.
 - 18:40 UTC: Stack beendet, pw-night-pg entfernt. pw-ui-pg und pw-snap-pg bleiben gestoppt.
+- 18:45 UTC: Der Push wurde erneut von der Rechteprüfung der Umgebung abgelehnt ("Out-of-Place Publication").
+  Auf origin liegt fb0215b; alle späteren Commits liegen nur lokal im Worktree. Kein Umweg versucht.
 
 ## Offene Punkte
 - Alle Phasen sind gelaufen. Offen sind nur Funde: security.md (3 mittel, 18 niedrig), phase5.md (M2, M4, N6
