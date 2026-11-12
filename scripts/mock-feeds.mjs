@@ -1,6 +1,9 @@
 // Lokale Mock-Feeds für den Seed-Stack (nur Node-Standardbibliothek, keine Netzanfragen nach außen).
 //
-//   node scripts/mock-feeds.mjs [Port]          (Standard 8190, oder Umgebung MOCK_FEEDS_PORT; Bindung nur 127.0.0.1)
+//   node scripts/mock-feeds.mjs [Port] [--demo-load=N]   (Standard 8190, oder Umgebung MOCK_FEEDS_PORT; Bindung nur 127.0.0.1)
+//   --demo-load=N (oder MOCK_DEMO_LOAD=N): hängt N erzeugte Last-Demo-CVEs (CVE-2031-NNNNN, Beschreibung "[Demo-Last] …") an das
+//   Debian-Paket linux/trixie an, für scripts/load-test.mjs ("3.000 CVEs je Host"). Rein erzeugt, nicht im Repo; ohne die
+//   Option unverändert. Nur gegen die Wegwerf-Datenbank verwenden (danach scripts/dev-stack.sh down && up).
 //
 // Liefert die Demo-Dateien aus scripts/fixtures/ in der Form, die die Adapter des Servers erwarten
 // (Hinweis: Statuswerte sind erfunden, die CVE-IDs sind echt; siehe README, Abschnitt "Qualitätsprüfung"):
@@ -24,7 +27,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
-const port = Number(process.argv[2] ?? process.env.MOCK_FEEDS_PORT ?? 8190);
+const args = process.argv.slice(2);
+const loadArg = args.find((a) => a.startsWith("--demo-load="));
+const demoLoad = Number((loadArg ?? "").split("=")[1] ?? process.env.MOCK_DEMO_LOAD ?? 0);
+const port = Number(args.find((a) => !a.startsWith("--")) ?? process.env.MOCK_FEEDS_PORT ?? 8190);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error("Ungültiger Port");
   process.exit(2);
@@ -41,7 +47,24 @@ function bzip2(buf) {
   }
 }
 
-const debian = readFileSync(join(here, "debian-tracker-demo.json"));
+let debian = readFileSync(join(here, "debian-tracker-demo.json"));
+if (demoLoad > 0) {
+  if (!Number.isInteger(demoLoad) || demoLoad > 20000) { console.error("--demo-load: ganze Zahl bis 20000"); process.exit(2); }
+  const d = JSON.parse(debian.toString("utf8"));
+  const prio = ["low", "medium", "high"];
+  for (let i = 1; i <= demoLoad; i++) {
+    // Mischung: 60 % in 6.12.20..39 behoben (die Seed-Kernel 6.12.30/6.12.48 sind je nach Wert betroffen oder nicht),
+    // 25 % offen, 15 % behoben erst in einer neueren Version als der installierten.
+    const k = i % 20;
+    const rel = k < 12 ? { status: "resolved", fixed_version: `6.12.${20 + (i % 20)}-1` } : k < 17 ? { status: "open" } : { status: "resolved", fixed_version: `6.12.${55 + (i % 5)}-1` };
+    d.linux[`CVE-2031-${String(i).padStart(5, "0")}`] = {
+      description: `[Demo-Last] Erzeugte Last-Demo-CVE ${i} (nicht echt).`,
+      releases: { trixie: { ...rel, urgency: prio[i % 3], repositories: { trixie: "6.12.57-1", "trixie-security": "6.12.57-1" } } },
+    };
+  }
+  debian = Buffer.from(JSON.stringify(d));
+  console.log(`mock-feeds: ${demoLoad} Last-Demo-CVEs angehängt`);
+}
 const ubuntu = JSON.parse(readFileSync(join(here, "ubuntu-cves-demo.json"), "utf8"));
 // Absteigend nach `updated_at` sortiert, wie die echte API bei sort_by=updated&order=descending.
 ubuntu.cves.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
