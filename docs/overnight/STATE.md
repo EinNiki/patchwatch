@@ -31,15 +31,15 @@ Entscheidungen beim Warten:
 |---|---|---|---|---|---|---|
 | 0 Sicherung und Branch | fertig | 00:00 | 00:01 | - | - | - |
 | Umgebung, Modelltest | fertig | 00:01 | 00:25 | - | - | - |
-| 1 UI-Restarbeiten | offen | | | | | |
-| 2 Qualitätsschranken | offen | | | | | |
-| 3 Responsiv | offen | | | | | |
-| 4 Funktionstests | offen | | | | | |
-| 5 Daten, Zeit, Robustheit | offen | | | | | |
-| 6 Agent und Deployment | offen | | | | | |
-| 7 Sicherheit | offen | | | | | |
-| 8 Aufräumen und Push | offen | | | | | |
-| 9 Bericht | offen | | | | | |
+| 1 UI-Restarbeiten | teilweise: nur am Code geprüft, Tests und Restarbeiten offen (Speicherregel) | 00:20 | 04:12 | 8 | 0 | 8 |
+| 2 Qualitätsschranken | teilweise: fmt, lint, typecheck grün; Rest übersprungen (Speicherregel) | 00:05 | 00:10 | 0 | 0 | 0 |
+| 3 Responsiv | übersprungen (Speicherregel, Browser) | | | | | |
+| 4 Funktionstests | übersprungen (Speicherregel) | | | | | |
+| 5 Daten, Zeit, Robustheit | teilweise: nur Code-Review; Läufe offen | 04:12 | 04:25 | 13 | 0 | 13 |
+| 6 Agent und Deployment | teilweise: nur Dateiprüfung; Builds und Tests offen | 04:11 | 04:15 | 20 | 0 | 20 |
+| 7 Sicherheit | fertig (nur lesend) | 00:05 | 04:20 | 21 | 0 | 21 |
+| 8 Aufräumen und Push | fertig: nur docs/overnight/ gepusht | 04:27 | 04:35 | | | |
+| 9 Bericht | fertig (REPORT.md) | 04:27 | 04:35 | | | |
 
 Phase 0: Tag before-overnight-2026-11-12 auf 8cf3064 angelegt und gepusht. Tag
 design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung).
@@ -72,5 +72,20 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
 | 4 | sonnet | Modelltest | ok |
 | 5 | opus | Modelltest | ok |
 | 6 | haiku | Umgebungsprüfung, Modelltest | ok, Ergebnis oben |
+| 7 | opus | Sicherheit Teil 1 (Avatar, Massenimport, Quellen) | 1 mittel, 6 niedrig; Befund geschrieben, Rückmeldung am Nutzungslimit gescheitert |
+| 8 | opus | Sicherheit Teil 2 (set-token, Läufe, Filter, Header, Web) | 2 mittel, 13 niedrig |
+| 9 | sonnet | Phase 1 am Code | vom Limit unterbrochen, fortgesetzt; 4 Punkte teilweise |
+| 10 | sonnet | Phase 6 Dateiprüfung | 1 hoch, 4 mittel, 9 niedrig, 6 Hinweise |
+| 11 | opus | Phase 5 Code-Review | 4 mittel, 9 niedrig |
+
+## Verlauf
+- 00:19 bis 04:10 UTC: Nutzungslimit erreicht, Lauf stand (STATE.md konnte in dem Moment nicht fortgeschrieben werden).
+- 04:10 und 04:25 UTC: Speicher erneut geprüft, Swap 53 %: schwere Schritte weiter übersprungen.
+- Phase 8: Push trotz nicht ausgeführter Tests, weil der Branch gegenüber dev nur docs/overnight/ enthält (kein Code);
+  fmt, lint, typecheck grün. security.md wird als verlangter Befund mitgepusht (privates Repo).
 
 ## Offene Punkte
+- Wiederaufnahme ("Mach bei der Zustandsdatei weiter"), sobald Speicher frei ist: Phase 1 (Tests, Restarbeiten laut
+  phase1.md), 2 (clippy, Tests, Builds), 3, 4, ausführende Teile von 5 und 6.
+- Alle Funde aus security.md, phase5.md, phase6.md, phase1.md sind offen.
+- Worktree /home/claude/patchwatch-night bleibt für die Wiederaufnahme bestehen.
