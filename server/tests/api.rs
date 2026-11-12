@@ -299,14 +299,45 @@ async fn duplicate_package_names_in_report_are_merged(pool: PgPool) {
             .fetch_all(&pool)
             .await
             .unwrap();
-    // Exactly one row per name; the highest version wins regardless of order.
+    // Exactly one row per name; the LOWEST version wins regardless of order (a vulnerable copy must never vanish).
     assert_eq!(
         pk,
         vec![
             ("bash".to_owned(), "5.2-1".to_owned()),
-            ("libc6".to_owned(), "2.39-0ubuntu8.10".to_owned())
+            ("libc6".to_owned(), "2.39-0ubuntu8.2".to_owned())
         ]
     );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn merging_duplicate_packages_does_not_touch_the_kernel_evaluation(pool: PgPool) {
+    // The running kernel is judged by its own version from the report's kernel block, not by host_packages: two
+    // copies of the same kernel package in the list (here a newer one first) change neither the host's kernel
+    // version nor what is stored for the package list beyond "lowest wins".
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "web2", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    let mut r = report("web2", "6.8.0-31.31", "6.8.0-35.35", 0, 0);
+    r["packages"] = json!([
+        {"name": "linux-image-6.8.0-31-generic", "version": "6.8.0-99.99", "source": "linux-signed", "source_version": "6.8.0-99.99"},
+        {"name": "linux-image-6.8.0-31-generic", "version": "6.8.0-31.31", "source": "linux-signed", "source_version": "6.8.0-31.31"}]);
+    let resp = call(&app, Method::POST, "/api/v1/report", &h, Some(r)).await;
+    assert_eq!(resp.status, StatusCode::NO_CONTENT);
+    let kv: Option<String> = sqlx::query_scalar("SELECT kernel_package_version FROM hosts WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kv.as_deref(), Some("6.8.0-31.31"));
+    let pv: String = sqlx::query_scalar(
+        "SELECT version FROM host_packages WHERE host_id = $1 AND name = 'linux-image-6.8.0-31-generic'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pv, "6.8.0-31.31");
 }
 
 #[sqlx::test(migrations = "./migrations")]
