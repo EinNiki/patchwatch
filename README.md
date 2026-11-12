@@ -505,6 +505,18 @@ node scripts/responsive-all.mjs ergebnis.md [gruppe,gruppe]
 node scripts/snapshot-diff.mjs ergebnis.md
 ```
 
+Funktionstest Ende-zu-Ende (`scripts/e2e-functional.mjs`: Anmeldung und Sperre, Passwortwechsel mit Rückgabe, Hosts, Token und
+Check-in, auch mit dem echten Agent-Binary, Watchlist, Filter, Suche, Quellenverwaltung, Abruf-Läufe mit Fehlermodi, Kanäle, WebSocket,
+Profilbild). Er **verändert** Daten (Debian-Quelle wird gelöscht, Passwort kurz geändert): nur im Wegwerf-Stack, danach
+`scripts/dev-stack.sh down && scripts/dev-stack.sh up`. Für den vollen Umfang den Server mit `PATCHWATCH_SECRET_KEY` (Geheimnisse der
+Kanäle) und `PATCHWATCH_CONFIG=<toml>` mit `[cve] request_timeout_secs = 2, retries = 2, retry_base_delay_ms = 200` (Zeitüberschreitung)
+starten; die Mock-Feeds nehmen den Fehlermodus per `POST /__mode` (`ok`, `fresh`, `304`, `503`, `503ra`, `422`, `hang`). Ergebnis
+und Abdeckung: `docs/overnight/functional.md`.
+
+```sh
+scripts/dev-stack.sh restart-server && node scripts/e2e-functional.mjs      # Exit 1 bei Fehlern
+```
+
 Das Web-UI kommt aus dem vorhandenen Build (`npm --prefix web run build`). Zustand (PID-Dateien, Logs, zufälliges
 Admin-Passwort mit `chmod 600`) liegt außerhalb des Repos in `PW_STACK_DIR`; Ports, Containername und Passwortdatei sind über
 `PW_*`-Variablen einstellbar (Kopf von `dev-stack.sh`). `scripts/mock-feeds.mjs [Port]` (nur Node-Standardbibliothek) liefert

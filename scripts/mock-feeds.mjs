@@ -7,6 +7,9 @@
 //   GET /tracker/data/json                       Debian-Tracker; Last-Modified, 304 bei If-Modified-Since
 //   GET /security/cves.json?limit=&offset=…      Ubuntu-API, paginiert (limit höchstens 20, sonst 422 wie die echte API)
 //   GET /security/cves/<CVE-ID>.json             Ubuntu-Einzelabruf (404 für unbekannte IDs)
+//   POST /__mode {"mode": …}  /  GET /__mode    Fehlermodus für /tracker/data/json (nur Tests, scripts/e2e-functional.mjs):
+//        ok (Standard, 304 bei If-Modified-Since) | fresh (immer 200) | 304 | 503 | 503ra (503 mit Retry-After: 1) | 422 | hang
+//        (antwortet nicht, bis der Client abbricht; zum Prüfen von Zeitüberschreitung und "läuft bereits")
 //   GET /oval/com.ubuntu.<release>.cve.oval.xml.bz2   OVAL je Release (noble, jammy); ETag/Last-Modified, 304
 // Server dazu starten mit:
 //   PATCHWATCH_CVE_DEBIAN_URL=http://127.0.0.1:8190/tracker/data/json  PATCHWATCH_CVE_UBUNTU_URL=http://127.0.0.1:8190
@@ -63,14 +66,36 @@ function notModified(req, etag) {
   return Number.isFinite(ims) && ims >= MODIFIED.getTime();
 }
 
+const MODES = ["ok", "fresh", "304", "503", "503ra", "422", "hang"];
+let mode = "ok";
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const p = url.pathname;
   res.on("finish", () => console.log(`${new Date().toISOString()} ${req.method} ${p}${url.search} -> ${res.statusCode}`));
+  if (p === "/__mode") {
+    if (req.method === "GET") return json(res, 200, { mode });
+    if (req.method !== "POST") return send(res, 405, "nur GET/POST");
+    let raw = "";
+    req.on("data", (c) => { raw += c; if (raw.length > 1024) req.destroy(); });
+    req.on("end", () => {
+      let m;
+      try { m = JSON.parse(raw).mode; } catch { /* leer */ }
+      if (!MODES.includes(m)) return json(res, 400, { error: `mode muss eines von ${MODES.join(", ")} sein` });
+      mode = m;
+      return json(res, 200, { mode });
+    });
+    return;
+  }
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "nur GET");
   if (p === "/healthz") return send(res, 200, "ok");
   if (p === "/tracker/data/json") {
-    if (notModified(req)) return send(res, 304, "", { "last-modified": lastModified });
+    if (mode === "503") return json(res, 503, { error: "Dienst nicht verfügbar" });
+    if (mode === "503ra") return send(res, 503, "{}", { "content-type": "application/json", "retry-after": "1" });
+    if (mode === "422") return json(res, 422, { error: "nicht verarbeitbar" });
+    if (mode === "hang") return; // keine Antwort; der Client bricht per Zeitlimit ab
+    if (mode === "304") return send(res, 304, "", { "last-modified": lastModified });
+    if (mode !== "fresh" && notModified(req)) return send(res, 304, "", { "last-modified": lastModified });
     return send(res, 200, debian, { "content-type": "application/json", "last-modified": lastModified });
   }
   if (p === "/security/cves.json") {
