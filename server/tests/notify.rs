@@ -566,6 +566,12 @@ async fn private_target_needs_exact_allowlist_entry(pool: PgPool) {
             Some(json!({"enabled": true, "config": {"url": url}, "secret": "tok"})),
         )
         .await;
+        if !expect_ok {
+            // Ein Schlüssel geht nie über http:// an einen Host außerhalb der Allowlist: schon das Speichern scheitert.
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "Allowlist {env:?}");
+            assert!(!r.raw.contains("tok\""));
+            continue;
+        }
         assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
         let before = seen.lock().unwrap().len();
         let t = call(
@@ -1162,4 +1168,163 @@ async fn new_channels_validate_and_never_echo_secrets(pool: PgPool) {
     for s in [SECRET, "AAE_", "GEHEIMSLACK"] {
         assert!(!list.raw.contains(s), "Liste enthält {s}");
     }
+}
+
+// ---------- F3: Geheimnis gehört zum gespeicherten Ziel ----------
+
+async fn put_ch(
+    app: &Router,
+    admin: &[(&str, &str)],
+    kind: &str,
+    body: Value,
+) -> (StatusCode, Value, String) {
+    let r = call(
+        app,
+        Method::PUT,
+        &format!("/api/v1/notifications/{kind}"),
+        admin,
+        Some(body),
+    )
+    .await;
+    (r.status, r.json, r.raw)
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn changed_channel_address_discards_the_stored_secret(pool: PgPool) {
+    let st = state(pool.clone(), &[("PATCHWATCH_SECRET_KEY", KEY)]);
+    let app = router(st);
+    let (session, csrf) = login(&app, &pool).await;
+    let admin = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let stored = |kind: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<Vec<u8>>>(
+                "SELECT secret FROM notification_channels WHERE kind = $1",
+            )
+            .bind(kind)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .is_some()
+        }
+    };
+    let gotify = |url: &str| json!({"enabled": true, "config": {"url": url}});
+    let mut first = gotify("https://gotify.example.org");
+    first["secret"] = json!(SECRET);
+    assert_eq!(
+        put_ch(&app, &admin, "gotify", first).await.0,
+        StatusCode::OK
+    );
+
+    // Gleiches Ziel in anderer Schreibweise (Großbuchstaben, Port 443, Pfad): das Geheimnis bleibt.
+    for same in [
+        "https://GOTIFY.Example.org:443",
+        "https://gotify.example.org/sub/path",
+    ] {
+        let (s, j, raw) = put_ch(&app, &admin, "gotify", gotify(same)).await;
+        assert_eq!(s, StatusCode::OK, "{raw}");
+        assert_eq!(j["secret_set"], true, "{same}");
+        assert!(stored("gotify").await);
+    }
+    // Anderer Host oder anderer Port: Geheimnis wird verworfen. Ein aktiver Gotify-Kanal braucht den Schlüssel dann neu.
+    for other in [
+        "https://evil.example.net",
+        "https://gotify.example.org:8443",
+    ] {
+        let (s, _, raw) = put_ch(&app, &admin, "gotify", gotify(other)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{other}: {raw}");
+        assert!(!raw.contains(SECRET));
+        assert!(
+            stored("gotify").await,
+            "abgelehntes Speichern ändert nichts"
+        );
+    }
+    // Ausgeschaltet gespeichert: Adresse neu, Geheimnis weg.
+    let mut off = gotify("https://evil.example.net");
+    off["enabled"] = json!(false);
+    let (s, j, raw) = put_ch(&app, &admin, "gotify", off).await;
+    assert_eq!(s, StatusCode::OK, "{raw}");
+    assert_eq!(j["secret_set"], false);
+    assert!(!stored("gotify").await);
+    assert!(!raw.contains(SECRET));
+    // Mit neuem Schlüssel wieder aktiv.
+    let mut again = gotify("https://evil.example.net");
+    again["secret"] = json!("NEUER-SCHLUESSEL");
+    assert_eq!(
+        put_ch(&app, &admin, "gotify", again).await.0,
+        StatusCode::OK
+    );
+    assert!(stored("gotify").await);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn channel_secret_is_never_accepted_over_plain_http_unless_allowlisted(pool: PgPool) {
+    let st = state(
+        pool.clone(),
+        &[
+            ("PATCHWATCH_SECRET_KEY", KEY),
+            ("PATCHWATCH_NOTIFY_ALLOWED_HOSTS", "gotify.lan"),
+        ],
+    );
+    let app = router(st);
+    let (session, csrf) = login(&app, &pool).await;
+    let admin = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let body = |url: &str| json!({"enabled": true, "config": {"url": url}, "secret": SECRET});
+    let (s, _, raw) = put_ch(&app, &admin, "gotify", body("http://gotify.example.org")).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{raw}");
+    assert!(!raw.contains(SECRET));
+    // Ausdrücklich erlaubter interner Host: wie bisher möglich.
+    let (s, _, raw) = put_ch(&app, &admin, "gotify", body("http://gotify.lan:8080")).await;
+    assert_eq!(s, StatusCode::OK, "{raw}");
+    // Von dort auf einen anderen Host: Geheimnis wird verworfen, nicht mitgenommen.
+    let off = json!({"enabled": false, "config": {"url": "https://other.example.org"}});
+    let (_, j, _) = put_ch(&app, &admin, "gotify", off).await;
+    assert_eq!(j["secret_set"], false);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn changed_smtp_and_webhook_targets_discard_their_secrets(pool: PgPool) {
+    let st = state(pool.clone(), &[("PATCHWATCH_SECRET_KEY", KEY)]);
+    let app = router(st);
+    let (session, csrf) = login(&app, &pool).await;
+    let admin = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let smtp = |host: &str, port: &str| {
+        json!({"enabled": true, "config": {"host": host, "port": port, "security": "starttls",
+            "username": "u", "from": "a@example.org", "to": "b@example.org"}})
+    };
+    let mut first = smtp("mail.example.org", "587");
+    first["secret"] = json!(SECRET);
+    assert_eq!(put_ch(&app, &admin, "smtp", first).await.0, StatusCode::OK);
+    let (_, j, _) = put_ch(&app, &admin, "smtp", smtp("MAIL.example.org", "587")).await;
+    assert_eq!(j["secret_set"], true);
+    for (h, p) in [("mail.evil.example", "587"), ("mail.example.org", "465")] {
+        let (_, j, raw) = put_ch(&app, &admin, "smtp", smtp(h, p)).await;
+        assert_eq!(j["secret_set"], false, "{h}:{p}");
+        assert!(!raw.contains(SECRET));
+        // Neu setzen für den nächsten Durchlauf.
+        let mut again = smtp(h, p);
+        again["secret"] = json!(SECRET);
+        assert_eq!(put_ch(&app, &admin, "smtp", again).await.0, StatusCode::OK);
+    }
+    // Webhook mit Bearer-Token.
+    let hook = |url: &str| json!({"enabled": true, "config": {"url": url}});
+    let mut first = hook("https://hook.example.org/a");
+    first["secret"] = json!(SECRET);
+    assert_eq!(
+        put_ch(&app, &admin, "webhook", first).await.0,
+        StatusCode::OK
+    );
+    let (_, j, _) = put_ch(&app, &admin, "webhook", hook("https://hook.example.org/b")).await;
+    assert_eq!(j["secret_set"], true);
+    let (_, j, _) = put_ch(&app, &admin, "webhook", hook("https://other.example.org/a")).await;
+    assert_eq!(j["secret_set"], false);
 }

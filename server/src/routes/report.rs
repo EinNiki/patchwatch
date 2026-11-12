@@ -433,7 +433,10 @@ mod merge_tests {
     fn three_entries_keep_the_lowest_and_other_names_stay() {
         let v = [p("a", "3.0"), p("b", "1.0"), p("a", "1.0"), p("a", "2.0")];
         let m = merged(&v);
-        assert_eq!(m, vec![("a".into(), "1.0".into()), ("b".into(), "1.0".into())]);
+        assert_eq!(
+            m,
+            vec![("a".into(), "1.0".into()), ("b".into(), "1.0".into())]
+        );
         let mut r: Vec<PackageIn> = v.iter().cloned().rev().collect();
         assert_eq!(merged(&r), m);
         r.rotate_left(1);
@@ -465,7 +468,9 @@ mod merge_tests {
         a.source = Some("src-b".into());
         let mut b = p("x", "1.0");
         b.source = Some("src-a".into());
-        let m1 = merge_duplicate_packages(&[a.clone(), b.clone()])[0].source.clone();
+        let m1 = merge_duplicate_packages(&[a.clone(), b.clone()])[0]
+            .source
+            .clone();
         let m2 = merge_duplicate_packages(&[b, a])[0].source.clone();
         assert_eq!(m1, m2);
     }

@@ -563,6 +563,9 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
     void save(body);
   }
 
+  // Neue Adresse: der gespeicherte Schlüssel wird vom Server entfernt (er gilt nur für die Adresse, für die er gespeichert wurde).
+  const addressChanged = Boolean(feed?.secret_set) && url !== null && url.trim() !== (feed?.base_url ?? "");
+
   return (
     <Dialog open={feed !== null} title={`Quelle „${feed?.label ?? ""}“ bearbeiten`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-3">
@@ -581,9 +584,10 @@ function EditDialog({ feed, onClose, onDone }: { feed: Feed | null; onClose: () 
         ) : null}
         {feed?.takes_secret ? (
           <>
-            <Field label={feed.secret_set ? "API-Schlüssel ersetzen (der alte wird nie angezeigt)" : "API-Schlüssel (wird nur geschrieben)"}>
+            <Field label={addressChanged ? "API-Schlüssel (neu eingeben)" : feed.secret_set ? "API-Schlüssel ersetzen (der alte wird nie angezeigt)" : "API-Schlüssel (wird nur geschrieben)"}>
               <TextInput type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} maxLength={512} />
             </Field>
+            {addressChanged ? <p className="text-xs text-warn">Mit einer neuen Adresse wird der gespeicherte Schlüssel entfernt. Bitte neu eingeben.</p> : null}
             {feed.secret_set ? (
               <div>
                 <Button className={BTN} variant="danger" onClick={() => void save({ clear_secret: true })} disabled={busy}>

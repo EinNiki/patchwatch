@@ -125,6 +125,10 @@ function zones(): string[] {
   }
 }
 
+/** Felder, die bestimmen, wohin das Geheimnis gesendet wird (der Server verwirft es bei Änderung, siehe notify::secret_target). */
+const ADDRESS_KEYS: Partial<Record<ChannelKind, string[]>> = { ntfy: ["url"], gotify: ["url"], webhook: ["url"], matrix: ["homeserver"], smtp: ["host", "port"] };
+const ADDRESS_HINT = "Mit einer neuen Adresse wird der gespeicherte Schlüssel entfernt. Bitte neu eingeben.";
+
 export default function ChannelPage({ params }: { params: Promise<{ kind: string }> }) {
   const { kind } = use(params);
   if (!isChannelKind(kind)) return <ErrorNote message="Unbekannter Kanal." />;
@@ -155,7 +159,10 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
   const zoneList = useMemo(() => zones(), []);
 
   const label = channelLabel(kind);
-  const needsSecret = spec.secret?.required === true && !ch.secret_set && secret === "";
+  // Neue Adresse: der gespeicherte Schlüssel geht nicht mit, er muss neu eingegeben werden.
+  const addressChanged =
+    ch.secret_set && spec.secret !== null && (ADDRESS_KEYS[kind] ?? []).some((k) => (config[k] ?? "").trim() !== initialValue(spec.config.find((f) => f.key === k)!, ch.config[k]).trim());
+  const needsSecret = spec.secret?.required === true && (!ch.secret_set || addressChanged) && secret === "";
   const keyMissing = spec.secret !== null && !secretStorage;
   const dirty =
     enabled !== ch.enabled ||
@@ -274,7 +281,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
             ))}
             {spec.secret ? (
               <div>
-                {ch.secret_set && !replacing ? (
+                {ch.secret_set && !replacing && !addressChanged ? (
                   <>
                     <p className="mb-1 text-xs font-semibold text-fg2">{spec.secret.label}</p>
                     <div className="flex flex-wrap items-center gap-2">
@@ -294,7 +301,7 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                   </>
                 ) : (
                   <>
-                    <Field label={`${spec.secret.label}${ch.secret_set ? " (ersetzt den gespeicherten)" : spec.secret.required ? "" : " (optional)"}`}>
+                    <Field label={`${spec.secret.label}${addressChanged ? " (neu eingeben)" : ch.secret_set ? " (ersetzt den gespeicherten)" : spec.secret.required ? "" : " (optional)"}`}>
                       <TextInput
                         type="password"
                         value={secret}
@@ -306,7 +313,8 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
                         className="font-mono"
                       />
                     </Field>
-                    {ch.secret_set ? (
+                    {addressChanged ? <p className="mt-1 text-xs text-warn">{ADDRESS_HINT}</p> : null}
+                    {ch.secret_set && !addressChanged ? (
                       <Button
                         className="mt-2"
                         onClick={() => {

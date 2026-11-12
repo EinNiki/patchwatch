@@ -4,6 +4,7 @@
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{Admin, CsrfAdmin};
 use crate::notify::channels::{self, KINDS};
+use crate::notify::secret_target;
 use crate::notify::store::{self, Effective, Update};
 use crate::notify::{events, messages};
 use crate::state::AppState;
@@ -166,8 +167,22 @@ pub async fn put(
     if secret.is_some() && body.clear_secret {
         return Err(bad("secret und clear_secret schließen sich aus".into()));
     }
+    // Gemeinsame Regel (notify::secret_target): ändern sich Adresse, Host oder Port, wird das gespeicherte Geheimnis
+    // verworfen und muss neu eingegeben werden (ein altes Geheimnis geht nie an ein anderes Ziel).
+    let drop_stored = secret.is_none()
+        && existing.secret.is_some()
+        && secret_target::channel_drops_secret(&kind, &existing.config, &config);
+    let clear_secret = body.clear_secret || drop_stored;
     // Ein nur in der Umgebung vorhandenes Geheimnis (ntfy-Token) wird nicht in die DB übernommen.
-    let has_secret = secret.is_some() || (!body.clear_secret && existing.secret.is_some());
+    let has_secret = secret.is_some() || (!clear_secret && existing.secret.is_some());
+    if has_secret {
+        let target = secret_target::channel_target(&kind, &config);
+        if let Some(m) =
+            secret_target::cleartext_problem(target.as_ref(), &st.cfg.notify_allowed_hosts)
+        {
+            return Err(bad(m.into()));
+        }
+    }
     let any_config = config.as_object().is_some_and(|o| !o.is_empty());
     if body.enabled || any_config {
         channels::validate_config(&kind, &config, has_secret || !body.enabled).map_err(bad)?;
@@ -222,7 +237,7 @@ pub async fn put(
             enabled: body.enabled,
             config,
             secret,
-            clear_secret: body.clear_secret,
+            clear_secret,
             events,
             summary_time,
             timezone,

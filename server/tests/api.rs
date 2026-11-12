@@ -324,11 +324,12 @@ async fn merging_duplicate_packages_does_not_touch_the_kernel_evaluation(pool: P
         {"name": "linux-image-6.8.0-31-generic", "version": "6.8.0-31.31", "source": "linux-signed", "source_version": "6.8.0-31.31"}]);
     let resp = call(&app, Method::POST, "/api/v1/report", &h, Some(r)).await;
     assert_eq!(resp.status, StatusCode::NO_CONTENT);
-    let kv: Option<String> = sqlx::query_scalar("SELECT kernel_package_version FROM hosts WHERE id = $1")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let kv: Option<String> =
+        sqlx::query_scalar("SELECT kernel_package_version FROM hosts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(kv.as_deref(), Some("6.8.0-31.31"));
     let pv: String = sqlx::query_scalar(
         "SELECT version FROM host_packages WHERE host_id = $1 AND name = 'linux-image-6.8.0-31-generic'",

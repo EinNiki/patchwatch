@@ -2,6 +2,7 @@ use crate::cve::runs::{self, Gate, Start, Trigger};
 use crate::cve::{refresh, sources};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{Admin, CsrfAdmin};
+use crate::notify::secret_target::{self, Target};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
@@ -462,6 +463,15 @@ fn check_secret(kind: &str, secret: &str) -> ApiResult<()> {
     Ok(())
 }
 
+/// Ein Schlüssel geht nie über http:// (außer der Host steht in der Allowlist des Betreibers).
+fn check_cleartext(st: &AppState, base_url: Option<&str>) -> ApiResult<()> {
+    let target = base_url.and_then(Target::from_url);
+    match secret_target::cleartext_problem(target.as_ref(), &st.cfg.notify_allowed_hosts) {
+        Some(m) => Err(ApiError::BadRequest(m.into())),
+        None => Ok(()),
+    }
+}
+
 /// Anzeigename: 1 bis 40 Zeichen, keine Steuerzeichen. Die Anzeige im UI escaped den Text (React), der Server speichert ihn unverändert.
 fn check_label(raw: &str) -> ApiResult<String> {
     let label = raw.trim();
@@ -573,6 +583,7 @@ pub async fn create(
     let secret = match &b.secret {
         Some(sec) => {
             check_secret(&b.kind, sec)?;
+            check_cleartext(&st, base_url)?;
             Some(
                 sources::encrypt_secret(&st, &id, sec)
                     .await
@@ -605,14 +616,26 @@ pub async fn update(
     Path(id): Path<String>,
     Json(b): Json<UpdateBody>,
 ) -> ApiResult<StatusCode> {
-    let kind: Option<String> =
-        sqlx::query_scalar("SELECT kind FROM cve_sources WHERE id = $1 AND deleted_at IS NULL")
-            .bind(&id)
-            .fetch_optional(&st.pool)
-            .await?;
-    let Some(kind) = kind else {
+    let old: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT kind, base_url FROM cve_sources WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(&id)
+    .fetch_optional(&st.pool)
+    .await?;
+    let Some((kind, old_base)) = old else {
         return Err(ApiError::NotFound);
     };
+    // Die neue Basis-Adresse nach diesem Update (None = Standardadresse des Typs).
+    let new_base: Option<String> = if b.clear_base_url == Some(true) {
+        None
+    } else if let Some(u) = &b.base_url {
+        Some(u.trim().to_owned())
+    } else {
+        old_base.clone()
+    };
+    // Gemeinsame Regel (notify::secret_target): ändert sich das Ziel, wird das gespeicherte Geheimnis verworfen.
+    let drop_secret =
+        secret_target::source_drops_secret(&kind, old_base.as_deref(), new_base.as_deref());
     let label = match &b.label {
         Some(l) => Some(check_label(l)?),
         None => None,
@@ -627,6 +650,7 @@ pub async fn update(
     let secret = match &b.secret {
         Some(sec) => {
             check_secret(&kind, sec)?;
+            check_cleartext(&st, new_base.as_deref())?;
             Some(
                 sources::encrypt_secret(&st, &id, sec)
                     .await
@@ -688,7 +712,9 @@ pub async fn update(
             .await
             .map_err(map_unique)?;
     }
-    if b.clear_secret == Some(true) {
+    if b.clear_secret == Some(true)
+        || (drop_secret && secret.is_none() && sources::takes_secret(&kind))
+    {
         sqlx::query("UPDATE cve_sources SET secret = NULL, updated_at = now() WHERE id = $1")
             .bind(&id)
             .execute(&mut *tx)

@@ -113,6 +113,32 @@ curl -b jar -H "x-csrf-token: <csrf_token aus der Antwort>" -H 'content-type: ap
      -d '{"name":"web1"}' https://patchwatch.example.org/api/v1/hosts
 ```
 
+### Aus dem Quellcode starten
+
+`docker-compose.yml` enthält nur `image:`-Zeilen (kein `build:`) und zieht fertige Images aus GHCR
+(`ghcr.io/einniki/patchwatch-server` und `…-web`, gebaut von `.github/workflows/images.yml` und `release.yml`). Es gibt
+keine zweite Compose-Datei für Quellcode-Builds. Um den Stand dieses Checkouts zu betreiben, wird lokal mit den
+Dockerfiles gebaut (Build-Kontext ist das Repo-Root) und mit **genau dem Namen und Tag** versehen, den die Compose-Datei
+verwendet; die Compose-Datei bleibt unverändert:
+
+```sh
+# Server (Rust, ca. 3 Minuten beim ersten Mal) und Web-Oberfläche bauen
+docker build -f server/Dockerfile -t ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest} .
+docker build -f web/Dockerfile    -t ghcr.io/einniki/patchwatch-web:${PATCHWATCH_VERSION:-latest} .
+
+# Neu starten, ohne die lokalen Images durch GHCR-Images zu ersetzen (--pull never); Postgres und seine Daten bleiben unberührt
+docker compose up -d --no-deps --pull never server web
+
+# Prüfen
+docker compose ps                    # server und web "healthy"
+docker compose logs --tail 50 server # Migrationen, "listening"; beim ersten Start das einmalige Admin-Passwort
+docker compose logs --tail 20 web
+```
+
+Nur der Server geändert (z. B. ein Serverfix)? Dann reichen der erste `docker build` und
+`docker compose up -d --no-deps --pull never server`. `docker compose pull` (oder `up` ohne `--pull never` mit fehlendem
+Image) holt wieder das GHCR-Image und überschreibt den lokal gebauten Tag.
+
 ### Agent-Token ändern und prüfen
 
 Der Token steht nie in einem Befehlsargument (sichtbar in `ps` und der Shell-History); `--token <wert>` wird abgelehnt.
@@ -164,6 +190,18 @@ setzen, wenn ein vertrauenswürdiger Proxy davorsteht und den echten Client in `
 Die Feeds der festen Standardquellen (Ubuntu, Debian, OSV, NVD, KEV) und OIDC laufen über den allgemeinen Client und
 folgen den Proxy-Variablen; deren Ziele kommen nicht aus Benutzereingaben. Eine eigene, ebenfalls geprüfte
 Proxy-Einstellung gibt es nicht; sie wäre nur mit Prüfung der Proxy-Adresse selbst sinnvoll.
+
+**Gespeicherte Schlüssel gehören zu ihrer Adresse.** Schlüssel und Adresse einer Quelle (NVD) oder eines Kanals (Gotify, ntfy,
+Webhook mit Bearer-Token, Matrix, SMTP) werden getrennt gespeichert. Ändert ein Admin Adresse, Host oder Port, wird der
+gespeicherte Schlüssel **verworfen** und muss neu eingegeben werden (die Oberfläche weist darauf hin: „Mit einer neuen
+Adresse wird der gespeicherte Schlüssel entfernt. Bitte neu eingeben.“; ein Kanal, der einen Schlüssel braucht, lässt sich
+dann nur mit neuem Schlüssel speichern). So lässt sich ein Schlüssel nicht durch bloßes Umstellen der Adresse an einen
+fremden Server schicken. Gleiches Ziel in anderer Schreibweise (Groß-/Kleinschreibung des Hosts, `:443`, anderer Pfad)
+behält den Schlüssel; ein anderer Host oder Port nicht. Einzige Ausnahme: Die neue Adresse ist exakt der offizielle Host
+des Typs (NVD: `services.nvd.nist.gov`, ntfy: `ntfy.sh`) per `https://`. Ein Schlüssel wird nie über `http://` gespeichert oder
+gesendet, außer der Host steht ausdrücklich in `PATCHWATCH_NOTIFY_ALLOWED_HOSTS`. Weiterleitungen werden nie befolgt.
+Schlüssel erscheinen nie in API-Antworten, Logs oder Fehlermeldungen. Die Regel steht an einer Stelle
+(`server/src/notify/secret_target.rs`) und gilt für CVE-Quellen und alle Kanäle.
 
 ### Profilbild
 
@@ -283,6 +321,15 @@ dieselbe Regel wie oben (Vergleich des laufenden Kernels mit der Fix-Version, `e
 unter der Fix-Version liegt, ist **verwundbar**, auch wenn die Security-Suite den Fix schon enthält; die Host-Ansicht
 zeigt dann „Fix verfügbar über Security-Updates“, bis der Host die Version installiert hat. Ob ein Host das Security-Archiv
 aktiviert hat, ist nicht bekannt.
+
+**Doppelte Paketnamen im Bericht (Multiarch).** Meldet ein Host denselben Paketnamen mehrfach (z. B. `libc6:amd64` und
+`libc6:i386` ohne Architekturangabe im Bericht), bleibt **die niedrigere Version** (Debian-Regeln aus dem Crate
+`debversion`, nicht Textvergleich: `1:2.0` > `2.0`, `1.0~rc1` < `1.0`). Eine verwundbare Version verschwindet so nie hinter einer
+gefixten; die Reihenfolge im Bericht spielt keine Rolle, bei Gleichstand entscheidet ein fester Vergleich der Quellfelder.
+Eine nicht lesbare (oder leere) Version wird nie von einer lesbaren verdeckt; sie bleibt stehen.
+**Grenze:** Der Bericht enthält keine Architektur und der Schlüssel der Tabelle `host_packages` ist (Host, Name); ohne
+Migration lassen sich beide Architekturen daher nicht getrennt speichern. Der Kernel wird nicht über diese Tabelle bewertet:
+der laufende Kernel kommt aus dem `kernel`-Block des Berichts und wird mit seiner eigenen Version geprüft (getestet).
 
 Grün (kein offener CVE-Befund) zeigt ein Host nur, wenn alle zuständigen Quellen nutzbar sind (siehe nächster
 Abschnitt); sonst „CVE-Lage unbekannt“ mit Begründung.

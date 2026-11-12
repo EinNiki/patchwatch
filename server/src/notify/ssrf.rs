@@ -164,7 +164,7 @@ pub struct Target {
 }
 
 /// Exakter Vergleich des URL-Hosts mit der Allowlist (Kleinschreibung, IPv6 ohne Klammern).
-fn host_allowed(host: &str, allowed_hosts: &[String]) -> bool {
+pub fn host_allowed(host: &str, allowed_hosts: &[String]) -> bool {
     let h = host.trim_matches(['[', ']']).to_ascii_lowercase();
     allowed_hosts
         .iter()
