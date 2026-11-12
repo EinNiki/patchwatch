@@ -708,3 +708,29 @@ async fn low_nvd_key_header_is_not_sent_after_a_redirect() {
     );
     assert!(seen.lock().unwrap().is_empty(), "Redirect wurde gefolgt");
 }
+
+/// Zwei Server starten gleichzeitig gegen dieselbe leere Datenbank: genau einer legt den Admin an und zeigt ein
+/// Start-Passwort; der andere meldet "schon vorhanden". Vorher gaben beide ein Passwort aus, gültig war nur das des
+/// zuletzt Schreibenden.
+#[sqlx::test(migrations = "./migrations")]
+async fn concurrent_first_start_announces_exactly_one_valid_password(pool: PgPool) {
+    let (a, b) = tokio::join!(
+        admin::bootstrap_admin(&pool, None),
+        admin::bootstrap_admin(&pool, None)
+    );
+    let results = [a.unwrap(), b.unwrap()];
+    let passwords: Vec<&String> = results
+        .iter()
+        .filter_map(|r| match r {
+            Bootstrap::Random(pw) => Some(pw),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(passwords.len(), 1, "genau ein Start-Passwort erwartet");
+    assert!(results.contains(&Bootstrap::Existing));
+    let hash: String = sqlx::query_scalar("SELECT password_hash FROM admin_users")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(security::verify_password(&hash, passwords[0]));
+}
