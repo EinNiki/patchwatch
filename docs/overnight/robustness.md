@@ -79,3 +79,59 @@ Vor jedem Build `free -m` (4,1 GB verfügbar) und `df -h` (20 GB frei, über der
 
 Beide Builds liefen ohne Fehler, kein Fix nötig. `docker inspect` zeigt `User=10001`, `docker run --rm --entrypoint id` bestätigt
 Nicht-root (uid 10001). Kein `compose up`. Die Test-Images wurden mit `docker rmi` wieder entfernt, kein prune.
+
+## Migrationen
+
+Gegen die zweite Wegwerf-Datenbank `pw-night-pg2` (127.0.0.1:55441), Server :8092, eigener Mock :8191. Für den Test mit zwei
+gleichzeitigen Servern lief der zweite kurz auf 127.0.0.1:8192 (eigener 81xx-Bereich; 8092 ist mit dem ersten belegt). Alles danach
+entfernt.
+
+| Fall | Ergebnis |
+| --- | --- |
+| Leere Datenbank, erster Start | 20 Migrationen (0001–0020) in Reihenfolge (`installed_on` sortiert wie `version`), alle `success`, zusammen 0,2 s; `/readyz` nach 2 s, ein Admin |
+| Zweiter Start | No-op: Prüfsummen und `installed_on` unverändert (Hash über alle Zeilen gleich), keine Fehler im Log, weiter ein Admin |
+| Start mit Seed-Daten (7 Hosts, 11 CVEs, 57 Host-CVE-Zeilen, nach `dev-seed.py` und Abruf) | Zahlen und Migrationen unverändert, keine Fehler |
+| Zwei Server gleichzeitig gegen dieselbe leere Datenbank | Migrationen genau einmal (Advisory Lock), eine Admin-Zeile, keine Fehler. **Aber** beide gaben ein Start-Passwort aus, gültig war nur das zweite (Login 401/200). Behoben in `3d02559` (Anlegen ohne Überschreiben); danach gibt nur ein Prozess ein Passwort aus (Login 200), der andere keines |
+| Datenbank startet 20 s nach dem Server (N5) | **Bestätigt:** Exit 1 nach 5,0 s („pool timed out while waiting for an open connection“). **Behoben** in `a4befe2`: Wiederholung mit Backoff 1 s bis 5 s, höchstens 60 s, jeder Versuch geloggt; im Nachtest 3 Versuche, bereit nach 22,3 s. Andere Fehler (falsches Passwort, ungültige Adresse) brechen weiter sofort ab; nach 60 s endet der Server wie vorher (Compose `restart` fängt das ab) |
+| Absturz mit hängendem Lauf | Mock `POST /__mode {"mode":"hang"}`, Abruf im Hintergrund: Debian-Lauf `running`/`connect`. Server mit SIGKILL beendet, neu gestartet: Lauf `interrupted` („Der Lauf wurde unterbrochen …“), neuer Abruf sofort möglich (200, Debian `not_modified`, Ubuntu `updated`) |
+| Job „in Arbeit“ eines beendeten Prozesses | Nachgestellt (Job mit `locked_at = now()`, `attempts = 1`, als hätte ihn der getötete Prozess beansprucht): nach Ablauf der Lease von 5 min erledigt (gesperrt 16:23:06, erledigt 16:28:20, `attempts` 2) |
+
+N6 (zwei Server stören sich bei Feed-Läufen: der zweite markiert die laufenden des ersten als unterbrochen) ist **nicht geprüft** und
+bleibt offen; das Design setzt weiter genau einen Server je Datenbank voraus.
+
+## Ausfall
+
+`scripts/e2e-outage.mjs` gegen den Seed-Stack (:8091, :3300): `pw-night-pg` 30 s gestoppt (`docker stop`/`docker start`, nur dieser
+Container), ein Playwright-Lauf. Vor den Fixes 10 FAIL (frühe Fassung des Skripts, ohne die Render-Fehler-Prüfung), mit neuem
+Server und altem Web 9 FAIL (Render-Fehler, UI, Umleitung), nach allen Fixes **27 von 27 OK**.
+
+| Hypothese | Befund vorher | Ergebnis |
+| --- | --- | --- |
+| N2: API im Ausfall 500 statt 503 | `GET /hosts` 500 „interner Fehler“ nach 5,0 s, Login 500, `/readyz` 503 | **Behoben** in `fa6a75a`: 503 „Die Datenbank ist gerade nicht erreichbar. Bitte in einigen Sekunden erneut versuchen.“, `code: db_unavailable`, `Retry-After: 5`, auch Login und Anmeldeprüfung; keine internen Details; Rust-Test `database_outage_is_503_without_details` (vorher rot: 500) |
+| N3: jeder Fehler von `/auth/me` führt zur Anmeldung | Neuladen im Ausfall landete auf `/login` | **Behoben** in `3dda8ab`: nur 401 leitet um, sonst Fehlerseite „Anmeldung kann gerade nicht geprüft werden“ mit „Erneut versuchen“; bleibt im Ausfall im Fehlerzustand, lädt nach der Erholung die Host-Liste ohne neue Anmeldung; Test `web/tests/session.test.mts` |
+| N4: keine `error.tsx`/`global-error.tsx` | Render-Fehler (nachgestellte unerwartete API-Antwort) ergab die englische Next-Seite „This page couldn’t load“ | **Behoben** in `1ad84bc`: Fehler einer Seite (CVE-Liste) im App-Rahmen mit Navigation, Fehler im Rahmen (Host-Liste der Seitenleiste) als ganze Seite, beide deutsch mit „Erneut versuchen“ |
+
+Erholung ohne Neustart (gleiche PID): `/readyz` 200 0,5 bis 0,6 s nach `docker start`, die alte Sitzung gilt, 7 Hosts und 9 CVEs vorher
+wie nachher, Live-Anzeige wieder „Live“. LISTEN/NOTIFY: eine Report-Anforderung kommt vor und nach dem Ausfall per WebSocket an; der
+WebSocket selbst blieb offen (er braucht keine Datenbank), nach der Neuverbindung des Live-Listeners kam `resync`. Log während 30 s
+Ausfall: 4 Warnungen des Live-Listeners, 3 fehlgeschlagene Worker-Durchläufe, die 503 je eine Zeile (tower-http loggt 5xx als ERROR),
+keine Flut, CPU danach 0 %.
+
+Worker (gegen `pw-night-pg2`, Job mit `pg_notify`): vor dem Ausfall nach 76 ms erledigt, danach nach 351 ms und 80 ms, also über
+LISTEN und nicht erst über die 15-s-Abfrage. `pg_terminate_backend` auf beide LISTEN-Verbindungen (offene Frage „ECONNRESET“ aus
+Phase 5): beide verbinden neu, Jobs nach 72 und 99 ms, keine Schleife, CPU 0 %.
+
+M4 (Hintergrund-Tasks nach Fehlstart): Die Erholung **im Betrieb** ist bestätigt (Worker, Live-Listener). Ein Fehlstart des Listeners
+direkt nach den Migrationen und Panics in den Hintergrund-Tasks wurden **nicht nachgestellt**; M4 bleibt offen.
+Hinweis: Im Ausfall wartet jede Anfrage bis zum `acquire_timeout` (5 s), bevor 503 kommt; nicht geändert.
+
+## Zeit
+
+| Prüfung | Test | Ergebnis |
+| --- | --- | --- |
+| Tageszusammenfassung am 29.03. und 25.10.2026 (Europe/Berlin), 08:00 und 02:30 | `worker::tests::daily_summary_once_on_*` (Minuten-Scheduler über den Kalendertag simuliert) | In Ordnung: je Tag genau ein Schlüssel; 02:30 im März um 03:00 (01:00 UTC), im Oktober beim ersten Vorkommen (00:30 UTC). Verhalten unverändert, nur als `daily_summary_key` herausgelöst (`e8c955c`) |
+| N7: tägliche Report-Anforderung am Umstellungstag | `schedule::tests::daily_fires_after_nonexistent_dst_time` (vorher rot: letzter Lauf blieb der 28.03.) | **Bestätigt, behoben** in `eae2a7f`: Uhrzeit in der Lücke löst zum ersten gültigen Zeitpunkt danach aus (03:00), genau einmal; Oktober einmal beim ersten Vorkommen (`daily_runs_once_on_repeated_dst_hour`) |
+| Relative Zeit über den Wechsel | `web/tests/format.test.mts` (`0c6bd98`) | In Ordnung: „vor n Tagen“ zählt Berliner Kalendertage (26 h am 25-Stunden-Tag = „vorgestern“, 24,5 h am selben Tag = „heute“) |
+| Stale-Grenze 26 h | `status::tests::stale_boundary_is_strict` | In Ordnung: genau 26 h nicht stale, 26 h + 1 s stale; über den Oktoberwechsel zählt die echte Zeitspanne. SQL in `mark_stale_hosts` ist ebenfalls strikt (`<`, am Code) |
+| Agent-Uhr eine Stunde falsch | `api.rs::wrong_agent_clock_does_not_matter` (+1 h, −1 h, −27 h) | In Ordnung: „Zuletzt gemeldet“ ist die Serverzeit beim Empfang, Host nicht stale |
+| N8: Bootzeit wandert | `format.test.mts` „Bootzeit nach Neustart …“ | **Bestätigt (Mechanismus), nicht behoben:** die Bootzeit liegt je Report um die Zeit zwischen Lesen der Uptime und Empfang zu spät, nicht kumulativ; die Minutenanzeige springt höchstens an einer Minutengrenze um eine Minute, nach einem Neustart gilt sofort der neue Wert. Mit echtem Agent nicht gemessen |

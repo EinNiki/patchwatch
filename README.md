@@ -516,6 +516,18 @@ PATCHWATCH_TRUST_PROXY=true scripts/dev-stack.sh restart-server && node scripts/
 
 Beide Skripte verändern nichts Gültiges (der Fuzz schickt nur abzulehnende Werte); danach für den Seed-Zustand `down && up`.
 
+Ausfall (`scripts/e2e-outage.mjs`, ein Browser): stoppt **nur** den in `PW_PG_CONTAINER` genannten Container (muss mit `pw-night-`
+beginnen) für `PW_OUTAGE_SECS` (30) Sekunden und startet ihn wieder, auch bei Fehlern. Prüft 503 mit deutschem Text und `Retry-After`,
+Fehlerzustand im UI ohne Umleitung zur Anmeldung, die Fehlerseiten bei Render-Fehlern, Erholung ohne Neustart (gleiche PID), gleiche
+Hosts-/CVE-Zahlen, Live-Anzeige und LISTEN/NOTIFY danach. Fordert für zwei Hosts einen Report an, sonst keine Änderung.
+
+```sh
+scripts/dev-stack.sh restart-server && PW_PG_CONTAINER=pw-night-pg PW_SERVER_PIDFILE=$PW_STACK_DIR/server.pid node scripts/e2e-outage.mjs   # Exit 1 bei Fehlern
+```
+
+Ist die Datenbank beim Start des Servers noch nicht erreichbar, versucht er es bis zu 60 s lang erneut (Backoff 1 s bis 5 s); im
+Betrieb antwortet die API bei nicht erreichbarer Datenbank mit 503 (`code: db_unavailable`) und erholt sich ohne Neustart.
+
 Funktionstest Ende-zu-Ende (`scripts/e2e-functional.mjs`: Anmeldung und Sperre, Passwortwechsel mit Rückgabe, Hosts, Token und
 Check-in, auch mit dem echten Agent-Binary, Watchlist, Filter, Suche, Quellenverwaltung, Abruf-Läufe mit Fehlermodi, Kanäle, WebSocket,
 Profilbild). Er **verändert** Daten (Debian-Quelle wird gelöscht, Passwort kurz geändert): nur im Wegwerf-Stack, danach
