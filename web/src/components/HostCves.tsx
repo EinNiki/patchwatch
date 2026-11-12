@@ -210,7 +210,7 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
         ))}
       </div>
       {/* Feste Spaltenzahl je Breite (auto-fit ergäbe bei 768–1279 px drei Spalten statt 2x2); Mindestbreite 200 px, wo sie passt. Ab 1280 px sind die Kacheln wegen der 20-rem-Spalte rechts nur 161–200 px breit: dort minmax(0,1fr), sonst liefe das Raster über. */}
-      <div className="mb-2 grid grid-cols-[minmax(200px,1fr)] gap-2 min-[640px]:grid-cols-[repeat(2,minmax(200px,1fr))] hd:grid-cols-4" role="group" aria-label="CVE-Zustände">
+      <div className="mb-2 grid grid-cols-[minmax(200px,1fr)] gap-2 min-[640px]:grid-cols-[repeat(2,minmax(200px,1fr))] hd:grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]" role="group" aria-label="CVE-Zustände">
         {bigTiles.map((t) => (
           <TileButton
             key={t}
@@ -350,7 +350,7 @@ function TileButton({ t, n, active, loaded, onPick, line, sub, warn }: { t: Tile
       onClick={() => onPick(t)}
       className={`flex min-w-0 flex-col gap-0.5 rounded-xs border bg-surface px-3 py-2 text-left hover:bg-sunk max-md:min-h-11 ${active ? `border-2 ${TONE_BORDER[m.tone]} bg-sunk` : "border-line"}`}
     >
-      <span className={`flex items-center gap-1.5 text-sm font-semibold ${TONE_TEXT[m.tone]}`}>
+      <span className={`flex flex-wrap items-center gap-x-1.5 text-sm font-semibold ${TONE_TEXT[m.tone]}`}>
         <Icon name={warn ? "warn" : m.icon} size={16} />
         {m.word}
         {active ? (
