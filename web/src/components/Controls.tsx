@@ -78,7 +78,7 @@ export function Checkbox({ label, hint, className = "", ...props }: Omit<InputHT
   return (
     <label className={`flex min-h-8 items-start gap-2 py-1 max-md:min-h-11 max-md:items-center ${className}`}>
       <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-(--accent) max-md:mt-0 max-md:size-5" {...props} />
-      <span>
+      <span className="min-w-0 [overflow-wrap:anywhere]">
         <span className="font-semibold">{label}</span>
         {hint ? <span className="block text-xs text-fg3">{hint}</span> : null}
       </span>
