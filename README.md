@@ -383,9 +383,9 @@ Feed-Zustand je Quelle („veraltet seit …“).
 
 **UI v2** (Seitenleiste: Hosts · CVEs · Agents · Benachrichtigungen · Einstellungen):
 
-- **Tabellen**: In der Hostliste ist die ganze Zeile klickbar (Maus, Touch; Hostname bleibt der echte Link, Strg/Cmd/Shift und
-  Mittelklick öffnen einen neuen Tab, markierter Text und Bedienelemente in der Zeile lösen nichts aus; die CVE-Zelle öffnet
-  die Host-Seite gefiltert). Die Tabellen (Hosts, Agents, CVEs, CVE-Quellen) füllen die ganze Inhaltsbreite bis 2560 px:
+- **Tabellen**: In der Hostliste und der CVE-Liste (Ziel `/cves/<ID>`) ist die ganze Zeile klickbar (Maus, Touch; Hostname bzw. CVE-ID bleibt der echte Link, Strg/Cmd/Shift und
+  Mittelklick öffnen einen neuen Tab, markierter Text und Bedienelemente in der Zeile (Stern, Hostlinks, „+N“-Popover) lösen nichts aus; die CVE-Zelle der
+  Hostliste öffnet die Host-Seite gefiltert). Agents und CVE-Quellen haben kein Detailziel, ihre Zeilen sind bewusst nicht klickbar. Die Tabellen (Hosts, Agents, CVEs, CVE-Quellen) füllen die ganze Inhaltsbreite bis 2560 px:
   jede Spalte hat einen prozentualen Anteil und eine Mindestbreite, die letzte Spalte endet am rechten Inhaltsrand, freier
   Platz geht an die Textspalten (Host, Beschreibung, Hostname). Text steht linksbündig, Zahlenspalten (Updates, Uptime)
   rechtsbündig samt Kopf; der Zellabstand ist links und rechts gleich (12 px ab 768, 16 px ab 1280, 24 px ab 1600), alle
@@ -482,6 +482,7 @@ Host-Seiten die CVE-Listen. `scripts/dev-stack.sh` baut den reproduzierbar auf, 
 scripts/dev-stack.sh up                # Postgres (pw-night-pg, 127.0.0.1:55440), Server :8091, Mock-Feeds :8190, Seed, ein Feed-Abruf, Web :3300
 scripts/dev-stack.sh status            # was läuft (nie das Passwort)
 scripts/dev-stack.sh restart-server    # setzt das In-Memory-Login-Limit zurück
+scripts/dev-stack.sh restart-web       # startet nur die Web-UI neu (nach npm --prefix web run build)
 scripts/dev-stack.sh down              # stoppt nur die eigenen Prozesse und entfernt den eigenen Container
 
 export PW_MODULE=/pfad/zu/node_modules/playwright PW_CHROME=/pfad/zu/chrome PW_BASE=http://127.0.0.1:3300 \

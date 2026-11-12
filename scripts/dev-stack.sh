@@ -2,12 +2,13 @@
 # Wegwerf-Stack für Qualitätsprüfungen (layout-check, a11y, Screenshots): Postgres im Container, Server, Mock-Feeds,
 # Demo-Hosts (scripts/dev-seed.py), ein Feed-Abruf gegen die Mocks und die Web-UI aus dem vorhandenen Build.
 #
-#   scripts/dev-stack.sh up | down | status | restart-server
+#   scripts/dev-stack.sh up | down | status | restart-server | restart-web
 #
 # up              startet alles, was noch nicht läuft (idempotent), und wartet auf den Feed-Abruf
 # down            stoppt NUR die eigenen Prozesse (PID-Dateien) und entfernt den eigenen Postgres-Container
 # status          zeigt, was läuft (nie das Passwort)
 # restart-server  startet nur den Server neu (setzt das In-Memory-Login-Limit zurück)
+# restart-web     startet nur die Web-UI neu (nach `npm --prefix web run build`)
 #
 # Umgebung (Standardwerte in Klammern):
 #   PW_STACK_DIR     Zustand: PID-Dateien, Logs, Passwortdateien, außerhalb des Repos
@@ -212,8 +213,9 @@ PY
 
 web_start() {
   [ -f "$ROOT/web/.next/standalone/server.js" ] || die "Kein Web-Build: npm --prefix web run build"
-  ( PORT=$WEB_PORT PATCHWATCH_API_URL=$API; export PORT PATCHWATCH_API_URL
-    start_bg web "$STACK/web.log" npm --prefix "$ROOT/web" run start:prod )
+  # Direkt node (statt npm), damit die PID-Datei den Prozess selbst trägt und stop_bg ihn samt Kindprozess (next-server) beendet.
+  ( cd "$ROOT/web" && PORT=$WEB_PORT PATCHWATCH_API_URL=$API && export PORT PATCHWATCH_API_URL \
+    && start_bg web "$STACK/web.log" node scripts/start-prod.mjs )
   wait_http "http://127.0.0.1:$WEB_PORT/login" 90 "Web"
 }
 
@@ -269,10 +271,18 @@ cmd_restart_server() {
   echo "dev-stack: Server neu gestartet (Login-Limit zurückgesetzt)"
 }
 
+cmd_restart_web() {
+  [ -f "$PGPWFILE" ] || die "Stack läuft nicht (zuerst: up)"
+  stop_bg web
+  web_start
+  echo "dev-stack: Web neu gestartet"
+}
+
 case ${1:-} in
   up) cmd_up ;;
   down) cmd_down ;;
   status) cmd_status ;;
   restart-server) cmd_restart_server ;;
-  *) echo "Verwendung: $0 up | down | status | restart-server" >&2; exit 2 ;;
+  restart-web) cmd_restart_web ;;
+  *) echo "Verwendung: $0 up | down | status | restart-server | restart-web" >&2; exit 2 ;;
 esac

@@ -12,6 +12,7 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { Icon, NavIcon } from "@/components/Icons";
 import { affectedHosts, affectingShort, filterDeviations, hostChips, hostState, statParts, listStats, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
+import { useRowLink } from "@/lib/rowLink";
 import { useFlash } from "@/lib/useFlash";
 import { toast } from "@/lib/toastStore";
 import { Button, Field, TextInput } from "@/components/Controls";
@@ -525,8 +526,9 @@ const CveRow = memo(function CveRow({
   onToggle: (c: CveListItem) => void;
 }) {
   const [pop, setPop] = useState(false);
+  const rowLink = useRowLink(`/cves/${c.id}`);
   return (
-      <tr data-flash={flash ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hide === "fade" ? "" : undefined}>
+      <tr {...rowLink} data-flash={flash ? "" : undefined} data-watched={c.watched ? "" : undefined} data-leaving={hide === "fade" ? "" : undefined}>
         <td className="cell-star">
           <button
             type="button"
