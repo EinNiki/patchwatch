@@ -1127,3 +1127,95 @@ async fn long_poll_checkin_answers_as_soon_as_a_report_is_requested(pool: PgPool
     assert_eq!(none.json["report_requested"], false);
     assert!(t.elapsed() >= std::time::Duration::from_millis(900));
 }
+
+/// NUL (\u0000) in JSON-Textfeldern kann Postgres (text und jsonb) nicht speichern: das muss 400 ergeben, nie 500.
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_login_username_is_400_and_still_rate_limited(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    admin::upsert_admin(&pool, "admin", PASSWORD).await.unwrap();
+    let try_login = |name: &'static str| {
+        let app = app.clone();
+        async move {
+            call(
+                &app,
+                Method::POST,
+                "/api/v1/auth/login",
+                &[],
+                Some(json!({"username": name, "password": PASSWORD})),
+            )
+            .await
+        }
+    };
+    // Gleiche Antwort für existierenden und nicht existierenden Namen.
+    let a = try_login("ad\u{0}min").await;
+    let b = try_login("gibt-es-nicht\u{0}").await;
+    assert_eq!(a.status, StatusCode::BAD_REQUEST);
+    assert_eq!(b.status, StatusCode::BAD_REQUEST);
+    // Versuche mit NUL zählen gegen das Rate-Limit je IP (8 weitere: insgesamt 10 erlaubt).
+    let mut last = StatusCode::OK;
+    for _ in 0..12 {
+        last = try_login("ad\u{0}min").await.status;
+        if last == StatusCode::TOO_MANY_REQUESTS {
+            break;
+        }
+        assert_eq!(last, StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_watchlist_note_is_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, csrf) = login(&app, &pool).await;
+    let h = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/watchlist/CVE-2024-1234",
+        &h,
+        Some(json!({"note": "a\u{0}b"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "Watchlist-Notiz");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_feed_interval_key_is_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, csrf) = login(&app, &pool).await;
+    let h = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings",
+        &h,
+        Some(json!({"feed_intervals": {"x\u{0}y": 60}})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "feed_intervals");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_in_oidc_settings_is_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let (session, csrf) = login(&app, &pool).await;
+    let h = [
+        ("cookie", session.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/oidc",
+        &h,
+        Some(json!({"enabled": false, "issuer": "https://i.example\u{0}", "client_id": "c", "redirect_url": "https://r.example/cb"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "OIDC");
+}

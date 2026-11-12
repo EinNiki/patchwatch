@@ -103,6 +103,9 @@ pub async fn put(
     }
     if let Some(map) = &body.feed_intervals {
         for (source, minutes) in map {
+            if super::has_nul(source) {
+                return Err(ApiError::BadRequest("Unbekannte Feed-Quelle".into()));
+            }
             // Nur bekannte Quellen: der Schlüssel landet in einem Settings-Key.
             let known: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM cve_sources WHERE id = $1 AND deleted_at IS NULL)",
@@ -118,6 +121,11 @@ pub async fn put(
     }
     if let Some(map) = &body.feed_bulk_intervals {
         for (source, minutes) in map {
+            if super::has_nul(source) {
+                return Err(ApiError::BadRequest(
+                    "Massendaten-Intervall gibt es nur für Ubuntu-Quellen".into(),
+                ));
+            }
             let known: bool = sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM cve_sources WHERE id = $1 AND kind = 'ubuntu' AND deleted_at IS NULL)",
             )

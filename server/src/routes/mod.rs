@@ -136,6 +136,12 @@ pub fn install_panic_hook() {
     }));
 }
 
+/// Enthält ein Text aus dem JSON-Body ein NUL (`\u0000`)? Postgres kann es weder in `text` noch in `jsonb` speichern
+/// oder vergleichen (sonst 500); Textfelder aus dem Body werden damit vor der Datenbank mit 400 abgelehnt.
+pub(crate) fn has_nul(s: &str) -> bool {
+    s.contains('\0')
+}
+
 /// Pfad oder Query mit kodiertem NUL (`%00`) ist immer ungültig: Postgres-Text kann kein NUL enthalten, die Abfrage
 /// würde mit einem Datenbankfehler (500) scheitern. Gilt für alle Routen, auch künftige.
 async fn reject_nul_in_uri(req: Request, next: Next) -> Result<Response, ApiError> {
