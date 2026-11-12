@@ -389,9 +389,10 @@ Feed-Zustand je Quelle („veraltet seit …“).
   jede Spalte hat einen prozentualen Anteil und eine Mindestbreite, die letzte Spalte endet am rechten Inhaltsrand, freier
   Platz geht an die Textspalten (Host, Beschreibung, Hostname). Text steht linksbündig, Zahlenspalten (Updates, Uptime)
   rechtsbündig samt Kopf; der Zellabstand ist links und rechts gleich (12 px ab 768, 16 px ab 1280, 24 px ab 1600), alle
-  Zellen stehen vertikal mittig. Unter 1024 px entfallen Spalten (Uptime und Agent zuerst, dann Updates), unter 768 px
-  werden Zeilen gestapelt; die Seite scrollt nie waagerecht. In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und
-  darunter die Hostnamen als Links (höchstens 3, der Rest hinter „+N“).
+  Zellen stehen vertikal mittig. Schmalere Fenster blenden Spalten aus (Hosts: Agent unter 1600 px, Uptime unter 1440 px,
+  „Zuletzt gemeldet“ und Updates unter 1280 px), unter 768 px werden Zeilen gestapelt; die Seite scrollt nie waagerecht.
+  In der CVE-Liste zeigt die Spalte „Hosts“ die Zusammenfassung und darunter die Hostnamen als Links (höchstens 3, der Rest
+  hinter „+N“).
 
 - **CVE-Quellen** (oben auf der CVE-Seite): Die Knopfreihe „Alle abrufen“, „Quelle hinzufügen“ (einziger Primärknopf) und
   „Verwalten“ steht rechts neben der Textzeile (32 px hoch, wie alle gleichrangigen Knöpfe; mobil 44 px); unter 1100 px sind es Symbolknöpfe mit Tooltip und `aria-label`,
