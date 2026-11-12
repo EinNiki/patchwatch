@@ -209,7 +209,8 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
           <span key={sg.tile} style={{ width: `${sg.pct}%` }} className={`${TONE_BG[TILE_META[sg.tile].tone]} ${sg.tile === "unknown" ? "opacity-60" : ""}`} title={`${TILE_META[sg.tile].word}: ${sg.count}`} />
         ))}
       </div>
-      <div className="mb-2 grid grid-cols-1 gap-2 min-[640px]:grid-cols-2 hd:grid-cols-4" role="group" aria-label="CVE-Zustände">
+      {/* Feste Spaltenzahl je Breite (auto-fit ergäbe bei 768–1279 px drei Spalten statt 2x2); Mindestbreite 200 px, wo sie passt. Ab 1280 px sind die Kacheln wegen der 20-rem-Spalte rechts nur 161–200 px breit: dort minmax(0,1fr), sonst liefe das Raster über. */}
+      <div className="mb-2 grid grid-cols-[minmax(200px,1fr)] gap-2 min-[640px]:grid-cols-[repeat(2,minmax(200px,1fr))] hd:grid-cols-4" role="group" aria-label="CVE-Zustände">
         {bigTiles.map((t) => (
           <TileButton
             key={t}
