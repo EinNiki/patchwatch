@@ -123,7 +123,6 @@ export function Popover({
     "aria-expanded": open,
     "aria-controls": open ? id : undefined,
   };
-  const style = sheet ? undefined : pos ? { top: pos.top, left: pos.left, width } : undefined;
   return (
     <>
       {trigger(t)}
@@ -137,8 +136,8 @@ export function Popover({
                 role="dialog"
                 aria-label={label}
                 tabIndex={-1}
-                style={pos ? { top: pos.top, left: pos.left, width: Math.min(width, window.innerWidth - 16), maxHeight: "calc(100dvh - 16px)" } : style}
-                className={`fixed z-[60] overflow-y-auto rounded-sm border border-line bg-surface p-3 text-sm shadow-lg ${
+                style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, width: Math.min(width, window.innerWidth - 16) }}
+                className={`fixed z-[60] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-sm border border-line bg-surface p-3 text-sm shadow-lg ${
                   sheet ? "max-md:!inset-x-0 max-md:!bottom-0 max-md:!top-auto max-md:!left-0 max-md:!w-auto max-md:max-h-[80vh] max-md:overflow-y-auto max-md:rounded-b-none max-md:p-4 max-md:pb-6" : ""
                 }`}
               >
