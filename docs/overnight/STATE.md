@@ -31,15 +31,15 @@ Entscheidungen beim Warten:
 |---|---|---|---|---|---|---|
 | 0 Sicherung und Branch | fertig | 00:00 | 00:01 | - | - | - |
 | Umgebung, Modelltest | fertig | 00:01 | 00:25 | - | - | - |
-| 1 UI-Restarbeiten | teilweise: am Code und mit 11 E2E-Skripten geprüft; Restarbeiten offen | 00:20 | 05:20 | 9 | 1 | 8 |
-| 2 Qualitätsschranken | fertig außer Docker-Builds; alles grün | 00:05 | 04:50 | 0 | 0 | 0 |
-| 3 Responsiv | offen (nur layout-check ohne Host-Seiten grün) | | | | | |
-| 4 Funktionstests | offen | | | | | |
-| 5 Daten, Zeit, Robustheit | teilweise: Code-Review, 2 Fixes mit Test; Läufe offen | 04:12 | 05:29 | 13 | 2 | 11 |
-| 6 Agent und Deployment | teilweise: Dateiprüfung, musl-Build und Agent-Tests grün; Docker offen | 04:11 | 04:48 | 20 | 0 | 20 |
+| 1 UI-Restarbeiten | fertig | 00:20 | 06:47 | 8 | 6 | 2 |
+| 2 Qualitätsschranken | fertig, grün (auch Docker-Builds) | 00:05 | 18:35 | 1 | 1 | 0 |
+| 3 Responsiv | fertig: responsive-all 0 Verstöße | 06:50 | 11:39 | 287 | 287 | Schrift 125/150 % außerhalb der Varianten |
+| 4 Funktionstests | fertig, grün | 11:40 | 15:30 | 6 (Skripte) | 6 | 0 |
+| 5 Daten, Zeit, Robustheit | fertig: Fuzzing, Last, Migrationen, Ausfall, Zeit | 04:12 | 17:10 | 14 | 9 | 5 |
+| 6 Agent und Deployment | fertig: Dateiprüfung, musl, Agent-Tests, Docker-Builds | 04:11 | 16:25 | 20 | 1 | 19 |
 | 7 Sicherheit | fertig (nur lesend) | 00:05 | 04:20 | 21 | 0 | 21 |
-| 8 Aufräumen und Push | aufgeräumt; Stand fb0215b ist gepusht, die späteren Commits siehe Verlauf | 05:29 | 05:45 | | | |
-| 9 Bericht | fertig (REPORT.md) | 05:31 | 05:45 | | | |
+| 8 Aufräumen und Push | aufgeräumt; Push siehe Verlauf | 18:35 | 18:45 | | | |
+| 9 Bericht | fertig (REPORT.md, neu geschrieben) | 18:35 | 18:45 | | | |
 
 Phase 0: Tag before-overnight-2026-11-12 auf 8cf3064 angelegt und gepusht. Tag
 design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung).
@@ -82,6 +82,13 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
 | 13 | sonnet | Seed-Stack, Browser-Tests | 11 von 13 Skripten grün; layout-check und a11y ohne CVE-Daten unvollständig; Commit 3a97664 |
 | 14 | sonnet | Fix doppelte Paketnamen | Commit 53f1304, Test schlug ohne Fix fehl |
 | 15 | sonnet | Fix NUL-Zeichen | Commit 1870417, 4 Tests schlugen ohne Fix fehl |
+| 16 | sonnet | Seed-Stack mit Mock-Feeds | dev-stack.sh, mock-feeds.mjs; layout-check 160, a11y grün |
+| 17 | sonnet | UI-Restarbeiten Phase 1 | 5 Commits, 13 Skripte grün |
+| 18 | sonnet | Phase 3 Responsiv | responsive-all.mjs, 9 Fixes, 33 Verstöße offen; vom Limit unterbrochen, fortgesetzt |
+| 19 | opus | Eskalation Phase 3 | 5 Fixes, responsive-all 0 Verstöße |
+| 20 | sonnet | Phase 4 Funktionstests | e2e-functional 189 OK; vom Limit unterbrochen, fortgesetzt |
+| 21 | sonnet | Flackertest, Fuzzing, Lasttest, Docker | 1 Server-Fix, alles grün |
+| 22 | opus | Phase 5 Läufe (Migrationen, Ausfall, Zeit) | 7 Fixes, e2e-outage 29/29 |
 
 ## Verlauf
 - 04:43 UTC: Nach Freigabe des Besitzers ("alles selber beenden, starten") Prozesse der UI-Sitzung beendet (Server
@@ -97,11 +104,16 @@ design-v2-2026-11-11 existiert bereits lokal und auf origin (von der UI-Sitzung)
 - 04:10 und 04:25 UTC: Speicher erneut geprüft, Swap 53 %: schwere Schritte weiter übersprungen.
 - Phase 8: Der Push des Branches (nur docs/overnight/, kein Code) wurde von der Rechteprüfung der Umgebung abgelehnt
   ("Out-of-Place Publication"). Kein zweiter Versuch, kein Umweg. Der Branch liegt lokal im Worktree.
+- 06:05 UTC: Fortsetzung auf Anweisung des Besitzers ("bis alle Tests grün sind"); Zeitgrenzen damit aufgehoben.
+  Unterbrechungen durch das Nutzungslimit: ca. 07:30 bis 10:08 und ca. 12:40 bis 15:02 UTC.
+- 17:12 bis 18:35 UTC: Abschlussprüfung des Dirigenten, alles nacheinander: fmt, clippy, cargo test --workspace
+  (346), musl-Build, install_test, shellcheck (ab Stufe warning sauber), npm lint, typecheck, test (105), build,
+  e2e-functional, 15 e2e-Skripte, e2e-outage, layout-check, a11y, 11 Layout-e2e-Skripte, fuzz-inputs,
+  responsive-all: alle Exit 0. Im ersten Durchgang war ein Agent-Test rot (EPIPE im Testhelfer, flackernd); behoben,
+  fünfmal wiederholt, danach ganze Rust-Suite grün. Web-Build und Browserläufe liefen nach dem letzten Web-Commit.
+- 18:40 UTC: Stack beendet, pw-night-pg entfernt. pw-ui-pg und pw-snap-pg bleiben gestoppt.
 
 ## Offene Punkte
-- Wiederaufnahme ("Mach bei der Zustandsdatei weiter"): Phase 1 Restarbeiten laut phase1.md, Phase 3, Phase 4,
-  Läufe aus Phase 5 (Migration, Last, Ausfall), Docker-Builds, Seed mit CVE-Daten aus Mock-Feeds,
-  scripts/responsive-all.mjs, README-Abschnitt "Qualitätsprüfung".
-- Offene Funde: security.md (21), phase5.md (11), phase6.md (20), phase1.md (8).
-- Beobachtung: RSS der alten Debug-Server wuchs im Leerlauf auf 1,3 bis 1,6 GB (nicht untersucht).
-- Worktree /home/claude/patchwatch-night bleibt für die Wiederaufnahme bestehen.
+- Alle Phasen sind gelaufen. Offen sind nur Funde: security.md (3 mittel, 18 niedrig), phase5.md (M2, M4, N6
+  Feed-Teil, N8, N9), phase6.md (19), responsive.md (Schrift 125/150 % bei 1280 px).
+- Die Zeilennummern in security.md, phase5.md, phase6.md gelten für den Stand vor den Fixes.
