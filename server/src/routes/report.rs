@@ -188,6 +188,19 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
     Ok(())
 }
 
+/// Höchstgröße des Report-Rests ohne Paketliste (gespeichert in `reports.raw`).
+const MAX_RAW_BYTES: usize = 64 * 1024;
+
+/// Enthält ein Text oder ein Schlüssel im JSON-Wert ein NUL-Zeichen?
+fn json_has_nul(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::String(s) => super::has_nul(s),
+        serde_json::Value::Array(a) => a.iter().any(json_has_nul),
+        serde_json::Value::Object(o) => o.iter().any(|(k, v)| super::has_nul(k) || json_has_nul(v)),
+        _ => false,
+    }
+}
+
 /// POST /api/v1/report: Authentifizierung per Bearer-Token (nur Hash in der DB), dann Validierung.
 pub async fn post_report(
     State(st): State<AppState>,
@@ -208,6 +221,14 @@ pub async fn post_report(
         if let Some(u) = o.get_mut("updates").and_then(|u| u.as_object_mut()) {
             u.remove("items");
         }
+    }
+    // Der Rest (auch unbekannte Felder) landet als jsonb in `reports.raw`: NUL würde dort einen Datenbankfehler (500)
+    // auslösen, und beliebig große Zusatzfelder blähen die Historie auf.
+    if json_has_nul(&raw) {
+        return Err(bad("ungültige Zeichen im Report"));
+    }
+    if raw.to_string().len() > MAX_RAW_BYTES {
+        return Err(bad("Report enthält zu viele Zusatzdaten"));
     }
     let updates_list = rep
         .updates

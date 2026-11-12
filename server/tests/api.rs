@@ -1219,3 +1219,36 @@ async fn nul_in_oidc_settings_is_400(pool: PgPool) {
     .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "OIDC");
 }
+
+/// Unbekannte Felder landen in `reports.raw` (jsonb): NUL darin ergab einen Datenbankfehler (500). Muss 400 sein, und es
+/// darf nichts gespeichert werden. Vom Fuzz-Skript nicht erreichbar (braucht ein gültiges Host-Token).
+#[sqlx::test(migrations = "./migrations")]
+async fn nul_and_oversize_unknown_report_fields_are_400(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let host = add_host(&pool, "nul-host", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let h = [("authorization", auth.as_str())];
+    for (name, mutate) in [
+        ("Zusatzfeld", json!({"x": "a\u{0}b"})),
+        ("verschachtelt", json!({"x": {"y": ["a\u{0}"]}})),
+        ("Schlüssel", json!({"k\u{0}": 1})),
+    ] {
+        let mut rep = report("nul-host", "6.8.0-31.31", "6.8.0-35.35", 0, 0);
+        for (k, v) in mutate.as_object().unwrap() {
+            rep[k] = v.clone();
+        }
+        let r = call(&app, Method::POST, "/api/v1/report", &h, Some(rep)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{name}");
+    }
+    // Beliebig große Zusatzfelder (hier 100 KB; das Body-Limit liegt bei 4 MiB) werden nicht in die Historie geschrieben.
+    let mut big = report("nul-host", "6.8.0-31.31", "6.8.0-35.35", 0, 0);
+    big["x"] = json!("y".repeat(100_000));
+    let r = call(&app, Method::POST, "/api/v1/report", &h, Some(big)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "großes Zusatzfeld");
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM reports WHERE host_id = $1")
+        .bind(host)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "abgelehnte Reports werden nicht gespeichert");
+}
