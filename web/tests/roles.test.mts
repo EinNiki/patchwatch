@@ -1,7 +1,7 @@
 // Abhängigkeitslogik, Zusammenfassung und Texte der Benutzerverwaltung (reine Logik).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { actionLabel, can, closeSet, createSummary, dependents, sensitiveChange, templateOf, togglePerm, type PermGroup, type RoleInfo } from "../src/lib/roles.ts";
+import { actionLabel, can, closeSet, createSummary, dependents, rowGuard, sensitiveChange, templateOf, togglePerm, type PermGroup, type RoleInfo } from "../src/lib/roles.ts";
 
 const p = (name: string, requires: string[] = [], sensitive = false) => ({ name, label: name, description: "", requires, sensitive });
 const groups: PermGroup[] = [
@@ -60,4 +60,31 @@ test("unbekannte Protokoll-Kennungen bleiben sichtbar", () => {
   assert.equal(actionLabel("user.created"), "Benutzer angelegt");
   assert.equal(actionLabel("user.permissions_changed"), "Rechte geändert");
   assert.equal(actionLabel("neu.ereignis"), "neu.ereignis");
+});
+
+const u = (over: Partial<{ is_self: boolean; auth_kind: string; status: string; permissions: string[] }> = {}) => ({ is_self: false, auth_kind: "local", status: "active", permissions: ["hosts.read"], ...over });
+
+test("Zeilenschutz: eigenes Konto und letzter lokaler Verwalter sind gesperrt, mit Grund", () => {
+  const self = u({ is_self: true, permissions: ["hosts.read", "users.manage"] });
+  const other = u({ permissions: ["hosts.read"] });
+  const all = [self, other];
+  const g = rowGuard(self, all, self.permissions);
+  assert.ok(g.remove && g.lock);
+  assert.equal(g.edit, undefined);
+  assert.deepEqual(rowGuard(other, all, self.permissions), {});
+});
+
+test("Zeilenschutz: der letzte lokale Verwalter ist auch für andere gesperrt, sobald es einen zweiten gibt nicht mehr", () => {
+  const a = u({ permissions: ["users.manage"] });
+  const me = u({ is_self: true, permissions: ["users.manage"], auth_kind: "oidc" });
+  assert.match(rowGuard(a, [a, me], ["users.manage"]).remove ?? "", /Letzter lokaler/);
+  const b = u({ permissions: ["users.manage"] });
+  assert.equal(rowGuard(a, [a, b, me], ["users.manage"]).remove, undefined);
+});
+
+test("Zeilenschutz: Konten mit stärkeren Rechten sind nicht verwaltbar", () => {
+  const strong = u({ permissions: ["hosts.read", "audit.read"] });
+  const g = rowGuard(strong, [strong], ["hosts.read", "users.manage"]);
+  assert.ok(g.edit && g.lock && g.remove);
+  assert.deepEqual(rowGuard(strong, [strong], undefined).edit !== undefined, true);
 });

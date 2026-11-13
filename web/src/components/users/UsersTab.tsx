@@ -14,7 +14,7 @@ import { ActionCell } from "@/components/ActionCell";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/components/AuthProvider";
-import { KIND_LABEL, STATUS_LABEL, type RolesResponse } from "@/lib/roles";
+import { KIND_LABEL, STATUS_LABEL, rowGuard, type RolesResponse } from "@/lib/roles";
 import type { StatusInfo } from "@/lib/status";
 import type { UserRow } from "@/lib/types";
 import { UserDialog, type DialogMode } from "./UserDialog";
@@ -27,21 +27,22 @@ const STATUS_INFO: Record<string, StatusInfo> = {
 };
 
 /** Löschen mit Namensbestätigung (und eigenem Passwort, wenn das Ziel Administrator ist). */
-function DeleteDialog({ user, onClose, onDone }: { user: UserRow | null; onClose: () => void; onDone: () => void }) {
+function DeleteDialog({ user, sensitive, onClose, onDone }: { user: UserRow | null; sensitive: readonly string[]; onClose: () => void; onDone: () => void }) {
   return (
     <Dialog open={user !== null} title={`${user?.display_name ?? ""} löschen?`} onClose={onClose}>
-      {user ? <DeleteForm key={user.id} user={user} onClose={onClose} onDone={onDone} /> : null}
+      {user ? <DeleteForm key={user.id} user={user} sensitive={sensitive} onClose={onClose} onDone={onDone} /> : null}
     </Dialog>
   );
 }
 
-function DeleteForm({ user, onClose, onDone }: { user: UserRow; onClose: () => void; onDone: () => void }) {
+function DeleteForm({ user, sensitive, onClose, onDone }: { user: UserRow; sensitive: readonly string[]; onClose: () => void; onDone: () => void }) {
   const { me } = useAuth();
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const needsPw = user.role === "admin" && me.auth_kind !== "oidc";
+  // Wie der Server: Passwort, wenn das Konto sensible Rechte hat (Benutzerverwaltung, OIDC, Aktivitätsprotokoll).
+  const needsPw = user.permissions.some((p) => sensitive.includes(p)) && me.auth_kind !== "oidc";
   return (
     <form
       onSubmit={(e) => {
@@ -63,7 +64,7 @@ function DeleteForm({ user, onClose, onDone }: { user: UserRow; onClose: () => v
         <TextInput value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" autoFocus />
       </Field>
       {needsPw ? (
-        <Field label="Dein Passwort (der Benutzer ist Administrator)">
+        <Field label="Dein Passwort (das Konto hat Verwaltungsrechte)">
           <TextInput type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
         </Field>
       ) : null}
@@ -86,7 +87,9 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
   const [lock, setLock] = useState<UserRow | null>(null);
   const [reset, setReset] = useState<UserRow | null>(null);
 
+  const { me } = useAuth();
   const list = users.data?.users;
+  const sensitive = roles?.groups.flatMap((g) => g.permissions.filter((p) => p.sensitive).map((p) => p.name)) ?? [];
   const pending = users.data?.pending ?? 0;
 
   async function act(path: string, ok: string, what: string) {
@@ -156,6 +159,8 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
             </thead>
             <tbody>
               {list.map((u) => {
+                const guard = rowGuard(u, list, me.permissions);
+                const reason = guard.remove ?? guard.lock ?? guard.edit;
                 return (
                   <tr key={u.id}>
                     <td className="cell-primary">
@@ -165,6 +170,7 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
                         {u.is_self ? <span className="text-xs text-fg3">(du)</span> : null}
                       </span>
                       {u.email ? <span className="block truncate text-xs text-fg3">{u.email}</span> : null}
+                      {reason ? <span className="block text-xs text-fg3" data-guard-reason>{reason}.</span> : null}
                     </td>
                     <td data-label="Anmeldeart">{KIND_LABEL[u.auth_kind] ?? u.auth_kind}</td>
                     <td data-label="Rolle">
@@ -181,11 +187,11 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
                         actions={[
                           u.status === "pending" && u.oidc_linked
                             ? { key: "approve", label: "Freigeben", aria: `${u.display_name} freigeben`, icon: "unlock" as const, run: () => setMode({ kind: "approve", user: u }) }
-                            : { key: "edit", label: "Bearbeiten", aria: `${u.display_name} bearbeiten`, icon: "edit" as const, run: () => setMode({ kind: "edit", user: u }) },
+                            : { key: "edit", label: "Bearbeiten", aria: `${u.display_name} bearbeiten`, icon: "edit" as const, run: () => setMode({ kind: "edit", user: u }), disabled: !!guard.edit, why: guard.edit },
                           ...(u.status === "locked"
                             ? [{ key: "unlock", label: "Entsperren", aria: `${u.display_name} entsperren`, icon: "unlock" as const, run: () => void act(`/users/${u.id}/unlock`, `${u.display_name} entsperrt.`, "Entsperren fehlgeschlagen") }]
-                            : [{ key: "lock", label: "Sperren", aria: `${u.display_name} sperren`, icon: "lock" as const, run: () => setLock(u), disabled: u.is_self || u.status !== "active", why: "Das eigene Konto kann nicht gesperrt oder gelöscht werden" }]),
-                          { key: "delete", label: "Löschen", aria: `Benutzer ${u.display_name} löschen`, icon: "trash" as const, run: () => setDel(u), danger: true, disabled: u.is_self, why: "Das eigene Konto kann nicht gesperrt oder gelöscht werden" },
+                            : [{ key: "lock", label: "Sperren", aria: `${u.display_name} sperren`, icon: "lock" as const, run: () => setLock(u), disabled: !!guard.lock || u.status !== "active", why: guard.lock }]),
+                          { key: "delete", label: "Löschen", aria: `Benutzer ${u.display_name} löschen`, icon: "trash" as const, run: () => setDel(u), danger: true, disabled: !!guard.remove, why: guard.remove },
                         ]}
                       />
                     </td>
@@ -215,6 +221,7 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
       <OneTimePassword name={shown?.name ?? ""} password={shown?.password ?? null} onDone={() => setShown(null)} />
       <DeleteDialog
         user={del}
+        sensitive={sensitive}
         onClose={() => setDel(null)}
         onDone={() => {
           toast.success(`${del?.display_name ?? "Benutzer"} gelöscht.`);

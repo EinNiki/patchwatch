@@ -52,8 +52,11 @@ export function ActionCell({ actions, name }: { actions: CellAction[]; name: str
       key={a.key}
       size={asIcon ? "icon" : "action"}
       variant={a.danger ? "danger" : "default"}
-      onClick={a.run}
-      disabled={a.disabled}
+      // Mit Grund: aria-disabled statt disabled, damit der Knopf fokussierbar bleibt und der Tooltip mit dem Grund erscheint.
+      onClick={a.disabled && a.why ? undefined : a.run}
+      disabled={a.disabled && !a.why}
+      aria-disabled={a.disabled && a.why ? true : undefined}
+      className={a.disabled && a.why ? "cursor-not-allowed opacity-50" : undefined}
       aria-label={a.aria}
       title={a.disabled && a.why ? a.why : asIcon ? a.label : undefined}
       data-stage={stage}

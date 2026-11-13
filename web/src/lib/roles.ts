@@ -85,6 +85,44 @@ export function createSummary(name: string, templateTitle: string, count: number
   return `Benutzer ${n} wird mit ${templateTitle === "Eigene" ? `eigener Auswahl (${count} Rechte)` : `der Vorlage ${templateTitle} (${count} Rechte)`} angelegt.`;
 }
 
+export interface GuardUser {
+  is_self: boolean;
+  auth_kind: string;
+  status: string;
+  permissions: readonly string[];
+}
+export interface RowGuard {
+  /** Grund, warum Bearbeiten/Freigeben nicht geht (sonst `undefined`). */
+  edit?: string;
+  lock?: string;
+  remove?: string;
+}
+
+/**
+ * Gründe, warum eine Zeilenaktion gesperrt ist. Spiegel der Serverregeln (der Server prüft immer erneut):
+ * eigenes Konto, letzter lokaler Benutzer mit `users.manage`, Konto mit Rechten, die man selbst nicht hat.
+ */
+export function rowGuard(u: GuardUser, all: readonly GuardUser[], mine: readonly string[] | undefined): RowGuard {
+  const g: RowGuard = {};
+  const isManager = (x: GuardUser) => x.auth_kind === "local" && x.status === "active" && x.permissions.includes("users.manage");
+  if (u.is_self) {
+    g.lock = "Das eigene Konto kann nicht gesperrt oder gelöscht werden";
+    g.remove = g.lock;
+  }
+  if (isManager(u) && all.filter(isManager).length <= 1) {
+    const why = "Letzter lokaler Benutzer mit dem Recht „Benutzer verwalten“: ohne ihn könnte niemand mehr Benutzer verwalten";
+    g.lock ??= why;
+    g.remove ??= why;
+  }
+  if (!u.permissions.every((p) => can(mine, p))) {
+    const why = "Dieses Konto hat Rechte, die du selbst nicht hast; du darfst es nicht verwalten";
+    g.edit = why;
+    g.lock = why;
+    g.remove = why;
+  }
+  return g;
+}
+
 export const STATUS_LABEL: Record<string, string> = { active: "aktiv", locked: "gesperrt", pending: "wartet auf Freigabe" };
 export const KIND_LABEL: Record<string, string> = { local: "lokal", oidc: "OIDC" };
 
