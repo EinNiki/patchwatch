@@ -32,12 +32,12 @@ type SortKey = "name" | "status" | "kernel" | "report" | "updates" | "cve";
  *  Spalten) und Status (längster Chip „Sicherheitsupdates offen“) ihre volle Breite, mit Updates wäre die Tabelle 30 px zu breit.
  *  Uptime kommt ab 1440 px, Agent ab 1600 px dazu. */
 const COLUMNS: { key: SortKey; label: string; num?: boolean; cls: string; tip?: string }[] = [
-  { key: "name", label: "Host", cls: "w-[13%] min-w-28" },
-  { key: "kernel", label: "Distribution / Kernel", cls: "w-[17%] min-w-28 hd:min-w-44" },
-  { key: "report", label: DATA_LABEL, cls: "w-[10%] min-w-32 md:max-hd:hidden", tip: DATA_TIP },
-  { key: "updates", label: "Updates", num: true, cls: "w-[9%] min-w-28 md:max-hd:hidden" },
-  { key: "cve", label: "CVE", cls: "w-[20%] min-w-52 hd:min-w-64" },
-  { key: "status", label: "Status", cls: "w-[12%] min-w-26" },
+  { key: "name", label: "Host", cls: "w-[13%] min-w-28 hd:w-[7.2rem] hd:min-w-[7.2rem] xl:w-[8.1rem] xl:min-w-[8.1rem]" },
+  { key: "kernel", label: "Distribution / Kernel", cls: "w-[17%] min-w-28 hd:w-[10.9rem] hd:min-w-[10.9rem]" },
+  { key: "report", label: DATA_LABEL, cls: "w-[10%] min-w-32 md:max-hd:hidden hd:w-[8rem] hd:min-w-[8rem]", tip: DATA_TIP },
+  { key: "updates", label: "Updates", cls: "w-[9%] min-w-28 md:max-hd:hidden hd:w-[7.5rem] hd:min-w-[7.5rem]" },
+  { key: "cve", label: "CVE", cls: "w-[20%] min-w-52 hd:w-[12.6rem] hd:min-w-[12.6rem]" },
+  { key: "status", label: "Status", cls: "w-[12%] min-w-26 hd:w-[12.1rem] hd:min-w-[12.1rem]" },
 ];
 
 const SORT_LABEL: Record<SortKey, string> = { name: "Host", kernel: "Kernel", report: DATA_LABEL, updates: "Updates", cve: "CVE", status: "Status" };
@@ -74,7 +74,6 @@ function HostsView() {
   const status = (params.get("status") ?? "") as HostStatus | "";
   const rebootOnly = params.get("reboot") === "1";
   const updatesOnly = params.get("updates") === "1";
-  const unknownOnly = params.get("cve") === "unknown";
   const sort = (params.get("sort") ?? "status") as SortKey;
   const dir = params.get("dir") === "desc" ? "desc" : "asc";
 
@@ -97,13 +96,12 @@ function HostsView() {
         (!needle || haystack(h).includes(needle)) &&
         (!status || h.status === status) &&
         (!rebootOnly || h.reboot_needed) &&
-        (!updatesOnly || (h.updates_pending ?? 0) > 0) &&
-        (!unknownOnly || h.is_proxmox || h.status === "cve_unknown" || h.cve_unknown > 0),
+        (!updatesOnly || (h.updates_pending ?? 0) > 0),
     );
     const cmp = SORTERS[sort] ?? SORTERS.status;
     const sorted = [...filtered].sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name, "de", { numeric: true }));
     return dir === "desc" ? sorted.reverse() : sorted;
-  }, [all, q, status, rebootOnly, updatesOnly, unknownOnly, sort, dir]);
+  }, [all, q, status, rebootOnly, updatesOnly, sort, dir]);
 
   const flashed = useFlash(
     all,
@@ -118,7 +116,6 @@ function HostsView() {
       { id: "sec", label: "Sicherheitsupdates", icon: "crit", tone: "text-crit", count: n((h) => h.status === "security_updates"), param: { status: "security_updates" } },
       { id: "updates", label: "Updates offen", icon: "warn", tone: "text-warn", count: n((h) => (h.updates_pending ?? 0) > 0), param: { updates: "1" } },
       { id: "reboot", label: "Neustart nötig", icon: "reboot", tone: "text-warn", count: n((h) => h.reboot_needed), param: { reboot: "1" } },
-      { id: "unknown", label: "CVE-Lage unbekannt", icon: "unknown", tone: "text-unknown", count: n((h) => h.is_proxmox || h.status === "cve_unknown" || h.cve_unknown > 0), param: { cve: "unknown" } },
       { id: "stale", label: "Meldet sich nicht", icon: "clock", tone: "text-unknown", count: n((h) => h.status === "stale"), param: { status: "stale" } },
     ];
     return list;
@@ -127,7 +124,7 @@ function HostsView() {
   const lastReport = useMemo(() => (all ?? []).reduce<string | null>((m, h) => (h.last_report_at && (!m || h.last_report_at > m) ? h.last_report_at : m), null), [all]);
 
   const feedOk = feedSummary(feeds.data)?.ok ?? false;
-  const activeFilters = [q.trim(), status, rebootOnly, updatesOnly, unknownOnly].filter(Boolean).length;
+  const activeFilters = [q.trim(), status, rebootOnly, updatesOnly].filter(Boolean).length;
   const filtering = activeFilters > 0;
 
   if (hosts.error && !all) return <ErrorNote message={hosts.error} />;
@@ -251,7 +248,7 @@ function HostsView() {
             <Empty title="Kein Host entspricht dem Filter">Passe die Suche an oder setze den Filter zurück.</Empty>
           ) : (
             <div className="@container/tbl max-hd:overflow-x-auto">
-              <table className="tbl stack dist [&_td]:py-1.5 md:[--tbl-min:34.5rem] hd:[--tbl-min:58rem]">
+              <table className="tbl stack dist [&_td]:py-1.5 hd:[--col-pad:16px] md:[--tbl-min:34.5rem] hd:[--tbl-min:58rem]">
                 <caption>Hosts mit Distribution, Kernel, Zeitpunkt der letzten Daten, offenen Updates, CVE-Lage und Status</caption>
                 <thead>
                   <tr>
@@ -267,15 +264,16 @@ function HostsView() {
                         onSort={() => setParam({ sort: c.key, dir: sort === c.key && dir === "asc" ? "desc" : "asc" })}
                       />
                     ))}
-                    <th scope="col" className="num w-[10%] min-w-32 max-xl:hidden">
+                    <th scope="col" className="w-[10%] min-w-32 max-xl:hidden hd:w-[8.3rem] hd:min-w-[8.3rem]">
                       <span className="th-pad">Uptime</span>
                     </th>
-                    <th scope="col" className="w-[9%] min-w-22 max-wide:hidden">
+                    <th scope="col" className="w-[9%] min-w-22 max-wide:hidden hd:w-[4.7rem] hd:min-w-[4.7rem]">
                       <span className="th-pad">Agent</span>
                     </th>
+                    <th aria-hidden="true" className="fill hidden p-0 hd:table-cell" />
                   </tr>
                 </thead>
-                <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${updatesOnly}|${unknownOnly}|${q}`}>
+                <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${updatesOnly}|${q}`}>
                   {rows.map((h) => (
                     <HostRow key={h.id} h={h} feedOk={feedOk} flash={flashed.has(h.id)} />
                   ))}
@@ -325,9 +323,9 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           {stale ? <span className="sr-only">: meldet sich nicht mehr</span> : null}
         </span>
       </td>
-      <td data-label="Updates" className="num whitespace-nowrap md:max-hd:hidden">
+      <td data-label="Updates" className="whitespace-nowrap md:max-hd:hidden">
         {h.updates_pending == null ? (
-          <span className="text-fg3">unbekannt</span>
+          <span className="text-fg3">–</span>
         ) : (
           <>
             <span className={h.updates_pending === 0 ? "text-fg3" : "mono"}>{h.updates_pending} offen</span>
@@ -335,7 +333,7 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </>
         )}
       </td>
-      <td className="cell-status" data-href={`/hosts/${h.id}?cve=${h.cve_vulnerable > 0 || h.cve_fix_pending > 0 ? "open" : h.cve_reboot > 0 ? "reboot" : h.cve_unknown > 0 ? "unknown" : "fixed"}`}>
+      <td className="cell-status" data-href={`/hosts/${h.id}?cve=${h.cve_vulnerable > 0 || h.cve_fix_pending > 0 ? "open" : h.cve_reboot > 0 ? "reboot" : "fixed"}`}>
         <CveCell h={h} feedOk={feedOk} />
       </td>
       <td className="cell-status lead">
@@ -346,8 +344,9 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
           </div>
         ) : null}
       </td>
-      <td className="mono num whitespace-nowrap max-xl:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
+      <td className="mono whitespace-nowrap max-xl:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
+      <td aria-hidden="true" className="fill hidden p-0 hd:table-cell" />
     </tr>
   );
 }
@@ -365,13 +364,20 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
   if (h.cve_vulnerable > 0) entries.push({ key: "v", to: to("open"), tone: "font-semibold text-crit", icon: "crit", num: h.cve_vulnerable, word: "offen", full: "offen" });
   if (h.cve_fix_pending > 0) entries.push({ key: "p", to: to("open"), tone: "text-warn", icon: "warn", num: h.cve_fix_pending, word: "Fix folgt", full: "Fix angekündigt" });
   if (h.cve_reboot > 0) entries.push({ key: "r", to: to("reboot"), tone: "text-warn", icon: "reboot", num: h.cve_reboot, word: "Neustart", full: "Neustart nötig" });
-  if (h.is_proxmox) entries.push({ key: "u", to: to("unknown"), tone: "text-unknown", icon: "unknown", num: null, word: "manuell prüfen", full: "manuell prüfen" });
-  else if (h.cve_unknown > 0) entries.push({ key: "u", to: to("unknown"), tone: "text-unknown", icon: "unknown", num: h.cve_unknown, word: "unbekannt", full: "unbekannt" });
   // Gefixt zählt nie als Entwarnung für Proxmox oder bei fehlender Quelle; es steht nur als ruhige Information dabei.
   if (h.cve_fixed > 0 && !h.is_proxmox) entries.push({ key: "f", to: to("fixed"), tone: "text-fg2", icon: "ok", num: h.cve_fixed, word: "gefixt", full: "gefixt" });
 
+  // Sicherheitsregel: Kann der Host nicht bewertet werden (Proxmox-Kernel, CVEs ohne Aussage), steht hier nie „keine offenen“.
+  // Die Zahl der CVEs ohne Aussage wird nicht angezeigt; die Zelle zeigt „–“ mit Erklärung, der Status-Chip „Nicht bewertbar“.
+  const notRated = h.is_proxmox || h.cve_unknown > 0;
   if (entries.length === 0) {
     if (h.status === "pending") return <span className="text-fg3">–</span>;
+    if (notRated)
+      return (
+        <span className="text-fg3" title={h.is_proxmox ? "Nicht bewertbar: für Proxmox-Kernel gibt es keine belastbare CVE-Quelle" : "Nicht bewertbar: für einen Teil der CVEs liefert die Quelle keine Aussage"}>
+          –<span className="sr-only"> nicht bewertbar</span>
+        </span>
+      );
     // Quelle unvollständig/veraltet/fehlerhaft: nie "keine offenen", sondern die Begründung zeigen.
     if (h.cve_source_issue)
       return (
@@ -405,7 +411,7 @@ function CveCell({ h, feedOk }: { h: Host; feedOk: boolean }) {
   const rest = overflow ? entries.slice(CVE_SLOTS - 1) : [];
   return (
     // Zwei feste Spalten: die zweite beginnt in jeder Zeile an derselben Stelle.
-    <div className="grid grid-cols-[repeat(2,7rem)] gap-x-3 gap-y-0 max-md:flex max-md:flex-wrap max-md:gap-x-3">
+    <div className="grid grid-cols-[repeat(2,max-content)] justify-start gap-x-3 gap-y-0 max-md:flex max-md:flex-wrap max-md:gap-x-3">
       {shown.map((e) => link(e))}
       {overflow ? (
         <Popover

@@ -29,7 +29,7 @@ const cves = (v: number) => (v === 1 ? "1 CVE" : `${v} CVEs`);
 /** Ein Satz als Entscheidungshilfe; richtet sich nach dem Zustand (kein Neustart nötig, alles gefixt, nur offen). */
 export function summarySentence(c: StateCounts, opts: { newest: string | null; proxmox: boolean; restricted: boolean }): string {
   if (opts.proxmox) {
-    return `Keine belastbare Quelle für Proxmox-Kernel: ${cves(c.unknown)} unbekannt, manuell prüfen.`;
+    return `Keine belastbare Quelle für Proxmox-Kernel: ${cves(c.unknown)} manuell zu prüfen.`;
   }
   const maybe = opts.restricted ? " (kann unvollständig sein)" : "";
   if (c.reboot > 0) {

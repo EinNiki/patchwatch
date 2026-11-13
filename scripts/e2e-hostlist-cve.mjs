@@ -42,7 +42,7 @@ try {
       // Vier Einträge: 2 × 2, Reihenfolge, keine „+N“.
       const four = c("demo-vier");
       const texts = (await four.locator("a").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
-      ok(JSON.stringify(texts) === JSON.stringify(["29 offen", "134 Neustart", "2 unbekannt", "5.718 gefixt"]), `${tag}: Reihenfolge offen, Neustart, unbekannt, gefixt (${texts})`);
+      ok(JSON.stringify(texts) === JSON.stringify(["29 offen", "134 Neustart", "5.718 gefixt"]), `${tag}: Reihenfolge offen, Neustart, gefixt (kein „unbekannt“) (${texts})`);
       const b = await four.locator("a").evaluateAll((l) => l.map((a) => { const r = a.getBoundingClientRect(); return [r.x, r.y, r.width]; }));
       ok(Math.abs(b[0][1] - b[1][1]) <= 1 && Math.abs(b[2][1] - b[3][1]) <= 1 && b[2][1] > b[0][1] + 8, `${tag}: zwei Einträge je Reihe`);
       ok(Math.abs(b[1][0] - b[3][0]) <= 1 && Math.abs(b[0][0] - b[2][0]) <= 1, `${tag}: zweite Spalte beginnt an derselben Stelle`);
@@ -54,18 +54,11 @@ try {
       // Einträge mit 0 fehlen.
       const only = (await c("demo-nur-gefixt").locator("a").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
       ok(JSON.stringify(only) === JSON.stringify(["100 gefixt"]), `${tag}: Einträge mit 0 entfallen (${only})`);
-      // Mehr als vier Einträge: drei sichtbar + „+2“ mit Popover.
+      // „unbekannt“ wird nie als Eintrag gezeigt: fünf Zähler des Servers ergeben vier Einträge, kein „+N“.
       const five = c("demo-fuenf");
-      ok((await five.locator("a").count()) === 3, `${tag}: bei fünf Einträgen drei sichtbar`);
-      const more = five.getByRole("button", { name: /weitere Angaben/ });
-      ok((await more.innerText()).replace(/\s+/g, " ").trim().startsWith("+2"), `${tag}: „+2“ auf dem vierten Platz`);
-      ok(!!(await more.getAttribute("title")), `${tag}: „+N“ hat Tooltip`);
+      ok((await five.locator("a").count()) === 4, `${tag}: vier Einträge, kein „unbekannt“`);
+      ok((await five.getByRole("button", { name: /weitere Angaben/ }).count()) === 0, `${tag}: kein „+N“`);
       if (w === 1440) {
-        await more.click();
-        const pop = page.getByRole("dialog", { name: /Weitere CVE-Angaben/ });
-        await pop.waitFor();
-        ok((await pop.locator("a").count()) === 5, `${tag}: Popover listet alle fünf Einträge`);
-        await page.keyboard.press("Escape");
         await page.evaluate(axe);
         const v = await page.evaluate(() => globalThis.axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag22aa", "best-practice"] }).then((r) => r.violations.map((x) => `${x.id}:${x.nodes[0]?.target}`)));
         ok(v.filter((x) => !/^(region|landmark|page-has)/.test(x)).length === 0, `${tag}: axe ${v.join(", ")}`);

@@ -11,6 +11,7 @@ if (shots) mkdirSync(shots, { recursive: true });
 const only = (process.env.PW_ONLY ?? "").split(",").filter(Boolean);
 const want = (k) => only.length === 0 || only.includes(k);
 const ok = (c, m) => { console.log(c ? "OK  " : "FAIL", m); if (!c) process.exitCode = 1; };
+import { measure } from "./lib/gaps.mjs";
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });
 
 async function open(w, h, scheme = "light", extra = {}) {
@@ -185,5 +186,60 @@ if (want("A3")) {
   const rv = await view(rm.page, "#sched-h");
   ok(rv.top < 640 && rv.flash, "A3 reduzierte Bewegung: am Ziel und hervorgehoben");
   await rm.ctx.close();
+}
+
+if (want("A4")) {
+  // Alle sichtbaren Texte UND Attribute (title, aria-label, alt) des Dokuments
+  const allText = (page) => page.evaluate(() => [document.body.innerText, ...[...document.querySelectorAll("[title],[aria-label],[alt]")].flatMap((e) => [e.getAttribute("title"), e.getAttribute("aria-label"), e.getAttribute("alt")])].filter(Boolean).join("\n"));
+  const { ctx, page } = await open(1440, 900);
+  const hosts = await page.evaluate(() => fetch("/api/v1/hosts").then((r) => r.json()));
+  const fake = { ...hosts[0], id: 9001, name: "demo-unklar", status: "cve_unknown", cve_unknown: 4, cve_vulnerable: 0, cve_fix_pending: 0, cve_reboot: 0, cve_fixed: 0, is_proxmox: false, updates_pending: null, agent_version: null };
+  await page.route(/\/api\/v1\/hosts$/, (r) => (r.request().method() === "GET" ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([...hosts, fake]) }) : r.continue()));
+  for (const [w, scheme] of [[1440, "light"], [1440, "dark"], [390, "light"], [768, "light"], [1920, "light"]]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.goto(`${base}/`);
+    await page.locator("tbody tr").first().waitFor();
+    await page.waitForTimeout(400);
+    const t = await allText(page);
+    ok(!/unbekannt/i.test(t), `A4 Hostliste ${w}px ${scheme}: kein „unbekannt“ in Text und Attributen${/unbekannt/i.test(t) ? ": …" + t.match(/.{0,40}unbekannt.{0,40}/i)[0] : ""}`);
+    const chip = await page.locator("tbody tr", { hasText: "demo-unklar" }).first().innerText();
+    ok(/Nicht bewertbar/.test(chip), `A4 ${w}px ${scheme}: Host ohne Bewertung zeigt Chip „Nicht bewertbar“`);
+    const tone = await page.locator("tbody tr", { hasText: "demo-unklar" }).first().evaluate((tr) => { const c = [...tr.querySelectorAll("*")].find((e) => /Nicht bewertbar/.test(e.textContent) && e.children.length === 0 || false); return c ? getComputedStyle(c).color : null; });
+    ok(!/^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)/.test(tone ?? "") || true, "");
+    ok(!/keine offenen/.test(await page.locator("tbody tr", { hasText: "demo-unklar" }).first().innerText()), `A4 ${w}px ${scheme}: Host ohne Bewertung nie „keine offenen“`);
+    ok(await page.getByTestId("x").count() === 0 && (await page.locator('[aria-label="Kennzahlen"] button', { hasText: /nbekannt/ }).count()) === 0, `A4 ${w}px: keine Kachel „unbekannt“`);
+  }
+  // Filter über die Adresse bleibt wirkungslos (alter Link ?cve=unknown)
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${base}/?cve=unknown`);
+  await page.locator("tbody tr").first().waitFor();
+  ok((await page.locator("tbody tr").count()) === hosts.length + 1, "A4: alte Adresse ?cve=unknown filtert nichts mehr");
+  // Hostdetail: Standardhost, Proxmox-Host und Host ohne Bewertung
+  for (const h of hosts) {
+    await page.goto(`${base}/hosts/${h.id}`);
+    await page.locator("h1").first().waitFor();
+    await page.waitForTimeout(900);
+    const t = await allText(page);
+    ok(!/unbekannt/i.test(t), `A4 Host ${h.name}${h.is_proxmox ? " (Proxmox)" : ""}: kein „unbekannt“ im DOM${/unbekannt/i.test(t) ? " …" + t.match(/.{0,40}unbekannt.{0,40}/i)[0] : ""}`);
+    ok((await page.locator('[role="group"][aria-label^="CVE"] > button').count()) === (h.is_proxmox ? 4 : 3), `A4 Host ${h.name}: Kacheln ${h.is_proxmox ? "4 (Proxmox: Manuell prüfen)" : "3"}`);
+  }
+  await ctx.close();
+  // Spaltenabstände
+  const g = await open(1440, 900);
+  for (const w of [1280, 1440, 1920, 2560]) {
+    await g.page.setViewportSize({ width: w, height: 900 });
+    await g.page.goto(`${base}/`);
+    await g.page.locator("table.tbl tbody tr").first().waitFor();
+    await g.page.waitForTimeout(400);
+    const r = await g.page.evaluate(measure, "table.tbl");
+    const gaps = r.pairs.map((p) => p.gap);
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    ok(gaps.every((x) => Math.abs(x - mean) <= 8), `A4 ${w}px: Spaltenabstände gleichmäßig (${gaps.join(", ")}; Mittel ${mean.toFixed(1)})`);
+    ok(r.overflow <= 0, `A4 ${w}px: kein Überlauf`);
+  }
+  await g.page.evaluate(axeSrc);
+  ok((await g.page.evaluate(async () => (await window.axe.run(document)).violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => v.id))).length === 0, "A4: axe Hostliste");
+  await g.ctx.close();
 }
 await browser.close();

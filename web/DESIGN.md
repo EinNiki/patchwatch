@@ -30,7 +30,7 @@ Apple-Muster (Tab-Bars, SF Symbols, Systemfarben, Kapsel-Buttons), „mutige“ 
   Detailseiten zweispaltig (Hauptinhalt links, Meta rechts).
 - **Einstellungen:** je Abschnitt zweispaltig (links Titel + Kurzbeschreibung, rechts Formular). **Benachrichtigungen:** ab 1024 px Kanalliste
   links, Formular rechts; mobil einspaltig.
-- **Hosts:** kompakte Kennzahlenleiste (verwundbar, Sicherheitsupdates, Neustart nötig, unbekannt, zuletzt gemeldet), zugleich Filter; darunter die Tabelle.
+- **Hosts:** kompakte Kennzahlenleiste (verwundbar, Sicherheitsupdates, Neustart nötig, meldet sich nicht, zuletzt gemeldet; es gibt bewusst keine Kachel „unbekannt“), zugleich Filter; darunter die Tabelle.
 - **Seitenleiste** (`nav`, `aria-label="Hauptnavigation"`): Marke `patchwatch` (mono), **Hosts · CVEs · Agents ·
   Benachrichtigungen · Einstellungen**. „Benachrichtigungen“ hat eine zweite Ebene (ntfy, Matrix, Gotify, Discord, Live im Browser),
   mehr Ebenen gibt es nicht; die Gruppe hat einen eigenen Auf/Zu-Knopf (`aria-expanded`), ihr Zustand steht in `localStorage`
@@ -180,7 +180,7 @@ und ein kleiner Hook genügen (Messung: First-Load-JS +0,4 KB gegenüber +30–4
   Laden nutzt die Zahl aus den Kopfzahlen, damit nichts springt.
 - Ab 1280 px (Breakpoint `hd`; bei großer Schrift erst, wenn der Inhalt mindestens 60 rem breit ist: Variante `side`) steht
   rechts die mitlaufende Spalte „Host-Details“ (20 rem), darunter derselbe Inhalt als
-  aufklappbarer Abschnitt unter den Kacheln. Die vier Kacheln (Offen, Neustart nötig, Gefixt, Unbekannt) sind gleich groß: ab 1280 px vier in einer Reihe,
+  aufklappbarer Abschnitt unter den Kacheln. Die drei Kacheln (Offen, Neustart nötig, Gefixt; bei Proxmox-Kernel zusätzlich „Manuell prüfen“) sind gleich groß: ab 1280 px nebeneinander,
   640–1279 px 2×2, darunter eine Spalte; „Unbekannt“ bleibt bei 0 sichtbar, aber gedämpft.
 - Ab 1600 px (`wide`) kommen Fix-Version (Offen), Paket und Quelle als Spalten dazu; die Beschreibung behält `1fr`.
   Unter 768 px oder wenn die Liste schmaler als 40 rem ist (große Schrift) ist die Zeile gestapelt; die Zeilenhöhe wächst

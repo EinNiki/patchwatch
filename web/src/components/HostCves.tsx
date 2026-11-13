@@ -78,7 +78,7 @@ function useDebounced<T>(v: T, ms: number): T {
 
 /** Eine Zeile: was gilt, in Worten (Fix-Version und Zustand des Hosts). */
 export function hostState(c: HostCve, running: string | null, proxmox: boolean): string {
-  const run = running ?? "unbekannt";
+  const run = running ?? "–";
   switch (c.status) {
     case "fixed":
       return c.fix_version ? `Fix ab ${c.fix_version}, läuft ${run}` : `Behoben, läuft ${run}`;
@@ -103,7 +103,7 @@ const TILE_META: Record<Tile, { word: string; icon: IconName; tone: "crit" | "wa
   open: { word: "Offen", icon: "crit", tone: "crit", line: () => "Kein Fix installiert" },
   reboot: { word: "Neustart nötig", icon: "reboot", tone: "warn", line: (k) => (k ? <>Fix installiert, läuft erst nach Neustart auf <span className="whitespace-nowrap">{k}</span></> : "Fix installiert, läuft erst nach Neustart") },
   fixed: { word: "Gefixt", icon: "ok", tone: "ok", line: () => "Läuft bereits mit Fix" },
-  unknown: { word: "Unbekannt", icon: "unknown", tone: "unknown", line: () => "Quelle liefert keine Aussage" },
+  unknown: { word: "Manuell prüfen", icon: "unknown", tone: "unknown", line: () => "Keine belastbare Quelle" },
 };
 const TONE_BORDER = { crit: "border-crit", warn: "border-warn", ok: "border-ok", grey: "border-fg3", unknown: "border-unknown" } as const;
 const TONE_TEXT = { crit: "text-crit", warn: "text-warn", ok: "text-ok", grey: "text-fg2", unknown: "text-unknown" } as const;
@@ -111,7 +111,7 @@ const TONE_BG = { crit: "bg-crit", warn: "bg-warn", ok: "bg-ok", grey: "bg-fg3",
 
 export function HostCves({ host, initialFilter, notice, details }: { host: Host; initialFilter: CveFilter | null; notice: FeedNotice; details?: React.ReactNode }) {
   // Proxmox: es gibt nur "unbekannt, manuell prüfen"; diese Einträge stehen sofort im Blick (nie grün, kein Alarm).
-  const [tile, setTile] = useState<Tile>(initialFilter ?? (host.is_proxmox ? "unknown" : "open"));
+  const [tile, setTile] = useState<Tile>(initialFilter === "unknown" && !host.is_proxmox ? "open" : (initialFilter ?? (host.is_proxmox ? "unknown" : "open")));
   const [text, setText] = useState("");
   const q = useDebounced(text.trim(), 250);
   const [levelMin, setLevelMin] = useState(0);
@@ -177,9 +177,9 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
   }
 
   const sentence = sc ? summarySentence(sc, { newest, proxmox: host.is_proxmox, restricted: notice.restricted }) : "CVE-Lage wird geladen …";
-  const segments = sc ? barSegments(sc) : [];
-  // Vier gleichwertige Kacheln; „Unbekannt“ bleibt auch bei 0 sichtbar (dann gedämpft), damit das Raster stabil ist.
-  const bigTiles: Tile[] = ["open", "reboot", "fixed", "unknown"];
+  const segments = sc ? barSegments(host.is_proxmox ? sc : { ...sc, unknown: 0 }) : [];
+  // Drei Kacheln; nur bei Proxmox-Kernel (nicht bewertbar) kommt „Manuell prüfen“ dazu. Sonst gibt es keine Kachel ohne Aussage.
+  const bigTiles: Tile[] = host.is_proxmox ? ["open", "reboot", "fixed", "unknown"] : ["open", "reboot", "fixed"];
 
   return (
     <section aria-labelledby="cve" className="mb-6">
@@ -188,7 +188,7 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
       </h2>
       {host.is_proxmox ? (
         <p role="note" className="mb-2 border-l-4 border-unknown bg-unknown-soft px-3 py-1.5 text-unknown">
-          <strong className="font-semibold">Proxmox-Kernel:</strong> Für -pve-Kernel gibt es keine belastbare CVE-Quelle. Jede Bewertung ist unbekannt und muss
+          <strong className="font-semibold">Proxmox-Kernel:</strong> Für -pve-Kernel gibt es keine belastbare CVE-Quelle. Jede Bewertung fehlt und muss
           manuell geprüft werden:{" "}
           <a href={PROXMOX_ADVISORIES} target="_blank" rel="noopener noreferrer">
             Proxmox Security Advisories
@@ -212,13 +212,13 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
       ) : null}
       {head.error && !head.data ? <ErrorNote message={head.error} /> : null}
 
-      {/* Entscheidungshilfe: ein Satz, gestapelter Balken, vier große Kacheln (je eine Liste), Unbekannt klein. */}
+      {/* Entscheidungshilfe: ein Satz, gestapelter Balken, vier große Kacheln (je eine Liste), Manuell prüfen nur bei Proxmox. */}
       <p className="mb-1.5 text-base font-semibold" aria-live="polite">
         {sentence}
       </p>
       <div
         role="img"
-        aria-label={sc ? `Verteilung: ${numbers.open} offen, ${numbers.reboot} Neustart nötig, ${numbers.fixed} gefixt, ${numbers.unknown} unbekannt` : "Verteilung wird geladen"}
+        aria-label={sc ? `Verteilung: ${numbers.open} offen, ${numbers.reboot} Neustart nötig, ${numbers.fixed} gefixt${host.is_proxmox ? `, ${numbers.unknown} manuell zu prüfen` : ""}` : "Verteilung wird geladen"}
         className="mb-3 flex h-2.5 w-full overflow-hidden rounded-xs bg-sunk"
       >
         {segments.map((sg) => (
@@ -258,7 +258,7 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
           role="group"
           aria-label="Zusammenfassung"
         >
-          {(["open", "reboot", "fixed", "unknown"] as Tile[]).map((t) => (
+          {bigTiles.map((t) => (
             <button
               key={t}
               type="button"
@@ -572,7 +572,7 @@ function Row({ c, h, narrow, variant, proxmox, onOpen, style }: { c: HostCve; h:
   const full = c.description ?? c.reason;
   const text = shortText(full) || c.reason;
   const st = CVE_STATUS[c.status];
-  const statusLabel = proxmox && c.status === "unknown" ? (c.reviewed_at ? "Unbekannt: geprüft" : "Unbekannt: manuell prüfen") : c.status === "vulnerable" || c.status === "fix_pending" ? openStatusWord(c) : shortLabel(c.status);
+  const statusLabel = proxmox && c.status === "unknown" ? (c.reviewed_at ? "Manuell geprüft" : "Manuell prüfen") : c.status === "vulnerable" || c.status === "fix_pending" ? openStatusWord(c) : shortLabel(c.status);
   const lvlTone = c.level >= 8 ? "text-crit" : c.level >= 5 ? "text-warn" : "text-fg2";
   const link = (
     <Link href={`/cves/${c.cve_id}`} className="mono inline-flex items-center gap-1 font-medium max-md:min-h-11" onPointerEnter={() => prefetchApi(`/cves/${c.cve_id}`)} onFocus={() => prefetchApi(`/cves/${c.cve_id}`)}>
@@ -650,7 +650,7 @@ function Detail({ c, host, running, busy, onReview }: { c: HostCve; host: Host; 
   return (
     <div className="space-y-3 text-sm">
       <p className="flex flex-wrap items-center gap-2">
-        <StatusBadge info={CVE_STATUS[c.status]} label={host.is_proxmox && c.status === "unknown" ? "Unbekannt: manuell prüfen" : undefined} />
+        <StatusBadge info={CVE_STATUS[c.status]} label={host.is_proxmox && c.status === "unknown" ? "Manuell prüfen" : undefined} />
         <Link href={`/cves/${c.cve_id}`} className="mono">
           Zur CVE-Seite
         </Link>

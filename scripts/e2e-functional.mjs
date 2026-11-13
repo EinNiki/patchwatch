@@ -468,7 +468,7 @@ await section("Quellenverwaltung", async () => {
   ok(hs.every((h) => !UB.includes(h.name) || h.status !== "ok"), "kein Ubuntu-Host grün");
   await p.goto(`${WEB}/`);
   const row = p.getByRole("row").filter({ hasText: "web-01" }).first(); await row.waitFor();
-  ok(/CVE-Lage unbekannt/.test(await row.innerText()), "Oberfläche: web-01 zeigt „CVE-Lage unbekannt“ (Text, nicht nur Farbe)");
+  ok(/Nicht bewertbar/.test(await row.innerText()), "Oberfläche: web-01 zeigt „Nicht bewertbar“ (Text, nicht nur Farbe)");
   ok((await admin.call("POST", "/api/v1/feeds/ubuntu/run")).status === 400, "Abruf einer abgeschalteten Quelle: 400");
   ok((await admin.call("PUT", "/api/v1/feeds/ubuntu", { body: { enabled: true } })).status === 204, "Ubuntu einschalten: 204");
   const back = await until(async () => { const h2 = await hosts(); return ["web-01", "web-02"].every((n) => byName(h2, n).cve_unknown <= byName(before, n).cve_unknown) ? h2 : null; }, 30000);

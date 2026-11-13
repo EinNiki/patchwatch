@@ -24,7 +24,7 @@ test("Satz: Neustart behebt alles, Einzahl, eingeschränkt", () => {
 });
 test("Satz: Proxmox ist nie grün", () => {
   const s = summarySentence(c(0, 0, 0, 7), { ...base, proxmox: true });
-  assert.ok(s.includes("manuell prüfen") && !s.includes("Keine offenen"));
+  assert.ok(s.includes("manuell zu prüfen") && !s.includes("Keine offenen"));
 });
 test("fix_pending zählt zu offen, Eintrag ohne Fix-Version nie als 'Fix installiert'", () => {
   const k = stateCounts({ vulnerable: 2, fix_pending: 3, fixed_installed_reboot_required: 4, fixed: 1, not_affected: 99, unknown: 0 });

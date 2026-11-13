@@ -31,7 +31,7 @@ try {
       await tiles.first().waitFor();
       await page.waitForFunction(() => ![...document.querySelectorAll('[role="group"][aria-label^="CVE"] > button[aria-pressed]')].some((b) => b.textContent.includes("…")));
       await page.waitForTimeout(300);
-      ok((await tiles.count()) === 4, `${tag}: vier Kacheln (Offen, Neustart nötig, Gefixt, Unbekannt)`);
+      ok((await tiles.count()) === 3, `${tag}: drei Kacheln (Offen, Neustart nötig, Gefixt), keine „Unbekannt“-Kachel`);
       const m = await tiles.evaluateAll((l) => l.map((b) => { const r = b.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, cut: [b, ...b.querySelectorAll("*")].some((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible"), right: r.right, text: b.textContent }; }));
       ok(m.every((t) => !t.cut), `${tag}: kein abgeschnittener Text in den Kacheln`);
       const perRow = w >= 1280 ? 4 : w >= 640 ? 2 : 1;
@@ -53,7 +53,7 @@ try {
         });
         ok(narrow >= 199.5, `${tag}: Kacheln nie schmaler als 200 px (${Math.round(narrow)})`);
       }
-      ok(m.some((t) => t.text.includes("Unbekannt")), `${tag}: Kachel „Unbekannt“ vorhanden`);
+      ok(!m.some((t) => /nbekannt/.test(t.text)), `${tag}: keine Kachel „Unbekannt“`);
       const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
       ok(over <= 0, `${tag}: kein Seitenüberlauf (${over})`);
       ok((await page.getByText("sudo reboot").count()) === 0 && (await page.locator('[aria-label*="sudo reboot"],[title*="sudo reboot"]').count()) === 0, `${tag}: kein „sudo reboot“ im DOM`);

@@ -91,10 +91,10 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
           <span className="text-fg3">noch keiner</span>
         )}
       </Fact>
-      <Fact label="Agent">{h.agent_version ? <Ver>{h.agent_version}</Ver> : <span className="text-fg3">unbekannt</span>}</Fact>
+      <Fact label="Agent">{h.agent_version ? <Ver>{h.agent_version}</Ver> : <span className="text-fg3">–</span>}</Fact>
       <Fact label="Offene Updates">
         {h.updates_pending == null ? (
-          <span className="text-fg3">unbekannt</span>
+          <span className="text-fg3">–</span>
         ) : (
           <>
             {h.updates_pending ? (
@@ -134,11 +134,6 @@ export function HostDetails({ host: h, feeds, notice }: { host: Host; feeds: Fee
           <span>vollständig</span>
         )}
       </Fact>
-      {h.cve_unknown === 0 ? (
-        <Fact label="Unbekannt">
-          <span className="text-fg3">keine CVE ohne Aussage</span>
-        </Fact>
-      ) : null}
     </dl>
     </div>
   );
