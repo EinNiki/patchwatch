@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/Controls";
 import { useState } from "react";
 
 type Theme = "system" | "light" | "dark";
@@ -19,7 +20,8 @@ export function ThemeSelect() {
   return (
     <label className="flex items-center gap-1.5 text-xs text-fg2">
       Farbschema
-      <select
+      <Select
+        className="w-auto min-w-24 text-xs"
         value={theme}
         onChange={(e) => {
           const next = e.target.value as Theme;
@@ -34,12 +36,11 @@ export function ThemeSelect() {
             /* Speicher gesperrt: Auswahl gilt nur für diese Sitzung */
           }
         }}
-        className="min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-xs text-fg max-md:min-h-11"
       >
         <option value="system">System</option>
         <option value="light">Hell</option>
         <option value="dark">Dunkel</option>
-      </select>
+      </Select>
     </label>
   );
 }

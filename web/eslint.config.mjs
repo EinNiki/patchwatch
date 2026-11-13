@@ -28,7 +28,7 @@ export default defineConfig([
   globalIgnores([".next/**", "node_modules/**", "next-env.d.ts"]),
   {
     files: ["src/**/*.tsx"],
-    ignores: ["src/components/Controls.tsx", ...LEGACY_RAW_BUTTON_FILES],
+    ignores: ["src/components/Controls.tsx", "src/components/Select.tsx", ...LEGACY_RAW_BUTTON_FILES],
     rules: {
       "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name='button']", message: "Rohe <button> sind verboten: Button aus @/components/Controls verwenden." }],
     },

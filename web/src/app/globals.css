@@ -883,6 +883,7 @@ summary {
    wie die Größe. Der Knopf bleibt 32 px hoch (mobil 44 px); ein unsichtbares ::before am Knopf selbst (also ohne zweites Klickziel)
    vergrößert die Fläche um --hit-y oben/unten (6 px: 32 → 44) und --hit-x seitlich (4 px = die Hälfte der üblichen 8 px Lücke, daher
    nie Überlappung mit dem Nachbarn). Hover, Fokus und Aktiv-Zustand greifen auch auf der erweiterten Fläche, weil sie zum Knopf gehört. */
+@layer components {
 :where(button) {
   position: relative;
   --hit-x: 4px;
@@ -945,10 +946,17 @@ aside button,
   button:not(:disabled):active {
     transform: scale(0.98);
   }
+  /* The pressed button shrinks by 2 %, so its extended hit area would no longer contain the press point and the
+     click would land on the parent (mouseup target differs). Grow the pseudo-element by the lost share (percent of
+     own width/height) so mousedown and mouseup stay on the button. */
+  button:not(:disabled):active::before {
+    inset: calc(var(--hit-y) * -1 - var(--bw, 1px) - 1.2%) calc(var(--hit-x) * -1 - var(--bw, 1px) - 1.2%);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   button,
   button:active {
     transform: none !important;
   }
+}
 }

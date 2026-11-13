@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, Ref, SelectHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, Ref } from "react";
 
 // Einheitliche Regeln für alle Knöpfe: feste Höhe 32 px (Touch: 44 px), Rahmen immer vorhanden, Zustände nur über Farbe und Symbol,
 // nie über die Größe (kein Skalieren beim Drücken). Größen: default (Mindestbreite 7rem), row (feste Breite 7rem für Aktionsreihen),
@@ -75,9 +75,7 @@ export function TextInput({ className = "", ref, ...props }: InputHTMLAttributes
   );
 }
 
-export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={`min-h-8 rounded-[3px] border border-control bg-sunk px-1.5 text-sm text-fg max-md:min-h-11 ${className}`} {...props} />;
-}
+export { Select } from "@/components/Select";
 
 /** Checkbox mit Beschriftung; die ganze Zeile ist die Trefferfläche (32 px, Touch 44 px). */
 export function Checkbox({ label, hint, className = "", ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { label: React.ReactNode; hint?: React.ReactNode }) {

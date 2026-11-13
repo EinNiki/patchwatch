@@ -13,6 +13,11 @@ const shots = process.env.PW_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 const ok = (c, m) => { console.log(c ? "OK  " : "FAIL", m); if (!c) process.exitCode = 1; };
 const tag = Date.now().toString(36).slice(-5);
+// Eigene Auswahl (Listbox): öffnen, Eintrag anklicken.
+async function pickRole(dlg, label) {
+  await dlg.getByRole("combobox", { name: /^Rolle/ }).click();
+  await dlg.page().getByRole("option", { name: label }).click();
+}
 const NEW_PW = "TESTWERT-e2e-passwort-12345";
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });
@@ -42,7 +47,7 @@ async function createUser(page, name, roleLabel) {
   await page.getByRole("button", { name: "Benutzer anlegen" }).first().click();
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel("Name", { exact: true }).fill(name);
-  await dlg.getByRole("combobox", { name: /^Rolle/ }).selectOption({ label: roleLabel });
+  await pickRole(dlg, roleLabel);
   const summary = `Benutzer ${name} wird mit der Rolle ${roleLabel} angelegt.`;
   ok(await dlg.getByText(summary).isVisible(), `Zusammenfassung "${summary}"`);
   return dlg;
@@ -94,13 +99,14 @@ try {
   ok(!(await dlg.isVisible()), "X-Knopf schließt den Bearbeiten-Dialog");
   await page.getByRole("button", { name: `${opName} bearbeiten` }).click();
   dlg = page.getByRole("dialog", { name: /bearbeiten/ });
-  await dlg.getByRole("combobox", { name: /^Rolle/ }).selectOption({ label: "Nur Lesen" });
+  await pickRole(dlg, "Nur Lesen");
   await dlg.getByRole("button", { name: "Speichern" }).click();
   ok(await dlg.getByText(/Namen des Benutzers eingeben/).isVisible(), "Rollenwechsel ohne Namensbestätigung wird gestoppt");
   await dlg.getByRole("button", { name: "Abbrechen" }).click();
 
   // --- Sperren / Entsperren -------------------------------------------------------------------------------------
-  const rowMenu = (n) => page.getByRole("button", { name: `Weitere Aktionen für ${n}` });
+  // Die Aktionen stehen jetzt direkt in der Zeile (ActionCell); kein Zeilenmenü mehr.
+  const rowMenu = () => ({ click: async () => {} });
   await rowMenu(viName).click();
   await page.getByRole("button", { name: `${viName} sperren` }).click();
   const lock = page.getByRole("dialog", { name: /sperren\?/ });

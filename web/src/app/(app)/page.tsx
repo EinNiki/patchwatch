@@ -21,7 +21,7 @@ import { useFlash } from "@/lib/useFlash";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
-import { Button, TextInput } from "@/components/Controls";
+import { Button, Select, TextInput } from "@/components/Controls";
 import { Popover } from "@/components/Popover";
 import { feedSummary } from "@/components/FeedStatus";
 
@@ -203,18 +203,14 @@ function HostsView() {
             </label>
             <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1">
               Status
-              <select
-                value={status}
-                onChange={(e) => setParam({ status: e.target.value })}
-                className="min-h-8 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg max-md:min-h-11"
-              >
+              <Select value={status} onChange={(e) => setParam({ status: e.target.value })} className="w-auto min-w-36">
                 <option value="">alle</option>
                 {HOST_STATUS_ORDER.map((s) => (
                   <option key={s} value={s}>
                     {HOST_STATUS[s].label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="flex min-h-8 items-center gap-2 text-sm max-md:min-h-11">
               <input type="checkbox" checked={rebootOnly} onChange={(e) => setParam({ reboot: e.target.checked ? "1" : null })} className="size-4 accent-(--accent) max-md:size-5" />
@@ -223,13 +219,12 @@ function HostsView() {
             {/* Mobil sind die Spaltenköpfe ausgeblendet: Sortierung steht hier. */}
             <label className="flex items-center gap-2 text-xs font-semibold text-fg2 max-md:flex-col max-md:items-stretch max-md:gap-1 md:hidden">
               Sortierung
-              <select
+              <Select
                 value={`${sort}:${dir}`}
                 onChange={(e) => {
                   const [k, d] = e.target.value.split(":");
                   setParam({ sort: k ?? null, dir: d ?? null });
                 }}
-                className="min-h-11 rounded-sm border border-control bg-sunk px-1.5 text-sm font-normal text-fg"
               >
                 {(Object.keys(SORT_LABEL) as SortKey[]).flatMap((k) => [
                   <option key={`${k}:asc`} value={`${k}:asc`}>
@@ -239,7 +234,7 @@ function HostsView() {
                     {SORT_LABEL[k]} absteigend
                   </option>,
                 ])}
-              </select>
+              </Select>
             </label>
             {filtering ? <Button onClick={() => router.replace(pathname, { scroll: false })}>Filter zurücksetzen</Button> : null}
           </form>

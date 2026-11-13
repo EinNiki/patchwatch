@@ -14,14 +14,22 @@ const ok = (c, m) => { console.log(c ? "OK  " : "FAIL", m); if (!c) process.exit
 import { measure } from "./lib/gaps.mjs";
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME, args: ["--no-sandbox"] });
 
+let state = null; // Einmal anmelden (Login-Limit), die Sitzung für alle Kontexte wiederverwenden
 async function open(w, h, scheme = "light", extra = {}) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, ...extra });
+  if (!state) {
+    const c0 = await browser.newContext();
+    const p0 = await c0.newPage();
+    await p0.goto(`${base}/login`);
+    await p0.getByLabel("Benutzername").fill("admin");
+    await p0.getByLabel("Passwort").fill(pw);
+    await p0.getByRole("button", { name: "Anmelden" }).click();
+    await p0.waitForURL((u) => !u.pathname.startsWith("/login"));
+    state = await c0.storageState();
+    await c0.close();
+  }
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, storageState: state, ...extra });
   const page = await ctx.newPage();
-  await page.goto(`${base}/login`);
-  await page.getByLabel("Benutzername").fill("admin");
-  await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+  await page.goto(`${base}/`);
   return { ctx, page };
 }
 async function axe(page, name) {
@@ -81,7 +89,7 @@ if (want("A2")) {
     await page.locator("[data-action-cell]").first().waitFor();
     const m = await page.evaluate(() => [...document.querySelector("[data-action-cell]").querySelectorAll("button")].map((b) => { const r = b.getBoundingClientRect(); return [b.textContent.trim(), Math.round(r.width), Math.round(r.height), Math.round(r.top)]; }));
     ok(m.length === 3 && m.every((x) => x[1] === m[0][1] && x[2] === m[0][2] && x[3] === m[0][3]), `A2 ${w}px: drei gleich große Knöpfe in einer Zeile ${JSON.stringify(m)}`);
-    const clip = await page.evaluate(() => [...document.querySelector("[data-action-cell]").querySelectorAll("button")].some((b) => b.scrollWidth > b.clientWidth + 1));
+    const clip = await page.evaluate(() => [...document.querySelector("[data-action-cell]").querySelectorAll("button")].some((b) => { const r = document.createRange(); r.selectNodeContents(b); return r.getBoundingClientRect().width > b.clientWidth - 2; }));
     ok(!clip, `A2 ${w}px: Knopftext nicht abgeschnitten`);
     const ov = await page.evaluate(() => { const t = document.querySelector("table.tbl"); const wr = t.parentElement; return wr.scrollWidth > wr.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth + 1; });
     ok(!ov, `A2 ${w}px: Tabelle ohne horizontales Scrollen`);
@@ -286,7 +294,7 @@ if (want("A8")) {
       const b = await box(add);
       const x = d === "rechts" ? b.x + b.width + 3 : b.x + b.width * dx, y = d === "oben" ? b.y - 4 : d === "unten" ? b.y + b.height + 4 : b.y + b.height / 2;
       await tap(x, y);
-      const opened = await page.getByRole("dialog").isVisible().catch(() => false);
+      await page.waitForTimeout(300); const opened = await page.getByRole("dialog").waitFor({ state: "visible", timeout: 1500 }).then(() => true, () => false);
       ok(opened, `A8 ${L}: Klick ${d} neben „Agent hinzufügen“ löst aus`);
       await page.keyboard.press("Escape");
       await page.getByRole("dialog").waitFor({ state: "detached" }).catch(() => {});
@@ -299,6 +307,7 @@ if (want("A8")) {
     ok(await dlg.isVisible() && /Token von .* erneuern/.test(await dlg.innerText()), `A8 ${L}: 2 px rechts neben „Token erneuern“ trifft Token erneuern`);
     await page.keyboard.press("Escape"); await dlg.waitFor({ state: "detached" });
     await tap(db.x - 2, db.y + db.height / 2);
+    await dlg.waitFor({ state: "visible", timeout: 1500 }).catch(() => {});
     ok(await dlg.isVisible() && /löschen\?/.test(await dlg.innerText()) && !/Token/.test(await dlg.innerText()), `A8 ${L}: 2 px links neben „Löschen“ trifft Löschen (nie den Nachbarn)`);
     // 3) Gefahraktion löst nie direkt etwas aus: nur Bestätigung; Abbruch lässt die Zeile bestehen
     const rows = await page.locator("table.tbl tbody tr").count();
@@ -347,7 +356,7 @@ if (want("A6")) {
     await b.hover(); await page.waitForTimeout(250); const hov = await b.evaluate((e) => getComputedStyle(e).backgroundColor + "|" + getComputedStyle(e).filter);
     ok(hov !== rest + "|none", "A6: Hover verändert Hintergrund oder Helligkeit");
   }
-  const rule = await page.evaluate(() => [...document.styleSheets].flatMap((s) => [...s.cssRules]).flatMap((r) => (r.cssRules ? [...r.cssRules] : [r])).some((r) => r.selectorText && /button:not\(:disabled\):active/.test(r.selectorText) && /scale\(0\.98\)/.test(r.cssText)));
+  const rule = await page.evaluate(() => { const flat = (rs) => [...rs].flatMap((r) => (r.selectorText === undefined && r.cssRules ? flat(r.cssRules) : [r])); return flat(document.styleSheets[0] ? [...document.styleSheets].flatMap((s) => [...s.cssRules]) : []).some((r) => r.selectorText && /button:not\(:disabled\):active/.test(r.selectorText) && /scale\(0\.98\)/.test(r.cssText)); });
   ok(rule, "A6: gedrückt-Stil scale(0,98) vorhanden");
   const fr = await page.getByRole("button", { name: "Agent hinzufügen" }).evaluate((e) => { e.focus(); return getComputedStyle(e).outlineStyle; });
   ok(true, `A6: Fokusring (${fr}) vorhanden nach Tastaturfokus`);
@@ -361,5 +370,55 @@ if (want("A6")) {
   await rm.page.mouse.up();
   await rm.page.keyboard.press("Escape");
   await rm.ctx.close();
+}
+
+if (want("A7")) {
+  for (const touch of [false, true]) {
+    const { ctx, page } = await open(1280, 900, "light", touch ? { hasTouch: true } : {});
+    await page.goto(`${base}/users`);
+    await page.getByRole("button", { name: "Benutzer anlegen" }).waitFor();
+    let fails = 0;
+    const N = touch ? 10 : 30;
+    for (let i = 0; i < N; i++) {
+      await page.getByRole("button", { name: "Benutzer anlegen" }).click();
+      const dlg = page.getByRole("dialog");
+      await dlg.waitFor();
+      if (i % 3 === 0) await page.waitForTimeout(300 + (i * 37) % 900);
+      const sel = dlg.getByRole("combobox", { name: /^Rolle/ });
+      const want = ["Betreiber", "Nur Lesen", "Administrator"][i % 3];
+      // Hit-Test am Mittelpunkt
+      const r = await sel.boundingBox();
+      const hit = await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); const c = e?.closest("[role=combobox]"); return !!c; }, [r.x + r.width / 2, r.y + r.height / 2]);
+      if (touch) await sel.tap(); else if (i % 2) await sel.click(); else { await sel.focus(); await page.keyboard.press("ArrowDown"); }
+      const lb = page.getByRole("listbox");
+      await lb.waitFor();
+      if (!touch && i % 2 === 0) { // Tastatur: Typeahead + Enter
+        await page.keyboard.type(want.slice(0, 3));
+        await page.keyboard.press("Enter");
+      } else {
+        const o = page.getByRole("option", { name: want });
+        if (touch) await o.tap(); else await o.click();
+      }
+      await lb.waitFor({ state: "detached" });
+      // Hintergrundaktivität: Neuzeichnen durch Größenänderung und Themenwechsel
+      await page.setViewportSize({ width: 1281 + (i % 5), height: 900 });
+      await page.evaluate(() => document.documentElement.setAttribute("data-theme", document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+      await page.waitForTimeout(120);
+      const shown = (await sel.innerText()).trim();
+      if (!hit || shown !== want) { fails++; console.log("  Versuch", i, { hit, shown, want }); }
+      await page.keyboard.press("Escape");
+      await dlg.waitFor({ state: "detached" });
+    }
+    ok(fails === 0, `A7 ${touch ? "Touch" : "Maus/Tastatur"}: Rolle wählbar und bleibt erhalten (${N} Versuche, ${fails} Ausfälle)`);
+    // Escape in der geöffneten Auswahl schließt nur die Auswahl, nicht das Fenster
+    await page.getByRole("button", { name: "Benutzer anlegen" }).click();
+    const d2 = page.getByRole("dialog"); await d2.waitFor();
+    await d2.getByRole("combobox", { name: /^Rolle/ }).click();
+    await page.keyboard.press("Escape");
+    ok(!(await page.getByRole("listbox").count()) && (await d2.isVisible()), "A7: Escape schließt nur die Auswahl");
+    ok((await d2.getByRole("combobox", { name: /^Rolle/ }).getAttribute("aria-expanded")) === "false", "A7: aria-expanded false nach Schließen");
+    await page.keyboard.press("Escape");
+    await ctx.close();
+  }
 }
 await browser.close();
