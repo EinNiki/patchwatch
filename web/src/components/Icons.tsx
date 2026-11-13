@@ -72,7 +72,7 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   }
 }
 
-export type NavIconName = "hosts" | "cves" | "agents" | "users" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "collapse" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill" | "more";
+export type NavIconName = "hosts" | "cves" | "agents" | "users" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "collapse" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill" | "more" | "key" | "trash" | "lock" | "unlock" | "edit" | "play" | "power";
 
 /** Navigations- und Aktions-Icons: eigene Linienformen, immer mit Text daneben (nie allein). */
 export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number }) {
@@ -194,6 +194,51 @@ export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number 
       return (
         <svg {...common} fill="currentColor">
           <path d="M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.4l-3.7 2.1.8-4.2L2 6.4l4.2-.5z" />
+        </svg>
+      );
+    case "key":
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="10.5" r="2.5" />
+          <path d="M7 8.5l6-6M11 4.5l1.5 1.5M9.5 6l1.5 1.5" />
+        </svg>
+      );
+    case "trash":
+      return (
+        <svg {...common}>
+          <path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 8.5h6.6l.7-8.5M6.7 7v4M9.3 7v4" />
+        </svg>
+      );
+    case "lock":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="7" width="9" height="6.5" rx="1" />
+          <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+        </svg>
+      );
+    case "unlock":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="7" width="9" height="6.5" rx="1" />
+          <path d="M5.5 7V5a2.5 2.5 0 0 1 4.7-1.2" />
+        </svg>
+      );
+    case "edit":
+      return (
+        <svg {...common}>
+          <path d="M2.5 13.5l.8-3L11 2.8a1.4 1.4 0 0 1 2 2L5.5 12.7z" />
+        </svg>
+      );
+    case "play":
+      return (
+        <svg {...common}>
+          <path d="M5 3l8 5-8 5z" />
+        </svg>
+      );
+    case "power":
+      return (
+        <svg {...common}>
+          <path d="M8 2v6M4.6 4.4a5 5 0 1 0 6.8 0" />
         </svg>
       );
     case "more":

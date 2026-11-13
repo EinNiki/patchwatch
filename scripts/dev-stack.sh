@@ -13,7 +13,7 @@
 # Umgebung (Standardwerte in Klammern):
 #   PW_STACK_DIR     Zustand: PID-Dateien, Logs, Passwortdateien, außerhalb des Repos
 #                    (${TMPDIR:-/tmp}/patchwatch-dev-stack)
-#   PW_PG_NAME       Containername, muss mit "pw-night-" beginnen (pw-night-pg)
+#   PW_PG_NAME       Containername, muss mit "pw-night-" oder "pw-fix-" beginnen (pw-night-pg)
 #   PW_PG_PORT       Postgres auf 127.0.0.1 (55440)
 #   PW_SERVER_PORT   API (8091)     PW_WEB_PORT  UI (3300)     PW_MOCK_PORT  Mock-Feeds (8190)
 #   PW_ADMIN_USER    Admin-Benutzer (admin)
@@ -41,7 +41,7 @@ MOCK="http://127.0.0.1:$MOCK_PORT"
 
 die() { echo "dev-stack: $*" >&2; exit 1; }
 
-case $PG_NAME in pw-night-*) ;; *) die "PW_PG_NAME muss mit pw-night- beginnen" ;; esac
+case $PG_NAME in pw-night-*|pw-fix-*) ;; *) die "PW_PG_NAME muss mit pw-night- oder pw-fix- beginnen" ;; esac
 
 # ---- Prozesse -----------------------------------------------------------------------------------------------------
 

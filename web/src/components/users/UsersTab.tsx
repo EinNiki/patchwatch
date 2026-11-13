@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
 import { NavIcon } from "@/components/Icons";
 import { RelTime } from "@/components/RelTime";
-import { RowMenu } from "@/components/RowMenu";
+import { ActionCell } from "@/components/ActionCell";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/components/AuthProvider";
@@ -151,20 +151,11 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
                 <th scope="col" className="w-[16%] min-w-28"><span className="th-pad">Rolle</span></th>
                 <th scope="col" className="w-[18%] min-w-32"><span className="th-pad">Status</span></th>
                 <th scope="col" className="w-[14%] min-w-24"><span className="th-pad">Zuletzt angemeldet</span></th>
-                <th scope="col" className="w-55 min-w-55 hd:w-60 hd:min-w-60"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="w-60 min-w-40 hd:w-112 hd:min-w-112"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
               {list.map((u) => {
-                const items = [
-                  ...(u.status === "locked"
-                    ? [{ label: "Entsperren", aria: `${u.display_name} entsperren`, run: () => void act(`/users/${u.id}/unlock`, `${u.display_name} entsperrt.`, "Entsperren fehlgeschlagen") }]
-                    : u.status === "active" && !u.is_self
-                      ? [{ label: "Sperren", aria: `${u.display_name} sperren`, run: () => setLock(u) }]
-                      : []),
-                  ...(u.auth_kind === "local" && !u.is_self ? [{ label: "Passwort zurücksetzen", aria: `Passwort von ${u.display_name} zurücksetzen`, run: () => setReset(u) }] : []),
-                  ...(!u.is_self ? [{ label: "Löschen", aria: `Benutzer ${u.display_name} löschen`, run: () => setDel(u), danger: true }] : []),
-                ];
                 return (
                   <tr key={u.id}>
                     <td className="cell-primary">
@@ -185,18 +176,18 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
                     </td>
                     <td data-label="Zuletzt angemeldet"><RelTime iso={u.last_login_at} /></td>
                     <td className="cell-actions">
-                      <div className="flex items-center justify-start gap-2">
-                        {u.status === "pending" && u.oidc_linked ? (
-                          <Button size="row" onClick={() => setMode({ kind: "approve", user: u })} aria-label={`${u.display_name} freigeben`}>
-                            Freigeben
-                          </Button>
-                        ) : (
-                          <Button size="row" onClick={() => setMode({ kind: "edit", user: u })} aria-label={`${u.display_name} bearbeiten`}>
-                            Bearbeiten
-                          </Button>
-                        )}
-                        {items.length > 0 ? <RowMenu label={`Weitere Aktionen für ${u.display_name}`} items={items} /> : null}
-                      </div>
+                      <ActionCell
+                        name={u.display_name}
+                        actions={[
+                          u.status === "pending" && u.oidc_linked
+                            ? { key: "approve", label: "Freigeben", aria: `${u.display_name} freigeben`, icon: "unlock" as const, run: () => setMode({ kind: "approve", user: u }) }
+                            : { key: "edit", label: "Bearbeiten", aria: `${u.display_name} bearbeiten`, icon: "edit" as const, run: () => setMode({ kind: "edit", user: u }) },
+                          ...(u.status === "locked"
+                            ? [{ key: "unlock", label: "Entsperren", aria: `${u.display_name} entsperren`, icon: "unlock" as const, run: () => void act(`/users/${u.id}/unlock`, `${u.display_name} entsperrt.`, "Entsperren fehlgeschlagen") }]
+                            : [{ key: "lock", label: "Sperren", aria: `${u.display_name} sperren`, icon: "lock" as const, run: () => setLock(u), disabled: u.is_self || u.status !== "active", why: "Das eigene Konto kann nicht gesperrt oder gelöscht werden" }]),
+                          { key: "delete", label: "Löschen", aria: `Benutzer ${u.display_name} löschen`, icon: "trash" as const, run: () => setDel(u), danger: true, disabled: u.is_self, why: "Das eigene Konto kann nicht gesperrt oder gelöscht werden" },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );
@@ -210,6 +201,10 @@ export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
         mode={mode}
         roles={roles}
         onClose={() => setMode(null)}
+        onReset={(u) => {
+          setMode(null);
+          setReset(u);
+        }}
         onDone={(r) => {
           setMode(null);
           void users.reload();

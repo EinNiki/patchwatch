@@ -19,7 +19,7 @@ import { toast } from "@/lib/toastStore";
 import { Icon, NavIcon } from "@/components/Icons";
 import { PageHeader, SectionHeader } from "@/components/PageHeader";
 import { Popover } from "@/components/Popover";
-import { RowMenu } from "@/components/RowMenu";
+import { ActionCell } from "@/components/ActionCell";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { Mono } from "@/components/Version";
@@ -339,17 +339,17 @@ export default function AgentsPage() {
         <div className="@container/tbl max-hd:overflow-x-auto">
           {/* Reihenfolge: Name, Hostname, Distribution, Zuletzt gemeldet, Zuletzt erreichbar, Aktionen, Agent-Version (grau, schmal).
               Überschüssige Breite geht an die Datenspalten; die Aktionsspalte hat eine feste Breite und sitzt direkt nach „Zuletzt erreichbar“. */}
-          <table className="tbl stack-lg dist1024 lg:max-hd:[--col-pad:10px] lg:[--tbl-min:46.5rem] hd:[--tbl-min:61rem]">
+          <table className="tbl stack-lg dist1024 lg:[--col-pad:10px] lg:[--tbl-min:46.5rem] hd:[--tbl-min:58rem]">
             <caption>Agents mit Zeitpunkt der letzten Daten, letzter Aktivität, Aktionen und Version</caption>
             <thead>
               <tr>
-                <th scope="col" className="w-[17%] min-w-24 hd:min-w-30"><span className="th-pad">Name</span></th>
-                <th scope="col" className="w-[21%] min-w-28 hd:min-w-38"><span className="th-pad">Hostname laut Agent</span></th>
-                <th scope="col" className="w-[26%] min-w-24 hd:min-w-40"><span className="th-pad">Distribution</span></th>
-                <th scope="col" className="w-[12%] min-w-20 hd:min-w-28"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
-                <th scope="col" className="w-[12%] min-w-20 hd:min-w-28"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
-                <th scope="col" className="w-55 min-w-55 hd:w-60 hd:min-w-60"><span className="th-pad">Aktionen</span></th>
-                <th scope="col" className="w-[7%] min-w-16 hd:min-w-20 text-fg3"><span className="th-pad">Agent-Version</span></th>
+                <th scope="col" className="w-[9%] min-w-24 hd:min-w-22"><span className="th-pad">Name</span></th>
+                <th scope="col" className="w-[10%] min-w-28 hd:min-w-26"><span className="th-pad">Hostname laut Agent</span></th>
+                <th scope="col" className="w-[12%] min-w-24 hd:min-w-30"><span className="th-pad">Distribution</span></th>
+                <th scope="col" className="w-[8%] min-w-20 hd:min-w-22"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
+                <th scope="col" className="w-[8%] min-w-20 hd:min-w-22"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
+                <th scope="col" className="w-60 min-w-40 hd:w-112 hd:min-w-60"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="w-[5%] min-w-16 hd:min-w-16 text-fg3"><span className="th-pad">Agent-Version</span></th>
               </tr>
             </thead>
             <tbody>
@@ -371,22 +371,14 @@ export default function AgentsPage() {
                     </td>
                     <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
                     <td className="cell-actions">
-                      <div className="flex items-center justify-start gap-2">
-                        {canRun ? (
-                          <Button size="wide" onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
-                            {FETCH_ACTION}
-                          </Button>
-                        ) : null}
-                        {canToken || canAdd ? (
-                          <RowMenu
-                            label={`Weitere Aktionen für ${h.name}`}
-                            items={[
-                              ...(canToken ? [{ label: "Token erneuern", aria: `Token erneuern für ${h.name}`, run: () => setConfirm({ kind: "rotate", host: h }) }] : []),
-                              ...(canAdd ? [{ label: "Löschen", aria: `Agent ${h.name} löschen`, run: () => setConfirm({ kind: "delete", host: h }), danger: true }] : []),
-                            ]}
-                          />
-                        ) : null}
-                      </div>
+                      <ActionCell
+                        name={h.name}
+                        actions={[
+                          ...(canRun ? [{ key: "run", label: FETCH_ACTION, aria: `${h.name}: ${FETCH_ACTION}`, icon: "refresh" as const, run: () => void request(h), disabled: waiting || coolingDown }] : []),
+                          ...(canToken ? [{ key: "rotate", label: "Token erneuern", aria: `Token erneuern für ${h.name}`, icon: "key" as const, run: () => setConfirm({ kind: "rotate", host: h }) }] : []),
+                          ...(canAdd ? [{ key: "delete", label: "Löschen", aria: `Agent ${h.name} löschen`, icon: "trash" as const, run: () => setConfirm({ kind: "delete", host: h }), danger: true }] : []),
+                        ]}
+                      />
                     </td>
                     <td data-label="Agent-Version" className="text-fg3">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
                   </tr>

@@ -9,6 +9,7 @@ const base =
 const sizes = {
   default: "min-w-28 px-3",
   row: "w-28",
+  action: "w-33 px-1",
   wide: "w-40",
   icon: "w-8 px-0 max-md:w-11",
 } as const;

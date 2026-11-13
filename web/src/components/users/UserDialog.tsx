@@ -18,7 +18,9 @@ export function UserDialog({
   roles,
   onClose,
   onDone,
+  onReset,
 }: {
+  onReset?: (u: UserRow) => void;
   mode: DialogMode | null;
   roles: RolesResponse | undefined;
   onClose: () => void;
@@ -26,12 +28,12 @@ export function UserDialog({
 }) {
   return (
     <Dialog open={mode !== null} title={mode?.kind === "create" ? "Benutzer anlegen" : mode?.kind === "approve" ? `${mode.user.display_name} freigeben` : `${mode?.user.display_name ?? ""} bearbeiten`} onClose={onClose}>
-      {mode && roles ? <Form key={mode.kind === "create" ? "new" : mode.user.id} mode={mode} roles={roles} onClose={onClose} onDone={onDone} /> : null}
+      {mode && roles ? <Form key={mode.kind === "create" ? "new" : mode.user.id} mode={mode} roles={roles} onClose={onClose} onDone={onDone} onReset={onReset} /> : null}
     </Dialog>
   );
 }
 
-function Form({ mode, roles, onClose, onDone }: { mode: DialogMode; roles: RolesResponse; onClose: () => void; onDone: (r: { password?: string; name: string }) => void }) {
+function Form({ mode, roles, onClose, onDone, onReset }: { onReset?: (u: UserRow) => void; mode: DialogMode; roles: RolesResponse; onClose: () => void; onDone: (r: { password?: string; name: string }) => void }) {
   const { me } = useAuth();
   const user = mode.kind === "create" ? null : mode.user;
   const [name, setName] = useState(user?.display_name ?? "");
@@ -136,7 +138,12 @@ function Form({ mode, roles, onClose, onDone }: { mode: DialogMode; roles: Roles
       ) : null}
       {mode.kind === "create" ? <p className="m-0 text-sm text-fg2">{createSummary(name, roleInfo?.title ?? "")}</p> : null}
       {error ? <ErrorNote message={error} /> : null}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
+        {mode.kind === "edit" && onReset && user && user.auth_kind === "local" && !user.is_self ? (
+          <Button className="mr-auto" onClick={() => onReset(user)}>
+            Passwort zurücksetzen
+          </Button>
+        ) : null}
         <Button onClick={onClose}>Abbrechen</Button>
         <Button type="submit" variant="primary" busy={busy}>
           {mode.kind === "create" ? "Benutzer anlegen" : mode.kind === "approve" ? "Freigeben" : "Speichern"}
