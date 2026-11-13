@@ -149,6 +149,7 @@ try {
   ok(!(await opPage.getByRole("navigation", { name: "Hauptnavigation" }).getByRole("link", { name: "Benutzer" }).count()), "Betreiber: kein Menüpunkt Benutzer");
   ok(await opPage.getByRole("button", { name: "Agent hinzufügen" }).isVisible(), "Betreiber darf Agents anlegen");
   await opPage.goto(`${base}/users`);
+  await opPage.getByText("Kein Zugriff (403)").waitFor({ timeout: 8000 }).catch(() => {});
   ok(await opPage.getByText("Kein Zugriff (403)").isVisible(), "Betreiber sieht auf /users die 403-Seite");
 
   const viPage = await firstLogin(viName, viPw);
@@ -158,6 +159,7 @@ try {
   ok(!(await viPage.getByRole("button", { name: "Agent hinzufügen" }).count()), "Nur Lesen: kein Knopf 'Agent hinzufügen'");
   ok(!(await viPage.getByRole("button", { name: /Daten jetzt abrufen|Alle Agents abrufen/ }).count()), "Nur Lesen: keine Abrufknöpfe");
   await viPage.goto(`${base}/users`);
+  await viPage.getByText("Kein Zugriff (403)").waitFor({ timeout: 8000 }).catch(() => {});
   ok(await viPage.getByText("Kein Zugriff (403)").isVisible(), "Nur Lesen sieht auf /users die 403-Seite");
   await viPage.context().close();
   await opPage.context().close();

@@ -383,8 +383,9 @@ if (want("A7")) {
       await page.getByRole("button", { name: "Benutzer anlegen" }).click();
       const dlg = page.getByRole("dialog");
       await dlg.waitFor();
-      if (i % 3 === 0) await page.waitForTimeout(300 + (i * 37) % 900);
-      const sel = dlg.getByRole("combobox", { name: /^Rolle/ });
+      // Mindestens die Einblend-Animation (150 ms) abwarten: Menschen klicken nicht früher, und Playwright scrollt mitten in der Animation den Dialogkörper.
+      await page.waitForTimeout(200 + (i % 3 === 0 ? (i * 37) % 900 : 0));
+      const sel = dlg.getByRole("combobox", { name: /^Vorlage/ });
       const want = ["Betreiber", "Nur Lesen", "Administrator"][i % 3];
       // Hit-Test am Mittelpunkt
       const r = await sel.boundingBox();
@@ -409,14 +410,14 @@ if (want("A7")) {
       await page.keyboard.press("Escape");
       await dlg.waitFor({ state: "detached" });
     }
-    ok(fails === 0, `A7 ${touch ? "Touch" : "Maus/Tastatur"}: Rolle wählbar und bleibt erhalten (${N} Versuche, ${fails} Ausfälle)`);
+    ok(fails === 0, `A7 ${touch ? "Touch" : "Maus/Tastatur"}: Vorlage wählbar und bleibt erhalten (${N} Versuche, ${fails} Ausfälle)`);
     // Escape in der geöffneten Auswahl schließt nur die Auswahl, nicht das Fenster
     await page.getByRole("button", { name: "Benutzer anlegen" }).click();
     const d2 = page.getByRole("dialog"); await d2.waitFor();
-    await d2.getByRole("combobox", { name: /^Rolle/ }).click();
+    await d2.getByRole("combobox", { name: /^Vorlage/ }).click();
     await page.keyboard.press("Escape");
     ok(!(await page.getByRole("listbox").count()) && (await d2.isVisible()), "A7: Escape schließt nur die Auswahl");
-    ok((await d2.getByRole("combobox", { name: /^Rolle/ }).getAttribute("aria-expanded")) === "false", "A7: aria-expanded false nach Schließen");
+    ok((await d2.getByRole("combobox", { name: /^Vorlage/ }).getAttribute("aria-expanded")) === "false", "A7: aria-expanded false nach Schließen");
     await page.keyboard.press("Escape");
     await ctx.close();
   }
@@ -459,7 +460,8 @@ if (want("A9")) {
         await page.keyboard.press("Escape"); await page.waitForTimeout(150);
         ok(!(await state()), `A9 ${L} ${path} „${name}“: Escape schließt`);
         // 4) Erneut öffnen, dann Klick auf die erweiterte Fläche des Auslösers (3 px daneben) schaltet um (schließt, öffnet nicht neu)
-        if (!touch) {
+        // Auslöser mit data-hit="none" haben bewusst keine erweiterte Fläche (sie würde Nachbarn überdecken): dort gibt es nichts zu prüfen.
+        if (!touch && (await t.getAttribute("data-hit")) !== "none") {
           await t.click(); await page.waitForTimeout(150);
           const b = await t.boundingBox();
           await page.mouse.click(b.x + b.width / 2, b.y + b.height + 3); await page.waitForTimeout(200);

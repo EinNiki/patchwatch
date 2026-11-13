@@ -2,7 +2,7 @@
 
 Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: web/DESIGN.md, Abschnitt „Trefferflächen“.
 
-818 Elemente, 529 mit Trefferfläche unter 44 px in einer Richtung.
+883 Elemente, 562 mit Trefferfläche unter 44 px in einer Richtung.
 
 | Seite | Element | sichtbar | Trefferfläche |
 |---|---|---|---|
@@ -57,6 +57,9 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /notifications (390px) | a „Gotify“ | 44×44 | 44×45 |
 | /notifications (390px) | a „Discord“ | 48×44 | 49×44 |
 | /settings (390px) | button „Menü“ | 85×44 | 94×45 |
+| /settings (390px) | a „Allgemein“ | 85×44 | 85×44 |
+| /settings (390px) | a „Zeitpläne“ | 81×44 | 82×44 |
+| /settings (390px) | a „OIDC“ | 56×44 | 57×44 |
 | /settings (390px) | button „Profilbild ändern“ | 126×44 | 135×45 |
 | /settings (390px) | input „INPUT“ | 358×44 | 358×65 |
 | /settings (390px) | input „INPUT“ | 358×44 | 358×65 |
@@ -65,7 +68,6 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /settings (390px) | button[combobox] „System“ | 287×44 | 322×49 |
 | /users (390px) | button „Menü“ | 85×44 | 94×45 |
 | /users (390px) | button[tab] „Benutzer“ | 77×44 | 81×45 |
-| /users (390px) | button[tab] „OIDC“ | 56×44 | 60×45 |
 | /users (390px) | button[tab] „Aktivität“ | 75×44 | 81×45 |
 | /users (390px) | button „Benutzer anlegen“ | 152×44 | 161×44 |
 | /users (390px) | button „admin bearbeiten“ | 132×44 | 136×45 |
@@ -74,12 +76,12 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (390px) | button „e2e-op-6r37o bearbeiten“ | 132×44 | 136×45 |
 | /users (390px) | button „e2e-op-6r37o sperren“ | 44×44 | 52×45 |
 | /users (390px) | button „Benutzer e2e-op-6r37o löschen“ | 44×44 | 48×45 |
+| /users (390px) | button „e2e-op-fs5nl bearbeiten“ | 132×44 | 136×45 |
+| /users (390px) | button „e2e-op-fs5nl sperren“ | 44×44 | 52×45 |
+| /users (390px) | button „Benutzer e2e-op-fs5nl löschen“ | 44×44 | 48×45 |
 | /users (390px) | button „e2e-vi-6r37o bearbeiten“ | 132×44 | 136×45 |
 | /users (390px) | button „e2e-vi-6r37o sperren“ | 44×44 | 52×45 |
 | /users (390px) | button „Benutzer e2e-vi-6r37o löschen“ | 44×44 | 48×45 |
-| /users (390px) | button „e2e-vi-6s3rs bearbeiten“ | 132×44 | 136×45 |
-| /users (390px) | button „e2e-vi-6s3rs sperren“ | 44×44 | 52×45 |
-| /users (390px) | button „Benutzer e2e-vi-6s3rs löschen“ | 44×44 | 48×45 |
 | / (768px) | a „patchwatch“ | 55×47 | 55×47 |
 | / (768px) | a „Hosts“ | 39×36 | 39×36 |
 | / (768px) | a „CVEs“ | 39×36 | 39×36 |
@@ -208,13 +210,15 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /settings (768px) | a „Einstellungen“ | 39×36 | 39×36 |
 | /settings (768px) | a „CVE-Feeds aktuell“ | 39×36 | 39×36 |
 | /settings (768px) | button „Abmelden“ | 39×36 | 39×36 |
+| /settings (768px) | a „Allgemein“ | 85×32 | 85×32 |
+| /settings (768px) | a „Zeitpläne“ | 81×32 | 82×32 |
+| /settings (768px) | a „OIDC“ | 56×32 | 57×32 |
 | /settings (768px) | button „Profilbild ändern“ | 126×32 | 135×45 |
 | /settings (768px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (768px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (768px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (768px) | button „Passwort ändern“ | 126×32 | 126×33 |
 | /settings (768px) | button[combobox] „System“ | 593×32 | 628×37 |
-| /settings (768px) | input „INPUT“ | 16×16 | 47×33 |
 | /users (768px) | a „patchwatch“ | 55×47 | 55×47 |
 | /users (768px) | a „Hosts“ | 39×36 | 39×36 |
 | /users (768px) | a „CVEs“ | 39×36 | 39×36 |
@@ -225,7 +229,6 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (768px) | a „CVE-Feeds aktuell“ | 39×36 | 39×36 |
 | /users (768px) | button „Abmelden“ | 39×36 | 39×36 |
 | /users (768px) | button[tab] „Benutzer“ | 77×32 | 81×44 |
-| /users (768px) | button[tab] „OIDC“ | 56×32 | 60×44 |
 | /users (768px) | button[tab] „Aktivität“ | 75×32 | 81×44 |
 | /users (768px) | button „Benutzer anlegen“ | 152×32 | 161×44 |
 | /users (768px) | button „admin bearbeiten“ | 132×32 | 140×45 |
@@ -234,12 +237,18 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (768px) | button „e2e-op-6r37o bearbeiten“ | 132×32 | 140×45 |
 | /users (768px) | button „e2e-op-6r37o sperren“ | 132×32 | 140×45 |
 | /users (768px) | button „Benutzer e2e-op-6r37o löschen“ | 132×32 | 136×45 |
+| /users (768px) | button „e2e-op-fs5nl bearbeiten“ | 132×32 | 140×45 |
+| /users (768px) | button „e2e-op-fs5nl sperren“ | 132×32 | 140×45 |
+| /users (768px) | button „Benutzer e2e-op-fs5nl löschen“ | 132×32 | 136×45 |
 | /users (768px) | button „e2e-vi-6r37o bearbeiten“ | 132×32 | 140×45 |
 | /users (768px) | button „e2e-vi-6r37o sperren“ | 132×32 | 140×45 |
 | /users (768px) | button „Benutzer e2e-vi-6r37o löschen“ | 132×32 | 136×45 |
 | /users (768px) | button „e2e-vi-6s3rs bearbeiten“ | 132×32 | 140×45 |
 | /users (768px) | button „e2e-vi-6s3rs sperren“ | 132×32 | 140×45 |
 | /users (768px) | button „Benutzer e2e-vi-6s3rs löschen“ | 132×32 | 136×45 |
+| /users (768px) | button „e2e-vi-e7aul bearbeiten“ | 132×32 | 140×45 |
+| /users (768px) | button „e2e-vi-e7aul sperren“ | 132×32 | 140×45 |
+| /users (768px) | button „Benutzer e2e-vi-e7aul löschen“ | 132×32 | 136×45 |
 | / (1024px) | a „patchwatch“ | 175×47 | 175×47 |
 | / (1024px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | / (1024px) | a „Hosts“ | 203×36 | 203×36 |
@@ -347,9 +356,9 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /cves (1024px) | a „db-01: verwundbar, Fix noch nicht instal“ | 47×22 | 49×23 |
 | /cves (1024px) | a „db-02: verwundbar, Fix noch nicht instal“ | 49×22 | 50×23 |
 | /cves (1024px) | button „+2 weitere Hosts“ | 26×24 | 26×25 |
-| /cves (1024px) | button „Nicht mehr beobachten“ | 32×32 | 37×39 |
-| /cves (1024px) | a „CVE-2024-1086“ | 94×15 | 95×16 |
-| /cves (1024px) | a „web-02: Fix installiert, Neustart nötig“ | 70×22 | 71×23 |
+| /cves (1024px) | button „Nicht mehr beobachten“ | 32×32 | 37×32 |
+| /cves (1024px) | a „CVE-2024-1086“ | 94×15 | 95×15 |
+| /cves (1024px) | a „web-02: Fix installiert, Neustart nötig“ | 70×22 | 71×22 |
 | /notifications (1024px) | a „patchwatch“ | 175×47 | 175×47 |
 | /notifications (1024px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | /notifications (1024px) | a „Hosts“ | 203×36 | 203×36 |
@@ -381,17 +390,18 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /settings (1024px) | a „Einstellungen“ | 203×36 | 203×36 |
 | /settings (1024px) | a „CVE-Feeds aktuell“ | 203×36 | 203×36 |
 | /settings (1024px) | button „Abmelden“ | 203×36 | 203×36 |
+| /settings (1024px) | a „Allgemein“ | 85×32 | 85×32 |
+| /settings (1024px) | a „Zeitpläne“ | 81×32 | 82×32 |
+| /settings (1024px) | a „OIDC“ | 56×32 | 57×32 |
 | /settings (1024px) | button „Profilbild ändern“ | 126×32 | 135×45 |
 | /settings (1024px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1024px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1024px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1024px) | button „Passwort ändern“ | 126×32 | 126×33 |
 | /settings (1024px) | button[combobox] „System“ | 405×32 | 440×37 |
-| /settings (1024px) | input „INPUT“ | 16×16 | 47×33 |
-| /settings (1024px) | input „INPUT“ | 232×32 | 232×53 |
-| /settings (1024px) | input „INPUT“ | 232×32 | 232×53 |
-| /settings (1024px) | input „INPUT“ | 232×32 | 232×53 |
-| /settings (1024px) | input „INPUT“ | 232×32 | 232×53 |
+| /settings (1024px) | input „INPUT“ | 112×32 | 112×53 |
+| /settings (1024px) | input „INPUT“ | 112×32 | 112×53 |
+| /settings (1024px) | input „INPUT“ | 112×32 | 143×53 |
 | /users (1024px) | a „patchwatch“ | 175×47 | 175×47 |
 | /users (1024px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | /users (1024px) | a „Hosts“ | 203×36 | 203×36 |
@@ -404,13 +414,20 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (1024px) | a „CVE-Feeds aktuell“ | 203×36 | 203×36 |
 | /users (1024px) | button „Abmelden“ | 203×36 | 203×36 |
 | /users (1024px) | button[tab] „Benutzer“ | 77×32 | 81×44 |
-| /users (1024px) | button[tab] „OIDC“ | 56×32 | 60×44 |
 | /users (1024px) | button[tab] „Aktivität“ | 75×32 | 81×44 |
 | /users (1024px) | button „Benutzer anlegen“ | 152×32 | 161×44 |
 | /users (1024px) | button „Aktionen für admin“ | 32×32 | 40×45 |
 | /users (1024px) | button „Aktionen für e2e-op-6r37o“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-op-fs5nl“ | 32×32 | 40×45 |
 | /users (1024px) | button „Aktionen für e2e-vi-6r37o“ | 32×32 | 40×45 |
 | /users (1024px) | button „Aktionen für e2e-vi-6s3rs“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-e7aul“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-fs5nl“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-ft6p6“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-fv98g“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-fynfi“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-g11rj“ | 32×32 | 40×45 |
+| /users (1024px) | button „Aktionen für e2e-vi-ioqez“ | 32×32 | 40×45 |
 | / (1440px) | a „patchwatch“ | 175×47 | 175×47 |
 | / (1440px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | / (1440px) | a „Hosts“ | 203×36 | 203×36 |
@@ -512,13 +529,11 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /cves (1440px) | button „Abmelden“ | 203×36 | 203×36 |
 | /cves (1440px) | button „Alle abrufen“ | 160×32 | 168×44 |
 | /cves (1440px) | button „Quelle hinzufügen“ | 160×32 | 168×44 |
-| /cves (1440px) | button „Abruf-Details: Erfolgreich beendet, unve“ | 144×42 | 155×49 |
 | /cves (1440px) | button „Debian: Details anzeigen“ | 87×24 | 89×25 |
 | /cves (1440px) | button „Debian jetzt abrufen“ | 32×32 | 40×37 |
 | /cves (1440px) | button „Debian abschalten“ | 32×32 | 40×37 |
 | /cves (1440px) | button „Debian bearbeiten“ | 32×32 | 40×37 |
 | /cves (1440px) | button „Debian löschen“ | 32×32 | 36×37 |
-| /cves (1440px) | button „Abruf-Details: Erfolgreich beendet“ | 106×26 | 117×33 |
 | /cves (1440px) | button „Ubuntu: Details anzeigen“ | 87×24 | 89×25 |
 | /cves (1440px) | button „Ubuntu jetzt abrufen“ | 32×32 | 40×37 |
 | /cves (1440px) | button „Ubuntu abschalten“ | 32×32 | 40×37 |
@@ -577,17 +592,19 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /settings (1440px) | a „Einstellungen“ | 203×36 | 203×36 |
 | /settings (1440px) | a „CVE-Feeds aktuell“ | 203×36 | 203×36 |
 | /settings (1440px) | button „Abmelden“ | 203×36 | 203×36 |
+| /settings (1440px) | a „Allgemein“ | 85×32 | 85×32 |
+| /settings (1440px) | a „Zeitpläne“ | 81×32 | 82×32 |
+| /settings (1440px) | a „OIDC“ | 56×32 | 57×32 |
 | /settings (1440px) | button „Profilbild ändern“ | 126×32 | 135×45 |
 | /settings (1440px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1440px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1440px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1440px) | button „Passwort ändern“ | 126×32 | 126×33 |
 | /settings (1440px) | button[combobox] „System“ | 821×32 | 856×37 |
-| /settings (1440px) | input „INPUT“ | 16×16 | 47×33 |
-| /settings (1440px) | input „INPUT“ | 330×32 | 330×53 |
-| /settings (1440px) | input „INPUT“ | 330×32 | 330×53 |
-| /settings (1440px) | input „INPUT“ | 330×32 | 330×53 |
-| /settings (1440px) | input „INPUT“ | 330×32 | 330×53 |
+| /settings (1440px) | input „INPUT“ | 112×32 | 112×53 |
+| /settings (1440px) | input „INPUT“ | 112×32 | 112×53 |
+| /settings (1440px) | input „INPUT“ | 112×32 | 143×53 |
+| /settings (1440px) | button[combobox] „Aus (Agents melden nach eigenem Zeitplan“ | 294×32 | 302×35 |
 | /users (1440px) | a „patchwatch“ | 175×47 | 175×47 |
 | /users (1440px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | /users (1440px) | a „Hosts“ | 203×36 | 203×36 |
@@ -600,7 +617,6 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (1440px) | a „CVE-Feeds aktuell“ | 203×36 | 203×36 |
 | /users (1440px) | button „Abmelden“ | 203×36 | 203×36 |
 | /users (1440px) | button[tab] „Benutzer“ | 77×32 | 81×44 |
-| /users (1440px) | button[tab] „OIDC“ | 56×32 | 60×44 |
 | /users (1440px) | button[tab] „Aktivität“ | 75×32 | 81×44 |
 | /users (1440px) | button „Benutzer anlegen“ | 152×32 | 161×44 |
 | /users (1440px) | button „admin bearbeiten“ | 132×32 | 140×45 |
@@ -609,12 +625,36 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (1440px) | button „e2e-op-6r37o bearbeiten“ | 132×32 | 140×45 |
 | /users (1440px) | button „e2e-op-6r37o sperren“ | 132×32 | 140×45 |
 | /users (1440px) | button „Benutzer e2e-op-6r37o löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-op-fs5nl bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-op-fs5nl sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-op-fs5nl löschen“ | 132×32 | 136×45 |
 | /users (1440px) | button „e2e-vi-6r37o bearbeiten“ | 132×32 | 140×45 |
 | /users (1440px) | button „e2e-vi-6r37o sperren“ | 132×32 | 140×45 |
 | /users (1440px) | button „Benutzer e2e-vi-6r37o löschen“ | 132×32 | 136×45 |
 | /users (1440px) | button „e2e-vi-6s3rs bearbeiten“ | 132×32 | 140×45 |
 | /users (1440px) | button „e2e-vi-6s3rs sperren“ | 132×32 | 140×45 |
 | /users (1440px) | button „Benutzer e2e-vi-6s3rs löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-e7aul bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-e7aul sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-e7aul löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-fs5nl bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-fs5nl sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-fs5nl löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-ft6p6 bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-ft6p6 sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-ft6p6 löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-fv98g bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-fv98g sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-fv98g löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-fynfi bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-fynfi sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-fynfi löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-g11rj bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-g11rj sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-g11rj löschen“ | 132×32 | 136×45 |
+| /users (1440px) | button „e2e-vi-ioqez bearbeiten“ | 132×32 | 140×45 |
+| /users (1440px) | button „e2e-vi-ioqez sperren“ | 132×32 | 140×45 |
+| /users (1440px) | button „Benutzer e2e-vi-ioqez löschen“ | 132×32 | 136×45 |
 | / (1920px) | a „patchwatch“ | 175×47 | 175×47 |
 | / (1920px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | / (1920px) | a „Hosts“ | 203×36 | 203×36 |
@@ -786,17 +826,19 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /settings (1920px) | a „Einstellungen“ | 203×36 | 203×36 |
 | /settings (1920px) | a „CVE-Feeds aktuell“ | 203×36 | 203×36 |
 | /settings (1920px) | button „Abmelden“ | 203×36 | 203×36 |
+| /settings (1920px) | a „Allgemein“ | 85×32 | 85×32 |
+| /settings (1920px) | a „Zeitpläne“ | 81×32 | 82×32 |
+| /settings (1920px) | a „OIDC“ | 56×32 | 57×32 |
 | /settings (1920px) | button „Profilbild ändern“ | 126×32 | 135×45 |
 | /settings (1920px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1920px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1920px) | input „INPUT“ | 384×32 | 384×53 |
 | /settings (1920px) | button „Passwort ändern“ | 126×32 | 126×33 |
 | /settings (1920px) | button[combobox] „System“ | 1301×32 | 1336×37 |
-| /settings (1920px) | input „INPUT“ | 16×16 | 47×33 |
-| /settings (1920px) | input „INPUT“ | 330×32 | 330×53 |
-| /settings (1920px) | input „INPUT“ | 330×32 | 330×53 |
-| /settings (1920px) | input „INPUT“ | 330×32 | 330×53 |
-| /settings (1920px) | input „INPUT“ | 330×32 | 330×53 |
+| /settings (1920px) | input „INPUT“ | 112×32 | 112×53 |
+| /settings (1920px) | input „INPUT“ | 112×32 | 112×53 |
+| /settings (1920px) | input „INPUT“ | 112×32 | 143×53 |
+| /settings (1920px) | button[combobox] „Aus (Agents melden nach eigenem Zeitplan“ | 294×32 | 302×35 |
 | /users (1920px) | a „patchwatch“ | 175×47 | 175×47 |
 | /users (1920px) | button „Seitenleiste ausblenden“ | 36×36 | 36×37 |
 | /users (1920px) | a „Hosts“ | 203×36 | 203×36 |
@@ -809,7 +851,6 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (1920px) | a „CVE-Feeds aktuell“ | 203×36 | 203×36 |
 | /users (1920px) | button „Abmelden“ | 203×36 | 203×36 |
 | /users (1920px) | button[tab] „Benutzer“ | 77×32 | 81×44 |
-| /users (1920px) | button[tab] „OIDC“ | 56×32 | 60×44 |
 | /users (1920px) | button[tab] „Aktivität“ | 75×32 | 81×44 |
 | /users (1920px) | button „Benutzer anlegen“ | 152×32 | 161×44 |
 | /users (1920px) | button „admin bearbeiten“ | 132×32 | 140×44 |
@@ -818,9 +859,33 @@ Erzeugt von `scripts/hit-targets.mjs` (Raster per `elementFromPoint`). Regel: we
 | /users (1920px) | button „e2e-op-6r37o bearbeiten“ | 132×32 | 140×44 |
 | /users (1920px) | button „e2e-op-6r37o sperren“ | 32×32 | 40×44 |
 | /users (1920px) | button „Benutzer e2e-op-6r37o löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-op-fs5nl bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-op-fs5nl sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-op-fs5nl löschen“ | 32×32 | 36×44 |
 | /users (1920px) | button „e2e-vi-6r37o bearbeiten“ | 132×32 | 140×44 |
 | /users (1920px) | button „e2e-vi-6r37o sperren“ | 32×32 | 40×44 |
 | /users (1920px) | button „Benutzer e2e-vi-6r37o löschen“ | 32×32 | 36×44 |
 | /users (1920px) | button „e2e-vi-6s3rs bearbeiten“ | 132×32 | 140×44 |
 | /users (1920px) | button „e2e-vi-6s3rs sperren“ | 32×32 | 40×44 |
 | /users (1920px) | button „Benutzer e2e-vi-6s3rs löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-e7aul bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-e7aul sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-e7aul löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-fs5nl bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-fs5nl sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-fs5nl löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-ft6p6 bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-ft6p6 sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-ft6p6 löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-fv98g bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-fv98g sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-fv98g löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-fynfi bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-fynfi sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-fynfi löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-g11rj bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-g11rj sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-g11rj löschen“ | 32×32 | 36×44 |
+| /users (1920px) | button „e2e-vi-ioqez bearbeiten“ | 132×32 | 140×44 |
+| /users (1920px) | button „e2e-vi-ioqez sperren“ | 32×32 | 40×44 |
+| /users (1920px) | button „Benutzer e2e-vi-ioqez löschen“ | 32×32 | 36×44 |

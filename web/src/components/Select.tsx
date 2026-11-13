@@ -55,9 +55,18 @@ export function Select({
   const typed = useRef<{ s: string; t: number }>({ s: "", t: 0 });
   const current = opts.findIndex((o) => o.value === value);
 
-  function pick(i: number) {
+  function pick(i: number, touch = false) {
     const o = opts[i];
     if (!o || o.disabled) return;
+    if (touch) {
+      // Auf Touch folgt dem pointerdown noch ein „click“, der nach dem Schließen der Liste das Element darunter träfe (z. B. einen Schalter im Dialog): einmalig verschlucken.
+      const swallow = (e: Event) => {
+        e.stopPropagation();
+        e.preventDefault();
+      };
+      document.addEventListener("click", swallow, { capture: true, once: true });
+      window.setTimeout(() => document.removeEventListener("click", swallow, true), 600);
+    }
     setOpen(false);
     btn.current?.focus();
     if (o.value !== value) onChange?.({ target: { value: o.value }, currentTarget: { value: o.value } } as unknown as ChangeEvent<HTMLSelectElement>);
@@ -206,7 +215,7 @@ export function Select({
               // pointerdown statt click: gilt für Maus und Touch gleich und kommt vor jedem Fokuswechsel.
               onPointerDown={(e) => {
                 e.preventDefault();
-                pick(i);
+                pick(i, e.pointerType !== "mouse");
               }}
               onPointerEnter={() => setActive(i)}
               className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-xs px-2 text-sm max-md:min-h-11 ${o.disabled ? "opacity-50" : ""} ${i === active ? "bg-sunk" : ""} ${o.value === value ? "font-semibold" : ""}`}
