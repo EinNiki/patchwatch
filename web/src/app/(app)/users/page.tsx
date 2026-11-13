@@ -1,18 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/components/AuthProvider";
 import { can, type RolesResponse } from "@/lib/roles";
 import { UsersTab } from "@/components/users/UsersTab";
-import { OidcSettings } from "@/components/users/OidcSettings";
 import { AuditTab } from "@/components/users/AuditTab";
 
 const TABS = [
   { id: "users", label: "Benutzer" },
-  { id: "oidc", label: "OIDC" },
   { id: "audit", label: "Aktivität" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -38,6 +37,11 @@ export default function UsersPage() {
   // Nur mit Recht laden (der Server würde sonst mit 403 antworten).
   const roles = useApi<RolesResponse>(allowed ? "/roles" : null);
   const [tab, setTab] = useState<TabId>("users");
+  const router = useRouter();
+  // OIDC liegt jetzt unter Einstellungen: alte Lesezeichen auf /users#oidc führen dorthin.
+  useEffect(() => {
+    if (window.location.hash === "#oidc") router.replace("/settings#oidc");
+  }, [router]);
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   if (!allowed) return <Forbidden />;
 
@@ -75,7 +79,7 @@ export default function UsersPage() {
         ))}
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === "users" ? <UsersTab roles={roles.data} /> : tab === "oidc" ? <OidcSettings roles={roles.data} /> : <AuditTab />}
+        {tab === "users" ? <UsersTab roles={roles.data} /> : <AuditTab />}
       </div>
     </>
   );

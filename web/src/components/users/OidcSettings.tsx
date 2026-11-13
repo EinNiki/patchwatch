@@ -12,6 +12,22 @@ import { useAuth } from "@/components/AuthProvider";
 import type { OidcSettings as Settings } from "@/lib/types";
 import type { RolesResponse } from "@/lib/roles";
 
+/** Ruhiger Hinweiskasten (neutral, kein Warn- oder Fehlerton): erklärt einen Zustand, ohne Alarm zu schlagen. */
+function InfoBox({ children }: { children: React.ReactNode }) {
+  return (
+    <p role="note" className="m-0 border-l-4 border-line bg-sunk px-3 py-2 text-sm text-fg2">
+      {children}
+    </p>
+  );
+}
+
+// Ohne Recht zur Benutzerverwaltung liefert der Server die Rollenliste nicht: feste Vorlagen als Rückfall.
+const FALLBACK_ROLES = [
+  { key: "admin", title: "Administrator", permissions: [] },
+  { key: "operator", title: "Betreiber", permissions: [] },
+  { key: "viewer", title: "Nur Lesen", permissions: [] },
+];
+
 interface TestResult {
   ok: boolean;
   keys?: number;
@@ -48,6 +64,10 @@ function Form({ s, roles, reload }: { s: Settings; roles: RolesResponse | undefi
   const [test, setTest] = useState<TestResult | null>(null);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const list = (v: string) => v.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+  // Der Test prüft die gespeicherten Werte: erst nach dem Speichern und ohne ungespeicherte Änderungen.
+  const [initial] = useState(() => JSON.stringify([f, s.group_roles]));
+  const dirty = JSON.stringify([f, groups]) !== initial;
+  const testBlocked = s.source !== "ui" ? "Speichere zuerst die Einstellungen; der Test prüft die gespeicherten Werte." : dirty ? "Es gibt ungespeicherte Änderungen; speichere zuerst, der Test prüft die gespeicherten Werte." : undefined;
   const hasAdminMap = groups.some((g) => g.role === "admin");
 
   async function save(e: React.FormEvent) {
@@ -94,15 +114,11 @@ function Form({ s, roles, reload }: { s: Settings; roles: RolesResponse | undefi
 
   return (
     <form onSubmit={(e) => void save(e)} className="flex max-w-2xl flex-col gap-3">
-      {s.source === "env" ? (
-        <p className="m-0 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
-          Die Werte stammen aus Umgebungsvariablen. Speichern legt eine Einstellung in der Datenbank an, die ab dann Vorrang hat.
-        </p>
-      ) : null}
+      {s.source === "env" ? <InfoBox>Die Werte stammen aus Umgebungsvariablen. Speichern legt eine Einstellung in der Datenbank an, die ab dann Vorrang hat.</InfoBox> : null}
       {!s.secret_storage ? (
-        <p className="m-0 border-l-4 border-warn bg-warn-soft px-3 py-2 text-warn">
-          PATCHWATCH_SECRET_KEY ist nicht gesetzt: das Client-Secret lässt sich nicht speichern.
-        </p>
+        <InfoBox>
+          Zum Speichern des Client-Secrets braucht der Server den Schlüssel <code>PATCHWATCH_SECRET_KEY</code> in seiner Umgebung. Er ist nicht gesetzt; sobald er gesetzt und der Server neu gestartet ist, lässt sich das Secret hier eintragen. Die übrigen Felder kannst du schon jetzt ausfüllen.
+        </InfoBox>
       ) : null}
       <Checkbox label="Anmeldung per OIDC aktivieren" checked={f.enabled} onChange={(e) => set("enabled", e.target.checked)} />
       <Field label="Name auf dem Anmelde-Knopf (z. B. Authentik)">
@@ -149,7 +165,7 @@ function Form({ s, roles, reload }: { s: Settings; roles: RolesResponse | undefi
             <div key={i} className="mb-1 flex flex-wrap items-center gap-2">
               <TextInput aria-label={`Gruppe ${i + 1}`} value={g.group} onChange={(e) => setGroups(groups.map((x, j) => (j === i ? { ...x, group: e.target.value } : x)))} placeholder="Gruppenname" className="min-w-0 flex-1" />
               <Select aria-label={`Rolle für Gruppe ${i + 1}`} value={g.role} onChange={(e) => setGroups(groups.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))}>
-                {(roles?.roles ?? [{ key: "viewer", title: "Nur Lesen", permissions: [] }]).map((r) => (
+                {(roles?.roles ?? FALLBACK_ROLES).map((r) => (
                   <option key={r.key} value={r.key}>
                     {r.title}
                   </option>
@@ -187,14 +203,20 @@ function Form({ s, roles, reload }: { s: Settings; roles: RolesResponse | undefi
         </p>
       ) : null}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button onClick={() => void runTest()} busy={testing}>
+        <Button
+          onClick={testBlocked ? undefined : () => void runTest()}
+          busy={testing}
+          aria-disabled={testBlocked ? true : undefined}
+          title={testBlocked}
+          className={testBlocked ? "cursor-not-allowed opacity-50" : ""}
+        >
           Verbindung testen
         </Button>
         <Button type="submit" variant="primary" busy={busy}>
           Speichern
         </Button>
       </div>
-      <p className="m-0 text-xs text-fg3">Der Verbindungstest prüft die gespeicherten Werte; speichere zuerst.</p>
+      <p className="m-0 text-xs text-fg3">{testBlocked ?? "Der Verbindungstest prüft die gespeicherten Werte."}</p>
     </form>
   );
 }
