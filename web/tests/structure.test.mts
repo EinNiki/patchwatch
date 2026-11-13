@@ -42,6 +42,9 @@ test("Entfernte Texte stehen nirgends mehr im Quelltext der Oberfläche", () => 
   for (const f of files) {
     const s = readFileSync(f, "utf8");
     assert.doesNotMatch(s, /Gestrichelt:/, `${f}: Legende „Gestrichelt: …“`);
+    // Geheimnisse kann niemand sehen (der Server liefert nie Klartext): kein Recht, keine Zeile, kein Text dazu.
+    assert.doesNotMatch(s, /Kann Geheimnisse sehen|can_see_secrets/i, `${f}: „Kann Geheimnisse sehen“`);
+    if (f.includes("users")) assert.doesNotMatch(s, /darf nicht/, `${f}: Text „darf nicht“ (Rechte sind Schalter)`);
   }
 });
 

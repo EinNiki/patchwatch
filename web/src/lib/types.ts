@@ -374,6 +374,10 @@ export interface UserRow {
   oidc_linked: boolean;
   requested_role: string | null;
   is_self: boolean;
+  /** Wirksame Rechte (Vorlage der Rolle oder eigene Auswahl). */
+  permissions: string[];
+  /** `true`: eigene Auswahl statt Vorlage der Rolle. */
+  custom_permissions: boolean;
 }
 
 export interface AuditEntry {

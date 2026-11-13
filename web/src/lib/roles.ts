@@ -6,14 +6,22 @@ export interface RoleInfo {
   title: string;
   permissions: string[];
 }
+export interface PermInfo {
+  name: string;
+  label: string;
+  description: string;
+  /** Voraussetzungen (Schreiben setzt Lesen voraus); Spiegel der Server-Tabelle, der Server prüft erneut. */
+  requires: string[];
+  /** Vergabe verlangt das eigene Passwort bzw. eine frische Anmeldung. */
+  sensitive: boolean;
+}
 export interface PermGroup {
   title: string;
-  permissions: { name: string; label: string }[];
+  permissions: PermInfo[];
 }
 export interface RolesResponse {
   roles: RoleInfo[];
   groups: PermGroup[];
-  can_see_secrets: boolean;
 }
 
 /** Hat der Benutzer das benannte Recht (z. B. `hosts.write`)? Ohne Angabe: nein (Standard verweigern). */
@@ -21,25 +29,60 @@ export function can(permissions: readonly string[] | undefined, perm: string): b
   return !!permissions && permissions.includes(perm);
 }
 
-export interface PreviewGroup {
-  title: string;
-  items: { label: string; allowed: boolean }[];
+const allPerms = (groups: readonly PermGroup[]): PermInfo[] => groups.flatMap((g) => g.permissions);
+
+/** Schließt eine Auswahl unter den Voraussetzungen ab: ein Recht ohne seine Voraussetzung fällt weg (kaskadierend). Unbekannte Namen fallen ebenfalls weg. */
+export function closeSet(selected: Iterable<string>, groups: readonly PermGroup[]): string[] {
+  const info = new Map(allPerms(groups).map((p) => [p.name, p]));
+  let cur = [...new Set(selected)].filter((n) => info.has(n));
+  for (;;) {
+    const keep = cur.filter((n) => info.get(n)!.requires.every((r) => cur.includes(r)));
+    if (keep.length === cur.length) break;
+    cur = keep;
+  }
+  return cur;
 }
 
-/** Rechtevorschau einer Rolle: je Gruppe alle Rechte mit "darf" oder "darf nicht". */
-export function previewRows(role: RoleInfo | undefined, groups: readonly PermGroup[]): PreviewGroup[] {
-  const has = new Set(role?.permissions ?? []);
-  return groups.map((g) => ({ title: g.title, items: g.permissions.map((p) => ({ label: p.label, allowed: has.has(p.name) })) }));
+/** Schalter umlegen: Einschalten nimmt die Voraussetzungen mit, Ausschalten nimmt abhängige Rechte mit (Abhängigkeitslogik wie am Server). */
+export function togglePerm(current: readonly string[], name: string, on: boolean, groups: readonly PermGroup[]): string[] {
+  const info = new Map(allPerms(groups).map((p) => [p.name, p]));
+  if (!info.has(name)) return closeSet(current, groups);
+  if (!on) return closeSet(current.filter((n) => n !== name), groups);
+  const next = new Set(current);
+  const add = (n: string) => {
+    if (next.has(n)) return;
+    next.add(n);
+    info.get(n)?.requires.forEach(add);
+  };
+  add(name);
+  return closeSet(next, groups);
 }
 
-/** Zusammenfassung unter dem Formular, bevor angelegt wird. */
-export function createSummary(name: string, roleTitle: string): string {
-  return `Benutzer ${name.trim() || "…"} wird mit der Rolle ${roleTitle} angelegt.`;
+/** Welche anderen Rechte hängen von diesem ab (werden beim Ausschalten mit ausgeschaltet)? Direkt und indirekt, nur bereits gewährte. */
+export function dependents(name: string, current: readonly string[], groups: readonly PermGroup[]): string[] {
+  const after = new Set(togglePerm(current, name, false, groups));
+  return current.filter((n) => n !== name && !after.has(n));
 }
 
-/** Administratorrechte berührt eine Änderung, wenn die alte oder die neue Rolle Administrator ist: dann wird das eigene Passwort verlangt. */
-export function involvesAdmin(oldRole: string | null, newRole: string): boolean {
-  return oldRole === "admin" || newRole === "admin";
+export const sameSet = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
+
+/** Vorlage, deren Rechte genau der Auswahl entsprechen; sonst `custom` ("Eigene"). */
+export function templateOf(selected: readonly string[], roles: readonly RoleInfo[]): string {
+  return roles.find((r) => sameSet(r.permissions, selected))?.key ?? "custom";
+}
+
+/** Sensible Rechte, die in `next` neu hinzukommen oder wegfallen (verlangt Passwort bzw. frische Anmeldung). */
+export function sensitiveChange(prev: readonly string[], next: readonly string[], groups: readonly PermGroup[]): string[] {
+  return allPerms(groups)
+    .filter((p) => p.sensitive && prev.includes(p.name) !== next.includes(p.name))
+    .map((p) => p.name);
+}
+
+/** Zusammenfassung unter dem Formular: erst sichtbar, wenn ein Name eingegeben ist (vorher leer). */
+export function createSummary(name: string, templateTitle: string, count: number): string {
+  const n = name.trim();
+  if (!n) return "";
+  return `Benutzer ${n} wird mit ${templateTitle === "Eigene" ? `eigener Auswahl (${count} Rechte)` : `der Vorlage ${templateTitle} (${count} Rechte)`} angelegt.`;
 }
 
 export const STATUS_LABEL: Record<string, string> = { active: "aktiv", locked: "gesperrt", pending: "wartet auf Freigabe" };
@@ -56,6 +99,7 @@ const ACTION_LABEL: Record<string, string> = {
   "user.created_by_oidc": "Konto per OIDC angelegt",
   "user.updated": "Benutzer geändert",
   "user.role_changed": "Rolle geändert",
+  "user.permissions_changed": "Rechte geändert",
   "user.role_changed_by_idp": "Rolle durch Anbieter herabgestuft",
   "user.locked": "Benutzer gesperrt",
   "user.unlocked": "Benutzer entsperrt",

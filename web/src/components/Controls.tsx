@@ -90,6 +90,28 @@ export function Checkbox({ label, hint, className = "", ...props }: Omit<InputHT
   );
 }
 
+/**
+ * Schalter (`role="switch"`) mit Beschriftung links und Schalterfläche rechts in fester Spalte; die ganze Zeile ist die Trefferfläche
+ * (min. 44 px hoch). Der Text umbricht, nichts wird abgeschnitten. Zustand zeigt die Daumenstellung, nicht nur die Farbe.
+ */
+export function Switch({ label, hint, note, className = "", ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "role"> & { label: React.ReactNode; hint?: React.ReactNode; note?: React.ReactNode }) {
+  return (
+    <label className={`flex min-h-11 items-center gap-3 py-1.5 ${props.disabled ? "cursor-not-allowed" : "cursor-pointer"} ${className}`}>
+      <span className={`min-w-0 flex-1 [overflow-wrap:anywhere] ${props.disabled ? "text-fg3" : ""}`}>
+        <span className="font-semibold">{label}</span>
+        {hint ? <span className="block text-xs text-fg3">{hint}</span> : null}
+        {note ? <span className="block text-xs text-fg2">{note}</span> : null}
+      </span>
+      <input
+        type="checkbox"
+        role="switch"
+        className="relative h-6 w-10 shrink-0 appearance-none rounded-full border border-control bg-sunk transition-colors duration-(--dur-1) after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-fg3 after:transition-transform after:duration-(--dur-1) checked:border-accent checked:bg-accent checked:after:translate-x-4 checked:after:bg-bg disabled:opacity-60"
+        {...props}
+      />
+    </label>
+  );
+}
+
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex max-w-full flex-col gap-1 text-xs font-semibold text-fg2">
