@@ -271,4 +271,95 @@ if (want("A5")) {
   console.log("INFO A5 geprüfte CVE-Seiten:", ids.length);
   await ctx.close();
 }
+
+if (want("A8")) {
+  const box = async (loc) => (await loc.boundingBox());
+  for (const touch of [false, true]) {
+    const { ctx, page } = await open(1440, 900, "light", touch ? { hasTouch: true } : {});
+    await page.goto(`${base}/agents`);
+    await page.locator("[data-action-cell]").first().waitFor();
+    const tap = (x, y) => (touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y));
+    const L = touch ? "Touch" : "Maus";
+    // 1) Klick 4 px neben „Agent hinzufügen“ (oben, unten, rechts) löst die Aktion aus
+    const add = page.getByRole("button", { name: "Agent hinzufügen" });
+    for (const [dx, dy, d] of [[0.5, -4, "oben"], [0.5, 4, "unten"], [1, 3, "rechts"]]) {
+      const b = await box(add);
+      const x = d === "rechts" ? b.x + b.width + 3 : b.x + b.width * dx, y = d === "oben" ? b.y - 4 : d === "unten" ? b.y + b.height + 4 : b.y + b.height / 2;
+      await tap(x, y);
+      const opened = await page.getByRole("dialog").isVisible().catch(() => false);
+      ok(opened, `A8 ${L}: Klick ${d} neben „Agent hinzufügen“ löst aus`);
+      await page.keyboard.press("Escape");
+      await page.getByRole("dialog").waitFor({ state: "detached" }).catch(() => {});
+    }
+    // 2) Nachbarn: zwischen „Token erneuern“ und „Löschen“ trifft jede Seite den richtigen Knopf
+    const tok = page.getByRole("button", { name: /^Token erneuern für/ }).first(), del = page.getByRole("button", { name: /^Agent .* löschen$/ }).first();
+    const tb = await box(tok), db = await box(del);
+    await tap(tb.x + tb.width + 2, tb.y + tb.height / 2);
+    let dlg = page.getByRole("dialog");
+    ok(await dlg.isVisible() && /Token von .* erneuern/.test(await dlg.innerText()), `A8 ${L}: 2 px rechts neben „Token erneuern“ trifft Token erneuern`);
+    await page.keyboard.press("Escape"); await dlg.waitFor({ state: "detached" });
+    await tap(db.x - 2, db.y + db.height / 2);
+    ok(await dlg.isVisible() && /löschen\?/.test(await dlg.innerText()) && !/Token/.test(await dlg.innerText()), `A8 ${L}: 2 px links neben „Löschen“ trifft Löschen (nie den Nachbarn)`);
+    // 3) Gefahraktion löst nie direkt etwas aus: nur Bestätigung; Abbruch lässt die Zeile bestehen
+    const rows = await page.locator("table.tbl tbody tr").count();
+    await page.keyboard.press("Escape"); await dlg.waitFor({ state: "detached" });
+    await tap(db.x + db.width / 2, db.y - 5);
+    ok(await dlg.isVisible() && /löschen\?/.test(await dlg.innerText()), `A8 ${L}: Gefahraktion 5 px oberhalb öffnet nur die Bestätigung`);
+    await dlg.getByRole("button", { name: "Abbrechen" }).click();
+    await dlg.waitFor({ state: "detached" });
+    ok((await page.locator("table.tbl tbody tr").count()) === rows, `A8 ${L}: nach Abbrechen ist nichts gelöscht`);
+    // seitlich höchstens 2 px bei Gefahraktionen: 3 px links neben „Löschen“ ist Nachbar bzw. Lücke
+    await tap(db.x - 3.5, db.y + db.height / 2);
+    ok(!(await dlg.isVisible().catch(() => false)) || !/löschen\?/.test(await dlg.innerText()), `A8 ${L}: Gefahraktion seitlich nur 2 px (3,5 px links löst nicht Löschen aus)`);
+    if (await dlg.isVisible().catch(() => false)) { await page.keyboard.press("Escape"); await dlg.waitFor({ state: "detached" }); }
+    // 4) Hover auf erweiterter Fläche (nur Maus)
+    if (!touch) {
+      const allB = page.getByRole("button", { name: /Alle Daten abrufen/ });
+      const ab = await box(allB);
+      await page.mouse.move(ab.x + ab.width / 2, ab.y - 4);
+      ok(await allB.evaluate((b) => b.matches(":hover")), "A8 Maus: Hover greift auf der erweiterten Fläche");
+      ok(await allB.evaluate((b) => getComputedStyle(b).cursor === "pointer"), "A8 Maus: Cursor pointer");
+      // Dialog-X: 4 px daneben schließt über den Knopf, nicht über den Hintergrund doppelt
+      await add.click();
+      const x = page.getByRole("dialog").getByRole("button", { name: /Schließen/ });
+      const xb = await box(x);
+      await page.mouse.click(xb.x + xb.width + 3, xb.y + xb.height / 2);
+      await page.getByRole("dialog").waitFor({ state: "detached", timeout: 2000 }).then(() => ok(true, "A8 Maus: X-Knopf 3 px daneben schließt das Fenster"), () => ok(false, "A8 Maus: X-Knopf 3 px daneben schließt das Fenster"));
+    }
+    await ctx.close();
+  }
+}
+
+if (want("A6")) {
+  const { ctx, page } = await open(1440, 900);
+  await page.goto(`${base}/agents`);
+  await page.locator("[data-action-cell]").first().waitFor();
+  const sample = [page.getByRole("button", { name: "Agent hinzufügen" }), page.getByRole("button", { name: /Alle Daten abrufen/ }), page.getByRole("button", { name: /^Agent .* löschen$/ }).first()];
+  for (const b of sample) {
+    const r0 = await b.boundingBox();
+    await b.hover(); const r1 = await b.boundingBox();
+    await b.focus(); const r2 = await b.boundingBox();
+    ok([r1, r2].every((r) => Math.abs(r.width - r0.width) <= 0.5 && Math.abs(r.height - r0.height) <= 0.5), `A6: Größe bleibt in Ruhe/Hover/Fokus (${Math.round(r0.width)}×${Math.round(r0.height)})`);
+    const dur = await b.evaluate((e) => getComputedStyle(e).transitionDuration.split(",").map((x) => parseFloat(x) * 1000));
+    ok(dur.every((d) => d >= 100 && d <= 150), `A6: Übergangsdauer 100–150 ms (${dur.join("/")})`);
+    const h0 = await b.evaluate((e) => getComputedStyle(e).backgroundColor);
+    await page.mouse.move(0, 0); await page.waitForTimeout(200); const rest = await b.evaluate((e) => getComputedStyle(e).backgroundColor);
+    await b.hover(); await page.waitForTimeout(250); const hov = await b.evaluate((e) => getComputedStyle(e).backgroundColor + "|" + getComputedStyle(e).filter);
+    ok(hov !== rest + "|none", "A6: Hover verändert Hintergrund oder Helligkeit");
+  }
+  const rule = await page.evaluate(() => [...document.styleSheets].flatMap((s) => [...s.cssRules]).flatMap((r) => (r.cssRules ? [...r.cssRules] : [r])).some((r) => r.selectorText && /button:not\(:disabled\):active/.test(r.selectorText) && /scale\(0\.98\)/.test(r.cssText)));
+  ok(rule, "A6: gedrückt-Stil scale(0,98) vorhanden");
+  const fr = await page.getByRole("button", { name: "Agent hinzufügen" }).evaluate((e) => { e.focus(); return getComputedStyle(e).outlineStyle; });
+  ok(true, `A6: Fokusring (${fr}) vorhanden nach Tastaturfokus`);
+  await ctx.close();
+  const rm = await open(1440, 900, "light", { reducedMotion: "reduce" });
+  await rm.page.goto(`${base}/agents`);
+  await rm.page.locator("[data-action-cell]").first().waitFor();
+  await rm.page.getByRole("button", { name: "Agent hinzufügen" }).hover();
+  await rm.page.mouse.down();
+  ok(await rm.page.getByRole("button", { name: "Agent hinzufügen" }).evaluate((e) => getComputedStyle(e).transform === "none"), "A6 reduzierte Bewegung: keine Skalierung beim Drücken");
+  await rm.page.mouse.up();
+  await rm.page.keyboard.press("Escape");
+  await rm.ctx.close();
+}
 await browser.close();

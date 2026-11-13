@@ -33,10 +33,20 @@ test("PageHeader nimmt keine Knöpfe entgegen", () => {
 
 test("Entfernte Texte stehen nirgends mehr im Quelltext der Oberfläche", () => {
   const files: string[] = [];
-  const walk = (d: string) => readdirSync(d).forEach((n) => { const p = join(d, n); statSync(p).isDirectory() ? walk(p) : /\.(tsx?|css)$/.test(n) && files.push(p); });
+  const walk = (d: string) => readdirSync(d).forEach((n) => {
+    const p = join(d, n);
+    if (statSync(p).isDirectory()) walk(p);
+    else if (/\.(tsx?|css)$/.test(n)) files.push(p);
+  });
   walk("src");
   for (const f of files) {
     const s = readFileSync(f, "utf8");
     assert.doesNotMatch(s, /Gestrichelt:/, `${f}: Legende „Gestrichelt: …“`);
   }
+});
+
+test("Rohe <button>: der Bestand darf nur schrumpfen (ESLint-Rahmen)", () => {
+  const cfg = readFileSync("eslint.config.mjs", "utf8");
+  const listed = [...cfg.matchAll(/^\s+"(src\/[^"]+)",$/gm)].map((m) => m[1]);
+  for (const f of listed) assert.match(readFileSync(f, "utf8"), /<button/, `${f}: steht in der Liste, enthält aber keinen rohen <button> mehr (aus der Liste entfernen)`);
 });

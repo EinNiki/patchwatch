@@ -877,3 +877,78 @@ summary {
   box-shadow: 0 0 0 2px var(--accent);
   background-color: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+
+/* ---------- Knöpfe: einheitliche Übergänge, gedrückt-Zustand und erweiterte Trefferfläche (siehe DESIGN.md „Knöpfe“, „Trefferflächen“) ----------
+   hig (buttons.md): eine Trefferfläche von mindestens 44 × 44 pt; accessibility.md: Abstand zwischen Steuerelementen ist so wichtig
+   wie die Größe. Der Knopf bleibt 32 px hoch (mobil 44 px); ein unsichtbares ::before am Knopf selbst (also ohne zweites Klickziel)
+   vergrößert die Fläche um --hit-y oben/unten (6 px: 32 → 44) und --hit-x seitlich (4 px = die Hälfte der üblichen 8 px Lücke, daher
+   nie Überlappung mit dem Nachbarn). Hover, Fokus und Aktiv-Zustand greifen auch auf der erweiterten Fläche, weil sie zum Knopf gehört. */
+:where(button) {
+  position: relative;
+  --hit-x: 4px;
+  --hit-y: 6px;
+  transition:
+    background-color 130ms var(--ease-out),
+    border-color 130ms var(--ease-out),
+    color 130ms var(--ease-out),
+    filter 130ms var(--ease-out),
+    transform 130ms var(--ease-out),
+    box-shadow 130ms var(--ease-out);
+}
+button:not(:disabled) {
+  cursor: pointer;
+}
+button::before {
+  content: "";
+  position: absolute;
+  /* ::before liegt im Innenrand (padding box): 1 px Rahmen zusätzlich, damit die Erweiterung ab der sichtbaren Kante gemessen wird. */
+  inset: calc(var(--hit-y) * -1 - var(--bw, 1px)) calc(var(--hit-x) * -1 - var(--bw, 1px));
+  background: transparent;
+}
+button:disabled::before,
+button[aria-disabled="true"]::before {
+  pointer-events: none;
+}
+/* Mobil sind die Knöpfe schon 44 px hoch: nur seitlich. */
+@media (max-width: 767px) {
+  :where(button) {
+    --hit-y: 0px;
+  }
+}
+/* Gefahraktionen: seitlich höchstens 2 px, nie zum Nachbarn hin (der Nachbar gewinnt immer in seiner sichtbaren Fläche). */
+button[data-danger="true"] {
+  --hit-x: 2px;
+}
+/* Dichte Reihen (Menüeinträge, Tabs, Seitenleiste, Sortierköpfe): keine Erweiterung, die Zeile ist selbst die Trefferfläche. */
+:where([data-hit="none"]) button,
+button[data-hit="none"] {
+  --hit-x: 0px;
+  --hit-y: 0px;
+}
+/* Tabs liegen mit 4 px Abstand nebeneinander: seitlich 2 px; Sortierköpfe sind niedrig, die Kopfzeile ist 44 px hoch. */
+[role="tab"] {
+  --hit-x: 2px;
+}
+.tbl th > button {
+  --hit-y: 8px;
+  --hit-x: 0px;
+}
+/* Seitenleiste, Kennzahlenleiste und Menüs: dichte Reihen ohne Lücke, die Zeile ist selbst die Trefferfläche. */
+aside button,
+[aria-label="Kennzahlen"] button,
+[role="menu"] button,
+[role="listbox"] button {
+  --hit-x: 0px;
+  --hit-y: 0px;
+}
+@media (hover: hover) {
+  button:not(:disabled):active {
+    transform: scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button,
+  button:active {
+    transform: none !important;
+  }
+}

@@ -6,6 +6,7 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, Ref, SelectHTMLAttribut
 // (eingeschalteter Umschalter, z. B. Stern „Nur Watchlist“; zusätzlich aria-pressed setzen).
 const base =
   "inline-flex h-8 items-center justify-center gap-1.5 rounded-[3px] border px-2 text-sm font-semibold whitespace-nowrap transition-[background-color,filter,border-color] duration-(--dur-1) ease-(--ease-out) disabled:cursor-not-allowed disabled:opacity-50 max-md:h-11";
+// Zustände: Ruhe, Hover (130 ms, Farbe), gedrückt (scale 0,98 aus globals.css), Fokus (Ring), deaktiviert, läuft (Spinner, gleiche Größe).
 const sizes = {
   default: "min-w-28 px-3",
   row: "w-28",
@@ -34,13 +35,15 @@ export function Button({
   disabled,
   ref,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "primary" | "danger" | "active"; size?: ButtonSize; busy?: boolean; ref?: Ref<HTMLButtonElement> }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "secondary" | "primary" | "danger" | "ghost" | "active"; size?: ButtonSize; busy?: boolean; ref?: Ref<HTMLButtonElement> }) {
   const v =
     variant === "primary"
       ? "border-accent bg-accent text-bg hover:brightness-110 active:brightness-90"
       : variant === "active"
         ? "border-accent bg-accent-soft text-accent hover:brightness-95 active:brightness-90"
-        : variant === "danger"
+        : variant === "ghost"
+          ? "border-transparent bg-transparent text-fg hover:bg-sunk active:bg-sunk active:brightness-95"
+          : variant === "danger"
         ? "border-crit bg-surface text-crit hover:bg-crit-soft active:bg-crit-soft active:brightness-95"
         : "border-control bg-surface text-fg hover:bg-sunk active:bg-sunk active:brightness-95";
   return (
@@ -49,6 +52,8 @@ export function Button({
       type="button"
       ref={ref}
       className={`${base} ${sizes[size]} ${v} ${busy ? "cursor-progress" : ""} ${className}`}
+      data-danger={variant === "danger" ? "true" : undefined}
+      data-variant={variant}
       disabled={disabled}
       aria-busy={busy || undefined}
       {...props}

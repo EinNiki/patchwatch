@@ -257,3 +257,15 @@ keinen X und kein Esc, weil der Wert nur einmal sichtbar ist. Die **Rechtevorsch
 (Haken bzw. gestrichelter Kreis) **und** Text „darf“ / „darf nicht“, am Ende „Kann Geheimnisse sehen: nein“; der Bereich ist
 per Tastatur scrollbar. Unter dem Formular steht die Zusammenfassung „Benutzer <Name> wird mit der Rolle <Rolle> angelegt.“.
 Schreibaktionen ohne Recht werden ausgeblendet (nie nur deaktiviert); der Server bleibt maßgeblich.
+
+## Knöpfe
+
+Ein Baustein `Button` (`components/Controls.tsx`), Varianten `primary`, `secondary` (Standard), `danger`, `ghost`, Symbolknopf (`size="icon"`, quadratisch). Höhe 32 px, mobil 44 px, gleiche Radien, Schrift und Innenabstände; Aktionsreihen nutzen feste Breiten (`row` 7 rem, `action` 8,25 rem, `wide` 10 rem). Zustände: Ruhe, Hover, gedrückt, Fokus (2-px-Ring), deaktiviert, läuft (Drehsymbol). Die Größe ändert sich nie bei einem Zustandswechsel.
+Animation (aus dem Skill hig, webtauglich): Hover 130 ms ease-out nur über Hintergrund, Rand, Textfarbe und Helligkeit; gedrückt kurz `scale(0.98)`; der Fokusring blendet weich ein. Nur `transform`, `opacity`, Farben, nie Layout. `prefers-reduced-motion`: nur Farbwechsel, keine Skalierung. Auf Touchgeräten gibt es keine Hover-Hervorhebung (Tailwind-`hover:` gilt nur mit `@media (hover: hover)`).
+Das gilt für alle `button`-Elemente über `globals.css` (Tabs, Chips, Symbolknöpfe, Zeilen), auch dort, wo noch kein `Button` verwendet wird. Rohe `<button>` sind per ESLint verboten; die Liste der Dateien mit Altbestand steht in `eslint.config.mjs` und darf nur schrumpfen.
+
+## Trefferflächen
+
+Regel (hig, `buttons.md`: Trefferfläche von mindestens 44 × 44; `accessibility.md`: Abstand zwischen Steuerelementen ist so wichtig wie die Größe, kleinste Steuerfläche 28 × 28): Der sichtbare Knopf bleibt 32 px hoch; ein unsichtbares `::before` am Knopf selbst (kein zweites Klickziel) erweitert die Fläche oben und unten um 6 px (32 → 44) und seitlich um 4 px (die Hälfte der üblichen 8-px-Lücke, damit sich Nachbarn nie überlappen). Gefahraktionen (`data-danger`): seitlich nur 2 px. Tabs: seitlich 2 px. Dichte Reihen (Seitenleiste, Kennzahlenleiste, Menüs) haben keine Erweiterung. Hover, Fokus und gedrückt greifen auch auf der erweiterten Fläche, der Cursor ist dort `pointer`. Gefahraktionen öffnen immer nur ein Bestätigungsfenster mit Namen. Mobil (Knopfhöhe 44 px) entfällt die vertikale Erweiterung.
+Messung: `scripts/hit-targets.mjs` (Raster per `elementFromPoint`) erzeugt `docs/hit-targets.md` und prüft, dass keine sichtbare Fläche von einem Nachbarn überdeckt wird und sich erweiterte Flächen nie überlappen.
+Grenzen: native Auswahlfelder und Eingabefelder (`select`, `input`) und Textlinks haben keine erweiterte Fläche (Pseudo-Elemente sind dort nicht möglich); Seitenleistenlinks sind 36 px hoch.
