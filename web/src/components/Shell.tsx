@@ -21,12 +21,15 @@ interface Item {
   icon: NavIconName;
   /** Pfadpräfixe, bei denen der Eintrag aktiv ist. */
   match: (p: string) => boolean;
+  /** Recht, das der Eintrag voraussetzt (fehlt es, erscheint er nicht; der Server prüft trotzdem). */
+  needs?: string;
 }
 
 const NAV: Item[] = [
   { href: "/", label: "Hosts", icon: "hosts", match: (p) => p === "/" || p.startsWith("/hosts") },
   { href: "/cves", label: "CVEs", icon: "cves", match: (p) => p.startsWith("/cves") },
   { href: "/agents", label: "Agents", icon: "agents", match: (p) => p.startsWith("/agents") },
+  { href: "/users", label: "Benutzer", icon: "users", match: (p) => p.startsWith("/users"), needs: "users.manage" },
   { href: "/notifications", label: "Benachrichtigungen", icon: "bell", match: (p) => p.startsWith("/notifications") },
   { href: "/settings", label: "Einstellungen", icon: "settings", match: (p) => p.startsWith("/settings") },
 ];
@@ -174,6 +177,7 @@ function useGlide(nav: RefObject<HTMLElement | null>, surface: RefObject<HTMLEle
 }
 
 function NavLinks({ pathname }: { pathname: string }) {
+  const { me } = useAuth();
   const subId = useId();
   const nav = useRef<HTMLElement>(null);
   const surface = useRef<HTMLSpanElement>(null);
@@ -197,7 +201,7 @@ function NavLinks({ pathname }: { pathname: string }) {
         data-glide
         className="pointer-events-none absolute left-0 top-0 -z-10 rounded-sm border-l-2 border-accent bg-sunk opacity-0 transition-[transform,opacity] duration-(--glide-dur) ease-(--ease-out) motion-reduce:transition-none"
       />
-      {NAV.map((n) => {
+      {NAV.filter((n) => !n.needs || (me.permissions ?? []).includes(n.needs)).map((n) => {
         const active = n.match(pathname);
         const exactNotifications = n.href === "/notifications" && pathname === "/notifications";
         const isGroup = n.href === "/notifications";

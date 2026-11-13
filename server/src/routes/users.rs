@@ -40,10 +40,12 @@ struct UserRow {
     last_login_at: Option<DateTime<Utc>>,
     has_avatar: bool,
     oidc_linked: bool,
+    /// Vom OIDC-Anbieter gewünschte Rolle, die ein Administrator noch bestätigen muss.
+    requested_role: Option<String>,
 }
 
 const SELECT_USER: &str = "SELECT id, username, display_name, email, auth_kind, role, status, created_at, last_login_at, \
-    (avatar IS NOT NULL) AS has_avatar, (oidc_subject IS NOT NULL) AS oidc_linked FROM admin_users";
+    (avatar IS NOT NULL) AS has_avatar, (oidc_subject IS NOT NULL) AS oidc_linked, requested_role FROM admin_users";
 
 fn view(u: &UserRow, me: i64) -> Value {
     let mut v = serde_json::to_value(u).unwrap_or(Value::Null);

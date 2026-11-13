@@ -59,6 +59,39 @@ pub async fn upsert_admin_with(
     Ok(())
 }
 
+/// Notzugang: macht `username` zu einem aktiven, lokalen Administrator mit dem gegebenen Passwort (legt das Konto an,
+/// falls es fehlt), hebt Sperre/Löschvermerk/OIDC-Bindung auf und beendet alle Sitzungen des Kontos. Nur für den
+/// Server-Unterbefehl `reset-admin` (Zugriff auf den Server selbst ist die Berechtigung); schreibt einen Protokolleintrag.
+pub async fn recover_admin(pool: &PgPool, username: &str, password: &str) -> Result<()> {
+    let hash = validated_hash(username, password)?;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO admin_users (username, password_hash, must_change_password, role, status, auth_kind) \
+         VALUES ($1, $2, false, 'admin', 'active', 'local') \
+         ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, must_change_password = false, \
+         role = 'admin', status = 'active', auth_kind = 'local', oidc_issuer = NULL, oidc_subject = NULL, \
+         requested_role = NULL, deleted_at = NULL RETURNING id",
+    )
+    .bind(username)
+    .bind(hash)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query("DELETE FROM sessions WHERE admin_id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    crate::audit::record(
+        pool,
+        Some(id),
+        "server-cli",
+        "admin.recovered",
+        Some(username),
+        crate::audit::Outcome::Ok,
+        "",
+    )
+    .await;
+    Ok(())
+}
+
 /// Zufallspasswort aus dem CSPRNG des Betriebssystems: 32 Zeichen aus 62 (ca. 190 Bit), ohne Modulo-Verzerrung.
 pub fn random_password() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -129,7 +162,8 @@ pub async fn bootstrap_admin(pool: &PgPool, env_password: Option<&str>) -> Resul
 /// Argon2-Verify als "Passwort muss geändert werden". Gibt die betroffenen Benutzernamen zurück.
 pub async fn flag_default_passwords(pool: &PgPool) -> Result<Vec<String>> {
     let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, username, password_hash FROM admin_users WHERE NOT must_change_password",
+        "SELECT id, username, password_hash FROM admin_users \
+         WHERE NOT must_change_password AND password_hash IS NOT NULL AND deleted_at IS NULL",
     )
     .fetch_all(pool)
     .await?;

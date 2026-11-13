@@ -12,6 +12,8 @@ import { Dialog } from "@/components/Dialog";
 import { NavIcon } from "@/components/Icons";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
+import { useAuth } from "@/components/AuthProvider";
+import { can } from "@/lib/roles";
 import { writeFailure } from "@/lib/apiErrors";
 import { toast } from "@/lib/toastStore";
 import { useFeedRuns } from "@/lib/useFeedRuns";
@@ -91,6 +93,9 @@ function message(e: unknown, fallback: string): string {
 }
 
 export function FeedSources() {
+  const { me } = useAuth();
+  const canRun = can(me.permissions, "sources.run");
+  const canWrite = can(me.permissions, "sources.write");
   const feeds = useApi<Feed[]>("/feeds", 30_000);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Feed | null>(null);
@@ -276,14 +281,18 @@ export function FeedSources() {
           CVE-Quellen
         </h2>
         <span className="src-actions ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
-          <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
-            {allBusy ? null : <NavIcon name="refresh" />}
-            <span className={HEAD_TXT}>Alle abrufen</span>
-          </Button>
-          <Button size="wide" variant="primary" className={HEAD_ICON} title="Quelle hinzufügen" onClick={() => setAdding(true)}>
-            <NavIcon name="plus" />
-            <span className={HEAD_TXT}>Quelle hinzufügen</span>
-          </Button>
+          {canRun ? (
+            <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
+              {allBusy ? null : <NavIcon name="refresh" />}
+              <span className={HEAD_TXT}>Alle abrufen</span>
+            </Button>
+          ) : null}
+          {canWrite ? (
+            <Button size="wide" variant="primary" className={HEAD_ICON} title="Quelle hinzufügen" onClick={() => setAdding(true)}>
+              <NavIcon name="plus" />
+              <span className={HEAD_TXT}>Quelle hinzufügen</span>
+            </Button>
+          ) : null}
         </span>
       </div>
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
@@ -346,10 +355,14 @@ export function FeedSources() {
                     <div className="@container">
                       {/* Vier Knöpfe nebeneinander. Ist die Spalte (Container, nicht Fenster) schmaler als 30 rem, werden alle vier Knöpfe quadratische Symbole; unter 1024 px (Karten) bleiben die Texte und die Knöpfe laufen bei Platzmangel in zwei Reihen. */}
                       <div className="feed-actions flex items-center justify-end gap-2 max-lg:grid max-lg:grid-cols-4 max-lg:@max-[30rem]:grid-cols-2">
-                        <RunButton f={f} run={latest.get(f.source)} starting={starting.has(f.source)} onRun={() => void runOne(f)} />
+                        {canRun ? <RunButton f={f} run={latest.get(f.source)} starting={starting.has(f.source)} onRun={() => void runOne(f)} /> : null}
+                        {canWrite ? (
+                          <>
                         <ActionButton icon="power" label={f.enabled ? "Abschalten" : "Einschalten"} aria={`${f.label} ${f.enabled ? "abschalten" : "einschalten"}`} onClick={() => void setEnabled(f, !f.enabled)} />
                         <ActionButton icon="edit" label="Bearbeiten" aria={`${f.label} bearbeiten`} onClick={() => setEditing(f)} />
                         <ActionButton icon="trash" label="Löschen" aria={`${f.label} löschen`} danger onClick={() => setRemoving(f)} />
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   </td>

@@ -6,8 +6,29 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 const USAGE: &str =
-    "Verwendung: patchwatch-server [serve | create-admin <benutzer> | migrate | healthcheck]\n\
-  create-admin liest das Passwort aus PATCHWATCH_ADMIN_PASSWORD oder von stdin.";
+    "Verwendung: patchwatch-server [serve | create-admin <benutzer> | reset-admin <benutzer> | migrate | healthcheck]\n\
+  create-admin liest das Passwort aus PATCHWATCH_ADMIN_PASSWORD oder von stdin.\n\
+  reset-admin (Notzugang) fragt das Passwort im Terminal ohne Anzeige ab (ohne Terminal: erste Zeile von stdin).";
+
+/// Passwort-Abfrage ohne Echo: im Terminal mit `stty -echo` (immer wieder eingeschaltet), sonst die erste Zeile von stdin.
+/// Das Passwort steht nie in Argumenten, Umgebung oder Dateien.
+fn prompt_password(prompt: &str) -> Result<String> {
+    use std::io::IsTerminal;
+    let tty = std::io::stdin().is_terminal();
+    if tty {
+        eprint!("{prompt}");
+        std::io::stderr().flush()?;
+        let _ = std::process::Command::new("stty").arg("-echo").status();
+    }
+    let mut line = String::new();
+    let read = std::io::stdin().read_line(&mut line);
+    if tty {
+        let _ = std::process::Command::new("stty").arg("echo").status();
+        eprintln!();
+    }
+    read?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_owned())
+}
 
 /// Minimaler HTTP-Check für Docker-HEALTHCHECK (kein curl im Image nötig).
 fn healthcheck(listen: &str) -> Result<()> {
@@ -91,6 +112,20 @@ async fn main() -> Result<()> {
             MIGRATOR.run(&pool).await?;
             admin::upsert_admin(&pool, user, &pw).await?;
             println!("Admin {user} angelegt/aktualisiert");
+            Ok(())
+        }
+        "reset-admin" => {
+            let user = args.get(1).context("Benutzername fehlt")?;
+            let pw = prompt_password("Neues Passwort (mindestens 12 Zeichen): ")?;
+            if std::io::IsTerminal::is_terminal(&std::io::stdin())
+                && pw != prompt_password("Passwort wiederholen: ")?
+            {
+                bail!("Die Eingaben stimmen nicht überein");
+            }
+            let pool = connect(&cfg).await?;
+            MIGRATOR.run(&pool).await?;
+            admin::recover_admin(&pool, user, &pw).await?;
+            println!("{user} ist jetzt aktiver lokaler Administrator; alle Sitzungen des Kontos wurden beendet");
             Ok(())
         }
         "serve" => {

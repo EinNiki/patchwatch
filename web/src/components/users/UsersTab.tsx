@@ -1,0 +1,255 @@
+"use client";
+
+import { useState } from "react";
+import { api, ApiError } from "@/lib/api";
+import { useApi } from "@/lib/useApi";
+import { toast } from "@/lib/toastStore";
+import { Avatar } from "@/components/Avatar";
+import { Button, Field, TextInput } from "@/components/Controls";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Dialog } from "@/components/Dialog";
+import { NavIcon } from "@/components/Icons";
+import { RelTime } from "@/components/RelTime";
+import { RowMenu } from "@/components/RowMenu";
+import { Empty, ErrorNote, Loading } from "@/components/States";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useAuth } from "@/components/AuthProvider";
+import { KIND_LABEL, STATUS_LABEL, type RolesResponse } from "@/lib/roles";
+import type { StatusInfo } from "@/lib/status";
+import type { UserRow } from "@/lib/types";
+import { UserDialog, type DialogMode } from "./UserDialog";
+import { OneTimePassword } from "./OneTimePassword";
+
+const STATUS_INFO: Record<string, StatusInfo> = {
+  active: { rank: 0, tone: "ok", icon: "ok", label: STATUS_LABEL.active },
+  locked: { rank: 0, tone: "crit", icon: "crit", label: STATUS_LABEL.locked },
+  pending: { rank: 0, tone: "warn", icon: "clock", label: STATUS_LABEL.pending },
+};
+
+/** Löschen mit Namensbestätigung (und eigenem Passwort, wenn das Ziel Administrator ist). */
+function DeleteDialog({ user, onClose, onDone }: { user: UserRow | null; onClose: () => void; onDone: () => void }) {
+  return (
+    <Dialog open={user !== null} title={`${user?.display_name ?? ""} löschen?`} onClose={onClose}>
+      {user ? <DeleteForm key={user.id} user={user} onClose={onClose} onDone={onDone} /> : null}
+    </Dialog>
+  );
+}
+
+function DeleteForm({ user, onClose, onDone }: { user: UserRow; onClose: () => void; onDone: () => void }) {
+  const { me } = useAuth();
+  const [name, setName] = useState("");
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const needsPw = user.role === "admin" && me.auth_kind !== "oidc";
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (name.trim() !== user.display_name) return setError("Der eingegebene Name stimmt nicht.");
+        setBusy(true);
+        api
+          .delWithBody(`/users/${user.id}`, { confirm_name: name.trim(), confirm_password: needsPw ? pw : undefined })
+          .then(onDone)
+          .catch((err: unknown) => setError(err instanceof ApiError ? err.message : "Löschen fehlgeschlagen."))
+          .finally(() => setBusy(false));
+      }}
+      className="flex flex-col gap-3"
+    >
+      <p className="m-0 text-fg2">
+        Das Konto wird gesperrt und anonymisiert, alle Sitzungen enden. Einträge im Aktivitätsprotokoll bleiben erhalten. Das lässt sich nicht rückgängig machen.
+      </p>
+      <Field label={`Zur Bestätigung den Namen „${user.display_name}“ eingeben`}>
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" autoFocus />
+      </Field>
+      {needsPw ? (
+        <Field label="Dein Passwort (der Benutzer ist Administrator)">
+          <TextInput type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
+        </Field>
+      ) : null}
+      {error ? <ErrorNote message={error} /> : null}
+      <div className="flex justify-end gap-2">
+        <Button onClick={onClose}>Abbrechen</Button>
+        <Button type="submit" variant="danger" busy={busy}>
+          Benutzer löschen
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function UsersTab({ roles }: { roles: RolesResponse | undefined }) {
+  const users = useApi<{ users: UserRow[]; pending: number }>("/users", 60_000);
+  const [mode, setMode] = useState<DialogMode | null>(null);
+  const [shown, setShown] = useState<{ name: string; password: string } | null>(null);
+  const [del, setDel] = useState<UserRow | null>(null);
+  const [lock, setLock] = useState<UserRow | null>(null);
+  const [reset, setReset] = useState<UserRow | null>(null);
+
+  const list = users.data?.users;
+  const pending = users.data?.pending ?? 0;
+
+  async function act(path: string, ok: string, what: string) {
+    try {
+      await api.post(path, undefined, { what });
+      toast.success(ok);
+      await users.reload();
+    } catch {
+      /* Der API-Client hat den Fehler als Toast gemeldet. */
+    }
+  }
+
+  async function doReset() {
+    const u = reset;
+    setReset(null);
+    if (!u) return;
+    try {
+      const r = await api.post<{ initial_password: string }>(`/users/${u.id}/reset-password`, undefined, { what: `Passwort von ${u.display_name} konnte nicht zurückgesetzt werden` });
+      setShown({ name: u.display_name, password: r.initial_password });
+      await users.reload();
+    } catch {
+      /* Toast vom API-Client */
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <p className="m-0 text-sm text-fg2">
+          {list ? `${list.length} ${list.length === 1 ? "Benutzer" : "Benutzer"}` : ""}
+          {pending > 0 ? `, ${pending} ${pending === 1 ? "Konto wartet" : "Konten warten"} auf Freigabe` : ""}
+        </p>
+        <div className="ml-auto">
+          <Button variant="primary" onClick={() => setMode({ kind: "create" })} disabled={!roles}>
+            <NavIcon name="plus" />
+            Benutzer anlegen
+          </Button>
+        </div>
+      </div>
+
+      {users.error && !list ? (
+        <div className="mb-3">
+          <ErrorNote message={users.error} />
+          <p className="mt-2">
+            <Button onClick={() => void users.reload()}>Erneut versuchen</Button>
+          </p>
+        </div>
+      ) : null}
+
+      {!list ? (
+        users.error ? null : <Loading what="Benutzer" />
+      ) : list.length === 0 ? (
+        <Empty title="Noch keine Benutzer">Lege den ersten Benutzer an.</Empty>
+      ) : (
+        <div className="@container/tbl max-hd:overflow-x-auto">
+          <table className="tbl stack-lg dist1024 lg:max-hd:[--col-pad:10px] lg:[--tbl-min:46.5rem] hd:[--tbl-min:61rem]">
+            <caption>Benutzer mit Anmeldeart, Rolle, Status, letzter Anmeldung und Aktionen</caption>
+            <thead>
+              <tr>
+                <th scope="col" className="w-[24%] min-w-32"><span className="th-pad">Name</span></th>
+                <th scope="col" className="w-[10%] min-w-20"><span className="th-pad">Anmeldeart</span></th>
+                <th scope="col" className="w-[16%] min-w-28"><span className="th-pad">Rolle</span></th>
+                <th scope="col" className="w-[18%] min-w-32"><span className="th-pad">Status</span></th>
+                <th scope="col" className="w-[14%] min-w-24"><span className="th-pad">Zuletzt angemeldet</span></th>
+                <th scope="col" className="w-55 min-w-55 hd:w-60 hd:min-w-60"><span className="th-pad">Aktionen</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((u) => {
+                const items = [
+                  ...(u.status === "locked"
+                    ? [{ label: "Entsperren", aria: `${u.display_name} entsperren`, run: () => void act(`/users/${u.id}/unlock`, `${u.display_name} entsperrt.`, "Entsperren fehlgeschlagen") }]
+                    : u.status === "active" && !u.is_self
+                      ? [{ label: "Sperren", aria: `${u.display_name} sperren`, run: () => setLock(u) }]
+                      : []),
+                  ...(u.auth_kind === "local" && !u.is_self ? [{ label: "Passwort zurücksetzen", aria: `Passwort von ${u.display_name} zurücksetzen`, run: () => setReset(u) }] : []),
+                  ...(!u.is_self ? [{ label: "Löschen", aria: `Benutzer ${u.display_name} löschen`, run: () => setDel(u), danger: true }] : []),
+                ];
+                return (
+                  <tr key={u.id}>
+                    <td className="cell-primary">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Avatar name={u.display_name} version={u.is_self && u.has_avatar ? 1 : null} size={20} />
+                        <span className="min-w-0 truncate font-semibold">{u.display_name}</span>
+                        {u.is_self ? <span className="text-xs text-fg3">(du)</span> : null}
+                      </span>
+                      {u.email ? <span className="block truncate text-xs text-fg3">{u.email}</span> : null}
+                    </td>
+                    <td data-label="Anmeldeart">{KIND_LABEL[u.auth_kind] ?? u.auth_kind}</td>
+                    <td data-label="Rolle">
+                      {u.role_title ?? u.role}
+                      {u.requested_role ? <span className="block text-xs text-warn">Anbieter wünscht: {roles?.roles.find((r) => r.key === u.requested_role)?.title ?? u.requested_role}</span> : null}
+                    </td>
+                    <td data-label="Status">
+                      <StatusBadge info={STATUS_INFO[u.status] ?? STATUS_INFO.locked} />
+                    </td>
+                    <td data-label="Zuletzt angemeldet"><RelTime iso={u.last_login_at} /></td>
+                    <td className="cell-actions">
+                      <div className="flex items-center justify-start gap-2">
+                        {u.status === "pending" && u.oidc_linked ? (
+                          <Button size="row" onClick={() => setMode({ kind: "approve", user: u })} aria-label={`${u.display_name} freigeben`}>
+                            Freigeben
+                          </Button>
+                        ) : (
+                          <Button size="row" onClick={() => setMode({ kind: "edit", user: u })} aria-label={`${u.display_name} bearbeiten`}>
+                            Bearbeiten
+                          </Button>
+                        )}
+                        {items.length > 0 ? <RowMenu label={`Weitere Aktionen für ${u.display_name}`} items={items} /> : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <UserDialog
+        mode={mode}
+        roles={roles}
+        onClose={() => setMode(null)}
+        onDone={(r) => {
+          setMode(null);
+          void users.reload();
+          if (r.password) setShown({ name: r.name, password: r.password });
+          else toast.success(`${r.name} gespeichert.`);
+        }}
+      />
+      <OneTimePassword name={shown?.name ?? ""} password={shown?.password ?? null} onDone={() => setShown(null)} />
+      <DeleteDialog
+        user={del}
+        onClose={() => setDel(null)}
+        onDone={() => {
+          toast.success(`${del?.display_name ?? "Benutzer"} gelöscht.`);
+          setDel(null);
+          void users.reload();
+        }}
+      />
+      <ConfirmDialog
+        open={lock !== null}
+        danger
+        title={`${lock?.display_name ?? ""} sperren?`}
+        confirmLabel="Sperren"
+        onCancel={() => setLock(null)}
+        onConfirm={() => {
+          const u = lock;
+          setLock(null);
+          if (u) void act(`/users/${u.id}/lock`, `${u.display_name} gesperrt.`, "Sperren fehlgeschlagen");
+        }}
+      >
+        Alle Sitzungen des Benutzers enden sofort; eine Anmeldung ist bis zum Entsperren nicht möglich.
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={reset !== null}
+        title={`Passwort von ${reset?.display_name ?? ""} zurücksetzen?`}
+        confirmLabel="Einmalpasswort erzeugen"
+        onCancel={() => setReset(null)}
+        onConfirm={() => void doReset()}
+      >
+        Ein neues Einmalpasswort wird einmalig angezeigt, alle Sitzungen des Benutzers enden. Beim nächsten Anmelden muss er das Passwort ändern.
+      </ConfirmDialog>
+    </>
+  );
+}

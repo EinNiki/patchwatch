@@ -970,3 +970,62 @@ async fn legacy_oidc_accounts_become_pending_and_keep_no_access(pool: PgPool) {
     let list = call(&app, Method::GET, "/api/v1/users", &a.h(), None).await;
     assert_eq!(list.json["pending"], 1, "{} {}", list.status, list.raw);
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn recover_admin_restores_a_locked_or_oidc_account_and_ends_sessions(pool: PgPool) {
+    // Gesperrter, herabgestufter lokaler Konto-Fall: Notzugang macht es wieder zum aktiven Administrator.
+    mk(&pool, "notfall", "viewer", "locked").await;
+    let app = router(state(pool.clone()));
+    admin::recover_admin(&pool, "notfall", "TESTWERT-notfall-0001")
+        .await
+        .unwrap();
+    let (role, status, kind): (String, String, String) = sqlx::query_as(
+        "SELECT role, status, auth_kind FROM admin_users WHERE username = 'notfall'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (role.as_str(), status.as_str(), kind.as_str()),
+        ("admin", "active", "local")
+    );
+    let s = login_with(&app, "notfall", "TESTWERT-notfall-0001")
+        .await
+        .expect("Anmeldung mit dem neuen Passwort");
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/users", &s.h(), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    // Ein zweiter Aufruf beendet die laufende Sitzung und protokolliert ohne Passwort.
+    admin::recover_admin(&pool, "notfall", "TESTWERT-notfall-0002")
+        .await
+        .unwrap();
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/users", &s.h(), None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    let log: String = sqlx::query_scalar("SELECT string_agg(action || coalesce(target,''), ',') FROM audit_log WHERE action = 'admin.recovered'")
+        .fetch_one(&pool).await.unwrap();
+    assert!(log.contains("admin.recovered") && !log.contains("TESTWERT"));
+    // Zu kurzes Passwort wird abgelehnt.
+    assert!(admin::recover_admin(&pool, "notfall", "kurz")
+        .await
+        .is_err());
+}
+
+/// Regression: OIDC-Konten haben keinen Passwort-Hash; die Prüfung auf Standardpasswörter beim Start darf daran nicht scheitern.
+#[sqlx::test(migrations = "./migrations")]
+async fn startup_default_password_scan_skips_accounts_without_a_hash(pool: PgPool) {
+    sqlx::query("INSERT INTO admin_users (username, display_name, auth_kind, role, status, oidc_issuer, oidc_subject) VALUES ('oidc-x', 'X', 'oidc', 'viewer', 'pending', 'https://idp.test', 's')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(admin::flag_default_passwords(&pool)
+        .await
+        .unwrap()
+        .is_empty());
+}

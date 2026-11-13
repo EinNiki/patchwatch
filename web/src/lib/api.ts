@@ -85,6 +85,9 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Wr
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown, opts?: WriteOptions) => request<T>("POST", path, body ?? {}, opts),
+  patch: <T>(path: string, body?: unknown, opts?: WriteOptions) => request<T>("PATCH", path, body, opts),
   put: <T>(path: string, body?: unknown, opts?: WriteOptions) => request<T>("PUT", path, body, opts),
   del: <T>(path: string, opts?: WriteOptions) => request<T>("DELETE", path, undefined, opts),
+  /** DELETE mit JSON-Body (Bestätigung des Namens); Fehler zeigt der Aufrufer im Formular. */
+  delWithBody: <T>(path: string, body: unknown) => request<T>("DELETE", path, body, { silent: true }),
 };

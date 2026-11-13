@@ -23,6 +23,8 @@ import { RowMenu } from "@/components/RowMenu";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { Mono } from "@/components/Version";
+import { useAuth } from "@/components/AuthProvider";
+import { can } from "@/lib/roles";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,63}$/;
 /// Der Server vergibt eine Anforderung erneut, wenn nach 10 Minuten kein Report kam.
@@ -204,6 +206,10 @@ function FetchInfo() {
 }
 
 export default function AgentsPage() {
+  const { me } = useAuth();
+  const canAdd = can(me.permissions, "hosts.write");
+  const canRun = can(me.permissions, "hosts.run");
+  const canToken = can(me.permissions, "agents.tokens");
   const hosts = useApi<Host[]>("/hosts", 60_000, LIVE_TYPES, patchHostRows);
   const now = useNow();
   const settings = useApi<Settings>("/settings", 60_000);
@@ -267,15 +273,21 @@ export default function AgentsPage() {
   return (
     <>
       <PageHeader title="Agents" count={list ? `${list.length} ${list.length === 1 ? "Agent" : "Agents"}` : undefined}>
-        <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0}>
-          <NavIcon name="refresh" />
-          {FETCH_ALL_ACTION}
-        </Button>
-        <FetchInfo />
-        <Button variant="primary" onClick={() => setAdding(true)}>
-          <NavIcon name="plus" />
-          Agent hinzufügen
-        </Button>
+        {canRun ? (
+          <>
+            <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0}>
+              <NavIcon name="refresh" />
+              {FETCH_ALL_ACTION}
+            </Button>
+            <FetchInfo />
+          </>
+        ) : null}
+        {canAdd ? (
+          <Button variant="primary" onClick={() => setAdding(true)}>
+            <NavIcon name="plus" />
+            Agent hinzufügen
+          </Button>
+        ) : null}
       </PageHeader>
 
       <section aria-labelledby="agent-update" className="mb-3">
@@ -308,12 +320,14 @@ export default function AgentsPage() {
       ) : list.length === 0 ? (
         <Empty title="Noch kein Agent eingerichtet">
           Lege einen Agent an, kopiere den einmalig angezeigten Token und führe den Installationsbefehl auf dem Host aus.
-          <div className="mt-3">
-            <Button variant="primary" onClick={() => setAdding(true)}>
-              <NavIcon name="plus" />
-              Agent hinzufügen
-            </Button>
-          </div>
+          {canAdd ? (
+            <div className="mt-3">
+              <Button variant="primary" onClick={() => setAdding(true)}>
+                <NavIcon name="plus" />
+                Agent hinzufügen
+              </Button>
+            </div>
+          ) : null}
         </Empty>
       ) : (
         <div className="@container/tbl max-hd:overflow-x-auto">
@@ -352,16 +366,20 @@ export default function AgentsPage() {
                     <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
                     <td className="cell-actions">
                       <div className="flex items-center justify-start gap-2">
-                        <Button size="wide" onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
-                          {FETCH_ACTION}
-                        </Button>
-                        <RowMenu
-                          label={`Weitere Aktionen für ${h.name}`}
-                          items={[
-                            { label: "Token erneuern", aria: `Token erneuern für ${h.name}`, run: () => setConfirm({ kind: "rotate", host: h }) },
-                            { label: "Löschen", aria: `Agent ${h.name} löschen`, run: () => setConfirm({ kind: "delete", host: h }), danger: true },
-                          ]}
-                        />
+                        {canRun ? (
+                          <Button size="wide" onClick={() => void request(h)} disabled={waiting || coolingDown} aria-label={`${h.name}: ${FETCH_ACTION}`}>
+                            {FETCH_ACTION}
+                          </Button>
+                        ) : null}
+                        {canToken || canAdd ? (
+                          <RowMenu
+                            label={`Weitere Aktionen für ${h.name}`}
+                            items={[
+                              ...(canToken ? [{ label: "Token erneuern", aria: `Token erneuern für ${h.name}`, run: () => setConfirm({ kind: "rotate", host: h }) }] : []),
+                              ...(canAdd ? [{ label: "Löschen", aria: `Agent ${h.name} löschen`, run: () => setConfirm({ kind: "delete", host: h }), danger: true }] : []),
+                            ]}
+                          />
+                        ) : null}
                       </div>
                     </td>
                     <td data-label="Agent-Version" className="text-fg3">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>

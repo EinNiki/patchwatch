@@ -187,8 +187,8 @@ setzen, wenn ein vertrauenswürdiger Proxy davorsteht und den echten Client in `
 
 **Ausgehende Proxys:** `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` werden für Benachrichtigungskanäle und Quellen-Spiegel
 (alles, was die SSRF-Prüfung durchläuft) bewusst **ignoriert**: Ein Proxy würde die geprüfte, gepinnte Adresse umgehen.
-Die Feeds der festen Standardquellen (Ubuntu, Debian, OSV, NVD, KEV) und OIDC laufen über den allgemeinen Client und
-folgen den Proxy-Variablen; deren Ziele kommen nicht aus Benutzereingaben. Eine eigene, ebenfalls geprüfte
+Die Feeds der festen Standardquellen (Ubuntu, Debian, OSV, NVD, KEV) laufen über den allgemeinen Client und
+folgen den Proxy-Variablen (OIDC dagegen nutzt die SSRF-Prüfung und ignoriert sie); deren Ziele kommen nicht aus Benutzereingaben. Eine eigene, ebenfalls geprüfte
 Proxy-Einstellung gibt es nicht; sie wäre nur mit Prüfung der Proxy-Adresse selbst sinnvoll.
 
 **Gespeicherte Schlüssel gehören zu ihrer Adresse.** Schlüssel und Adresse einer Quelle (NVD) oder eines Kanals (Gotify, ntfy,
@@ -597,14 +597,101 @@ Ubuntu-API (paginiert, `limit` höchstens 20), Ubuntu-Einzelabruf und die OVAL-D
 Quellen stehen in der Konfiguration (`PATCHWATCH_CVE_UBUNTU_URL`, `..._OVAL_URL`, `..._DEBIAN_URL`) und dürfen auf Loopback
 zeigen; der SSRF-Schutz für in der UI angelegte Quellen bleibt unverändert.
 
-## Anmeldung per OpenID Connect
+## Benutzer und Rollen
 
-Zusätzlich zum Passwort lässt sich ein OIDC-Provider (Authentik, Keycloak, Google, Entra ...) einrichten. Variablen siehe
-`.env.example` (`PATCHWATCH_OIDC_*`). Der Ablauf ist Authorization Code mit PKCE, nonce und einem state-Cookie.
-Angemeldet wird nur, wer in `PATCHWATCH_OIDC_ALLOWED_EMAILS` oder `PATCHWATCH_OIDC_ALLOWED_DOMAINS` steht und eine
-verifizierte E-Mail-Adresse hat; ohne Allow-List startet der Server nicht. SSO-Benutzer erscheinen als `oidc:<email>`
-und haben kein Passwort. Die Signatur des ID-Tokens wird nicht geprüft, weil er direkt vom Token-Endpunkt über TLS kommt
-(OIDC Core 3.1.3.7); Aussteller, Zielgruppe, Ablauf und nonce werden geprüft.
+Menü **Benutzer** (nur für Administratoren) mit den Tabs *Benutzer*, *OIDC* und *Aktivität*. Es gibt drei feste Rollen; der
+**Server** prüft bei jeder Anfrage das benannte Recht der Route (Standard: verweigert, 401 ohne Anmeldung, 403 ohne Recht).
+Die Oberfläche blendet Aktionen ohne Recht nur aus. Rolle und Status werden bei **jeder** Anfrage aus der Datenbank gelesen;
+Rollenwechsel, Sperren, Löschen, Passwortwechsel und -reset beenden alle Sitzungen des Benutzers sofort.
+
+| Recht | Administrator | Betreiber | Nur Lesen |
+|---|:-:|:-:|:-:|
+| Hosts, CVEs, Quellen-Zustand, Kanäle, Einstellungen ansehen | ja | ja | ja |
+| Hosts anlegen/löschen, Daten abrufen (`hosts.write`, `hosts.run`) | ja | ja | nein |
+| Agent-Token erneuern (`agents.tokens`) | ja | ja | nein |
+| CVEs beobachten/manuell prüfen (`cves.watch`) | ja | ja | nein |
+| Quellen anlegen/ändern/löschen/abrufen (`sources.*`) | ja | ja | nein |
+| Kanäle ändern, Testnachricht (`channels.write`, `channels.test`) | ja | ja | nein |
+| Einstellungen und Zeitpläne ändern (`settings.write`) | ja | ja | nein |
+| Benutzer verwalten, OIDC einrichten, Aktivitätsprotokoll (`users.manage`, `oidc.manage`, `audit.read`) | ja | nein | nein |
+
+Keine Rolle sieht Geheimnisse (Token, Passwörter, Client-Secret): Die API gibt sie nie aus, nur „gesetzt/nicht gesetzt“.
+Das Anlegen-Fenster zeigt die Rechte der gewählten Rolle als Vorschau.
+
+- **Einmalpasswort:** Lokale Konten bekommen ein Zufallspasswort (32 Zeichen), das **einmal** angezeigt wird (nie in Logs,
+  nie erneut abrufbar) und beim ersten Anmelden geändert werden muss (mindestens 12 Zeichen).
+- **Administratorrechte** zu vergeben oder zu entziehen verlangt das eigene Passwort (bei OIDC-Konten eine Anmeldung, die
+  höchstens 5 Minuten alt ist); Rollenwechsel verlangen zusätzlich den Namen des Benutzers. Niemand ändert die eigene Rolle
+  oder löscht/sperrt sich selbst.
+- **Aussperrschutz:** Der letzte aktive Administrator und der letzte **lokale** Administrator lassen sich nicht löschen,
+  sperren oder herabstufen (Transaktion mit Zeilensperre, auch bei gleichzeitigen Anfragen).
+- **Löschen ist weich:** Das Konto wird gesperrt und anonymisiert (Name, E-Mail, OIDC-Identität, Passwort, Bild entfernt),
+  damit das Aktivitätsprotokoll gültige Verweise behält.
+- **Aktivitätsprotokoll:** Anmeldungen, Benutzer- und OIDC-Änderungen mit Zeit, Benutzer, Ergebnis und **gekürzter** IP
+  (IPv4 /24, IPv6 /48); nie Passwörter, Token, Secrets oder Sitzungs-IDs. Aufbewahrung 365 Tage
+  (Einstellung `audit.retention_days`, 30–3650).
+- Beim Update läuft Migration 0021/0022 beim Start: alle bisherigen Konten werden Administrator; frühere `oidc:<email>`-Konten
+  werden zu OIDC-Konten im Status *wartet auf Freigabe* (siehe unten).
+
+## OIDC einrichten
+
+Neben dem Passwort lässt sich ein OIDC-Anbieter einrichten (Tab *OIDC* oder `PATCHWATCH_OIDC_*`, siehe `.env.example`).
+Voraussetzung: `PATCHWATCH_PUBLIC_URL=https://patchwatch.example.org` (daraus entsteht die Redirect-URI
+`<public-url>/api/v1/auth/oidc/callback`, ersatzweise `PATCHWATCH_OIDC_REDIRECT_URL`) und `PATCHWATCH_SECRET_KEY`
+(das Client-Secret wird verschlüsselt gespeichert). Den Tab *OIDC → Verbindung testen* nutzen, bevor jemand sich anmeldet.
+
+1. **Authentik:** Provider *OAuth2/OpenID*, Client-Typ vertraulich, Redirect-URI wie oben (exakt), Signaturschlüssel
+   *RS256* (Zertifikat zuweisen), Scopes `openid email profile`; Issuer ist die *OpenID-Konfigurations-Aussteller*-URL
+   (`https://auth.example.org/application/o/<slug>/`). Gruppen: Scope-Mapping `groups` ist im Standard-Scope `profile` enthalten.
+2. **Keycloak:** Client *OpenID Connect*, *Client authentication* an, *Standard flow* an, Redirect-URI wie oben;
+   Issuer `https://kc.example.org/realms/<realm>`. Gruppen: Client-Scope mit Mapper *Group Membership* (Token-Claim `groups`,
+   *Full group path* aus).
+3. **Authelia:** `identity_providers.oidc.clients` mit `client_id`, `client_secret` (Hash), `redirect_uris`,
+   `scopes: [openid, profile, email, groups]`, `token_endpoint_auth_method: client_secret_basic` oder `client_secret_post`;
+   Issuer ist die öffentliche Authelia-Adresse. E-Mail und Gruppen liefert bei Authelia oft nur der UserInfo-Endpunkt;
+   patchwatch ruft ihn bei Bedarf ab.
+
+**Regeln (fest eingebaut):** Authorization Code mit PKCE S256, state (Cookie + Datenbank, einmalig, 10 Minuten) und nonce;
+die Signatur des ID-Tokens wird gegen das JWKS des Anbieters geprüft (nur RS256 und ES256; `none`, HMAC und
+Schlüsseltyp-Verwechslung werden abgelehnt), außerdem `iss`, `aud`, `azp`, `exp`, `iat`, `nbf` (60 s Toleranz) und `nonce`.
+JWKS-Cache 10 Minuten, Neuabruf bei unbekannter `kid` höchstens einmal je Minute. Ein Konto wird **nur** über (Issuer, `sub`)
+gefunden, **nie** über E-Mail oder Namen: gleiche E-Mail mit neuem `sub` ergibt ein neues, getrenntes Konto.
+Neue Konten sind standardmäßig *ausstehend* (ohne Rechte, bis ein Administrator sie freigibt und die Rolle wählt); es gibt nie
+automatisch Administratorrechte. Optionen im Tab *OIDC*: *Nur Lesen vergeben* (nur bei Gruppenzuordnung oder verifizierter
+E-Mail in `…_ALLOWED_DOMAINS`/`…_ALLOWED_EMAILS`) oder *Ablehnen*; **Gruppe → Rolle**: ist eine Zuordnung eingerichtet, gilt sie
+als maßgeblich (keine passende Gruppe = Nur Lesen). Eine **Hochstufung** durch den Anbieter wartet auf die Bestätigung eines
+Administrators (Hinweis in der Tabelle), eine **Herabstufung** wirkt sofort; eine Administrator-Zuordnung speichert nur,
+wer sein Passwort bestätigt. Nach jeder Anmeldung gibt es eine neue Sitzungs-ID. Das Rücksprungziel `return_to` stammt nur
+aus einer Positivliste relativer Pfade. Fehler zeigen dem Browser nur „Anmeldung nicht möglich“; der Grund (fester Code,
+nie Tokens) steht im Aktivitätsprotokoll. Die Passwort-Anmeldung bleibt als Notzugang bestehen, mindestens ein lokaler
+Administrator bleibt immer erhalten.
+
+**Sicherheit der Abrufe:** Discovery, JWKS, Token- und UserInfo-Endpunkt laufen durch die SSRF-Prüfung (nur `https://`,
+Adresse geprüft und gepinnt, keine Weiterleitungen, kein Proxy, Zeitlimit, Antwort höchstens 256 KiB, alle Endpunkte beim
+selben Host wie der Issuer). `http://` ist nur für Hosts erlaubt, die in `PATCHWATCH_NOTIFY_ALLOWED_HOSTS` stehen (Anbieter
+im Heimnetz); Loopback und Link-Local bleiben immer gesperrt.
+
+## Zugang wiederherstellen
+
+Ist der Zugang verloren (Passwort vergessen, alle Administratoren gesperrt oder gelöscht, OIDC-Anbieter ausgefallen), hilft
+der Server-Unterbefehl auf dem Server selbst (der Zugriff auf den Server ist die Berechtigung):
+
+```sh
+docker compose exec server patchwatch-server reset-admin <benutzer>   # fragt das Passwort ohne Anzeige ab (zweimal)
+```
+
+Er macht `<benutzer>` (wird angelegt, falls es fehlt) zum aktiven **lokalen Administrator**, hebt Sperre, Löschvermerk und
+OIDC-Bindung auf, beendet alle Sitzungen des Kontos und schreibt einen Eintrag ins Aktivitätsprotokoll. Das Passwort steht
+nie in Argumenten, Umgebung oder Dateien (ohne Terminal liest der Befehl die erste Zeile von stdin). Mindestens 12 Zeichen.
+
+## Sicherheitshinweise
+
+- Nach dem Update: Migration läuft beim Start; Server neu starten; OIDC (falls genutzt) neu prüfen, frühere `oidc:<email>`-Konten
+  freigeben oder neu anlegen; mindestens einen lokalen Administrator mit starkem Passwort behalten.
+- `PATCHWATCH_PUBLIC_URL` und `PATCHWATCH_SECRET_KEY` setzen, sonst lässt sich OIDC nicht speichern.
+- Hinter einem Reverse-Proxy `trust_proxy=true` nur setzen, wenn der Proxy `X-Forwarded-For` anhängt (Rate-Limits und
+  Aktivitätsprotokoll nutzen die Client-IP).
+- Vergib die Rolle Administrator sparsam; Betreiber können Hosts, Quellen und Kanäle ändern, aber keine Benutzer verwalten.
 
 ### Ubuntu-Erstabruf: Umfang und Entscheidung
 

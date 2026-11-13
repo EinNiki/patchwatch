@@ -326,6 +326,13 @@ export interface FeedBulk {
 
 export interface Me {
   username: string;
+  /** Anzeigename (Fallback: `username`). */
+  display_name?: string | null;
+  /** `admin`, `operator` oder `viewer`; Rechte stehen in `permissions` (der Server setzt sie bei jeder Anfrage durch). */
+  role?: string;
+  role_title?: string;
+  permissions?: string[];
+  auth_kind?: "local" | "oidc";
   csrf_token: string;
   /** Start-Passwort (erzeugt oder früherer Standardwert): bis zum Wechsel ist nur der Passwortwechsel möglich. */
   must_change_password?: boolean;
@@ -347,4 +354,50 @@ export interface UpdateItem {
   to: string;
   origin: string;
   security: boolean;
+}
+
+/** Benutzer in der Verwaltung (`GET /users`). */
+export interface UserRow {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string | null;
+  auth_kind: "local" | "oidc";
+  role: string;
+  role_title: string | null;
+  status: "active" | "locked" | "pending";
+  created_at: string;
+  last_login_at: string | null;
+  has_avatar: boolean;
+  oidc_linked: boolean;
+  requested_role: string | null;
+  is_self: boolean;
+}
+
+export interface AuditEntry {
+  id: number;
+  at: string;
+  actor_name: string;
+  action: string;
+  target: string | null;
+  result: "ok" | "denied" | "failed";
+  ip: string | null;
+}
+
+export interface OidcSettings {
+  source: "ui" | "env" | "none";
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  redirect_url: string;
+  public_url_set: boolean;
+  name: string;
+  scopes: string;
+  allowed_emails: string[];
+  allowed_domains: string[];
+  group_claim: string;
+  group_roles: { group: string; role: string }[];
+  new_account: "pending" | "viewer" | "reject";
+  secret_set: boolean;
+  secret_storage: boolean;
 }
