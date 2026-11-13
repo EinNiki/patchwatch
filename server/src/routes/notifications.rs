@@ -1,8 +1,9 @@
 //! Konfiguration der Benachrichtigungskanäle. Geheimnisse sind nur schreibend: Sie werden nie
 //! zurückgegeben, in der Datenbank verschlüsselt abgelegt und in keiner Antwort oder Fehlermeldung gezeigt.
 
+use crate::authz;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, CsrfAdmin};
+use crate::extract::{Authed, CsrfAuthed};
 use crate::notify::channels::{self, KINDS};
 use crate::notify::secret_target;
 use crate::notify::store::{self, Effective, Update};
@@ -58,7 +59,10 @@ fn known_kind(kind: &str) -> ApiResult<()> {
     }
 }
 
-pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>> {
+pub async fn list(
+    _: Authed<authz::p::ChannelsRead>,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Value>> {
     let all = store::load_all(&st.pool, &st.cfg).await?;
     Ok(Json(json!({
         // Ohne Schlüssel lassen sich keine Geheimnisse speichern; die UI weist darauf hin.
@@ -69,7 +73,7 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>
 }
 
 pub async fn get_one(
-    _: Admin,
+    _: Authed<authz::p::ChannelsRead>,
     State(st): State<AppState>,
     Path(kind): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -137,7 +141,7 @@ fn clean_config(kind: &str, raw: &Value) -> ApiResult<Value> {
 }
 
 pub async fn put(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::ChannelsWrite>,
     State(st): State<AppState>,
     Path(kind): Path<String>,
     Json(body): Json<PutBody>,
@@ -258,7 +262,7 @@ pub async fn put(
 /// "Testnachricht senden" über die gespeicherte Konfiguration. Das Ergebnis ist generisch
 /// (`ok` / `nicht erreichbar` / `HTTP <Code>`); der Antwort-Body der Gegenseite wird nie gezeigt.
 pub async fn test(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::ChannelsTest>,
     State(st): State<AppState>,
     Path(kind): Path<String>,
 ) -> ApiResult<Json<Value>> {

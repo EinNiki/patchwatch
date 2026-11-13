@@ -1,7 +1,8 @@
+use crate::authz;
 use crate::cve::runs::{self, Gate, Start, Trigger};
 use crate::cve::{refresh, sources};
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, CsrfAdmin};
+use crate::extract::{Authed, CsrfAuthed};
 use crate::notify::secret_target::{self, Target};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
@@ -324,7 +325,10 @@ fn classify(
     }
 }
 
-pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<FeedRow>>> {
+pub async fn list(
+    _: Authed<authz::p::SourcesRead>,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Vec<FeedRow>>> {
     let sources = sources::list(&st).await?;
     let rows: Vec<FeedDb> = sqlx::query_as(
         "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill, retry_step, next_attempt_at, bulk FROM feed_state",
@@ -551,7 +555,7 @@ fn reevaluate_in_background(st: &AppState) {
 /// Quelle hinzufügen (nur bekannte Typen). Alles wird vor dem Speichern geprüft, gespeichert wird mit einem einzigen
 /// INSERT: bei einem Fehler entsteht nichts, ein gleichzeitiger Doppelversand scheitert am Unique-Index.
 pub async fn create(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::SourcesWrite>,
     State(st): State<AppState>,
     Json(b): Json<CreateBody>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
@@ -611,7 +615,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::SourcesWrite>,
     State(st): State<AppState>,
     Path(id): Path<String>,
     Json(b): Json<UpdateBody>,
@@ -737,7 +741,7 @@ pub async fn update(
 /// (Hosts ohne aktive Quelle für ihre Distribution werden "CVE-Lage unbekannt"); danach räumt der Cleanup-Job auf.
 /// Das Geheimnis wird sofort verworfen. Wieder hinzufügen geht jederzeit.
 pub async fn delete(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::SourcesWrite>,
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
@@ -826,7 +830,7 @@ fn already_running(run_id: i64) -> Response {
 
 /// Eine Quelle sofort abrufen. 202 mit dem Lauf; läuft schon einer, 409 mit dessen Nummer (der Client hängt sich daran an).
 pub async fn run_source(
-    CsrfAdmin(admin): CsrfAdmin,
+    CsrfAuthed(admin, _): CsrfAuthed<authz::p::SourcesRun>,
     State(st): State<AppState>,
     Path(name): Path<String>,
     body: Option<Json<RunBody>>,
@@ -883,7 +887,7 @@ pub struct RunsQuery {
 
 /// Läufe auflisten: `?active=true` für die Anzeige im Fortschritt, sonst der Verlauf (neueste zuerst, höchstens 50).
 pub async fn runs_list(
-    _: Admin,
+    _: Authed<authz::p::SourcesRead>,
     State(st): State<AppState>,
     Query(q): Query<RunsQuery>,
 ) -> ApiResult<Json<Value>> {
@@ -924,7 +928,7 @@ pub struct RefreshQuery {
 /// gemeldet (`running`), Quellen, die wegen Mindestabstand oder Backoff nicht dürfen, mit Grund unter `skipped`.
 /// Mit `?wait=true` wird synchron und ohne Laufprotokoll abgerufen (für Skripte und Tests).
 pub async fn refresh(
-    CsrfAdmin(admin): CsrfAdmin,
+    CsrfAuthed(admin, _): CsrfAuthed<authz::p::SourcesRun>,
     State(st): State<AppState>,
     Query(q): Query<RefreshQuery>,
     body: Option<Json<RunBody>>,

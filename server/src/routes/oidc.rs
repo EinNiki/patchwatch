@@ -3,8 +3,9 @@
 //! Der ID-Token kommt direkt vom Token-Endpunkt über TLS; die Signatur wird deshalb nicht geprüft (OIDC Core 3.1.3.7,
 //! Punkt 6), wohl aber Aussteller, Zielgruppe, Ablauf und nonce. Angemeldet wird nur, wer in `OIDC_ALLOWED_EMAILS`
 //! oder `OIDC_ALLOWED_DOMAINS` steht und dessen E-Mail-Adresse nicht als unverifiziert gemeldet wird.
+use crate::authz;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, ClientIp, CsrfAdmin};
+use crate::extract::{Authed, ClientIp, CsrfAuthed};
 use crate::security;
 use crate::state::AppState;
 use axum::extract::{Query, State};
@@ -130,7 +131,10 @@ pub async fn providers(State(st): State<AppState>) -> Json<Value> {
 }
 
 /// Einstellungen für die UI; das Client-Secret wird nie ausgegeben.
-pub async fn settings_get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>> {
+pub async fn settings_get(
+    _: Authed<authz::p::OidcManage>,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Value>> {
     Ok(Json(settings_view(&st).await))
 }
 
@@ -203,7 +207,7 @@ fn clean_list(v: &[String]) -> Vec<String> {
 
 /// Speichert die OIDC-Einstellungen. Wer sich anmelden darf, muss festgelegt sein (E-Mails oder Domains).
 pub async fn settings_put(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::OidcManage>,
     State(st): State<AppState>,
     Json(b): Json<SettingsBody>,
 ) -> ApiResult<Json<Value>> {

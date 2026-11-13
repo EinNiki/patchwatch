@@ -1,5 +1,6 @@
+use crate::authz;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, CsrfAdmin};
+use crate::extract::{Authed, CsrfAuthed};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -342,7 +343,7 @@ fn build_filter(q: &ListQuery, all_releases: bool, affecting_only: bool) -> ApiR
 /// Trefferzahl der aktuellen Filter je Umfang: `mine` (Releases auf meinen Hosts) und `all` (alle Releases). Für den
 /// Leer-Zustand ("3 CVEs passen, wenn Releases ohne Host mitzählen"); benutzt dieselbe Filterlogik wie die Liste.
 pub async fn scope_count(
-    _: Admin,
+    _: Authed<authz::p::CvesRead>,
     State(st): State<AppState>,
     Query(q): Query<ListQuery>,
 ) -> ApiResult<Json<Value>> {
@@ -380,7 +381,7 @@ fn parse_affects(q: &ListQuery) -> ApiResult<bool> {
 }
 
 pub async fn list(
-    _: Admin,
+    _: Authed<authz::p::CvesRead>,
     State(st): State<AppState>,
     Query(q): Query<ListQuery>,
 ) -> ApiResult<Json<Vec<CveOut>>> {
@@ -492,7 +493,7 @@ struct AffectedHost {
 }
 
 pub async fn detail(
-    _: Admin,
+    _: Authed<authz::p::CvesRead>,
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -540,7 +541,10 @@ pub async fn detail(
     })))
 }
 
-pub async fn watchlist(admin: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<CveOut>>> {
+pub async fn watchlist(
+    admin: Authed<authz::p::CvesRead>,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Vec<CveOut>>> {
     list(
         admin,
         State(st),
@@ -569,7 +573,7 @@ pub struct WatchBody {
 
 /// Fügt eine CVE zur Watchlist hinzu (auch, wenn die Feeds sie noch nicht kennen).
 pub async fn watch(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::CvesWatch>,
     State(st): State<AppState>,
     Path(id): Path<String>,
     body: Option<Json<WatchBody>>,
@@ -608,7 +612,7 @@ pub async fn watch(
 }
 
 pub async fn unwatch(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::CvesWatch>,
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {

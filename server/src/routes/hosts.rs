@@ -1,5 +1,6 @@
+use crate::authz;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, CsrfAdmin};
+use crate::extract::{Authed, CsrfAuthed};
 use crate::security;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
@@ -28,7 +29,7 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
 
 /// Offene Paket-Updates laut letztem Report; `{"items": null}`, wenn der Agent noch keine Liste mitschickt.
 pub async fn updates(
-    _: Admin,
+    _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
@@ -94,7 +95,10 @@ async fn with_source_issues(st: &AppState, mut rows: Vec<HostRow>) -> ApiResult<
     Ok(rows)
 }
 
-pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<HostRow>>> {
+pub async fn list(
+    _: Authed<authz::p::HostsRead>,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Vec<HostRow>>> {
     let rows = sqlx::query_as::<_, HostRow>(&format!("{HOST_SELECT} ORDER BY h.name"))
         .fetch_all(&st.pool)
         .await?;
@@ -102,7 +106,7 @@ pub async fn list(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Vec<Ho
 }
 
 pub async fn detail(
-    _: Admin,
+    _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<HostRow>> {
@@ -132,7 +136,7 @@ pub struct HistoryRow {
 }
 
 pub async fn history(
-    _: Admin,
+    _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
     Query(q): Query<HistoryQuery>,
@@ -220,7 +224,7 @@ const LEVEL_SQL: &str =
 /// Antwort: `{items, total, counts, host, issue}`. Die Zähler gelten für den ganzen Host (ohne Suche/Filter), `total`
 /// für die gefilterte Liste. Sortierung und Gruppen stammen aus festen Listen; nur der Suchtext ist ein Parameter.
 pub async fn cves(
-    _: Admin,
+    _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
     Query(q): Query<CvesQuery>,
@@ -432,7 +436,7 @@ pub struct GroupsQuery {
 /// Einträge nach Fix-Version gruppiert (`reboot` oder `fixed`): `{groups: [{fix_version, count}], total}`, neueste Version
 /// zuerst (dpkg-Reihenfolge). Einträge ohne Fix-Version stehen in einer Gruppe mit `fix_version: null`.
 pub async fn cve_groups(
-    _: Admin,
+    _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
     Query(q): Query<GroupsQuery>,
@@ -510,7 +514,7 @@ fn valid_host_name(n: &str) -> bool {
 
 /// Legt einen Host an; der Token wird nur hier einmalig im Klartext zurückgegeben.
 pub async fn create(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::HostsWrite>,
     State(st): State<AppState>,
     Json(body): Json<NewHost>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
@@ -539,7 +543,7 @@ pub async fn create(
 }
 
 pub async fn rotate_token(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::AgentsTokens>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
@@ -557,7 +561,7 @@ pub async fn rotate_token(
 }
 
 pub async fn remove(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::HostsWrite>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
@@ -576,7 +580,7 @@ pub async fn remove(
 /// "Geprüft am …": Admin hat die CVE für diesen Host manuell geprüft. Der Status bleibt unverändert
 /// (UNKNOWN); die Markierung verfällt, sobald sich der laufende Kernel ändert.
 pub async fn review(
-    CsrfAdmin(admin): CsrfAdmin,
+    CsrfAuthed(admin, _): CsrfAuthed<authz::p::CvesWatch>,
     State(st): State<AppState>,
     Path((id, cve)): Path<(i64, String)>,
 ) -> ApiResult<StatusCode> {
@@ -608,7 +612,7 @@ pub async fn review(
 }
 
 pub async fn unreview(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::CvesWatch>,
     State(st): State<AppState>,
     Path((id, cve)): Path<(i64, String)>,
 ) -> ApiResult<StatusCode> {
@@ -626,7 +630,7 @@ const REQUEST_COOLDOWN_SECS: i32 = 60;
 /// "Jetzt aktualisieren": merkt den Wunsch beim Host vor; der Agent holt ihn beim nächsten Check-in ab.
 /// Höchstens eine Anfrage je Host und Minute (in der DB, übersteht Neustarts).
 pub async fn request_report(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::HostsRun>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
@@ -685,7 +689,7 @@ pub async fn request_all(pool: &sqlx::PgPool) -> sqlx::Result<(i64, i64)> {
 
 /// "Alle aktualisieren": gleiche Regel je Host; Hosts im Cooldown werden übersprungen.
 pub async fn request_report_all(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::HostsRun>,
     State(st): State<AppState>,
 ) -> ApiResult<Json<Value>> {
     let (requested, total) = request_all(&st.pool).await?;

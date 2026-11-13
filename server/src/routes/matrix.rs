@@ -1,6 +1,7 @@
+use crate::authz;
 use crate::cve::reeval;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::Admin;
+use crate::extract::Authed;
 use crate::routes::cves::valid_cve_id;
 use crate::state::AppState;
 use axum::extract::{Query, State};
@@ -39,7 +40,7 @@ struct Cell {
 
 /// Zellen für die Matrix-Ansicht. Fehlende Bewertungen werden als `unknown` geliefert, nie als grün.
 pub async fn matrix(
-    _: Admin,
+    _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Query(q): Query<MatrixQuery>,
 ) -> ApiResult<Json<Value>> {

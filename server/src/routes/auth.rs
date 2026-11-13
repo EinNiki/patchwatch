@@ -1,5 +1,6 @@
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, ClientIp, CsrfAdmin, PendingAdmin, PendingCsrfAdmin};
+use crate::audit::{self, Outcome};
+use crate::extract::{Admin, ClientIp, PendingAdmin, PendingCsrfAdmin, SelfAdmin, SelfCsrfAdmin};
 use crate::security;
 use crate::state::AppState;
 use axum::body::Bytes;
@@ -42,8 +43,11 @@ pub async fn login(
     if super::has_nul(&body.username) {
         return Err(ApiError::BadRequest("ungültige Eingabe".into()));
     }
+    // Nur aktive lokale Konten mit Passwort können sich so anmelden; gesperrte, ausstehende, gelöschte und OIDC-Konten
+    // verhalten sich wie ein unbekannter Name (gleiche Antwort, gleiche Rechenzeit durch den Dummy-Hash).
     let user: Option<(i64, String, bool)> = sqlx::query_as(
-        "SELECT id, password_hash, must_change_password FROM admin_users WHERE username = $1",
+        "SELECT id, password_hash, must_change_password FROM admin_users \
+         WHERE username = $1 AND status = 'active' AND auth_kind = 'local' AND deleted_at IS NULL AND password_hash IS NOT NULL",
     )
     .bind(&body.username)
     .fetch_optional(&st.pool)
@@ -58,8 +62,14 @@ pub async fn login(
         .await
         .map_err(anyhow::Error::from)?;
     let Some(admin_id) = admin_id.filter(|_| ok) else {
+        audit::record(&st.pool, None, &body.username, "login", None, Outcome::Failed, &ip).await;
         return Err(ApiError::Unauthorized);
     };
+    sqlx::query("UPDATE admin_users SET last_login_at = now() WHERE id = $1")
+        .bind(admin_id)
+        .execute(&st.pool)
+        .await?;
+    audit::record(&st.pool, Some(admin_id), &body.username, "login", None, Outcome::Ok, &ip).await;
 
     let session_id = security::new_session_id();
     let csrf = security::new_csrf_token();
@@ -115,6 +125,7 @@ pub struct ChangePassword {
 pub async fn change_password(
     State(st): State<AppState>,
     PendingCsrfAdmin(admin): PendingCsrfAdmin,
+    ClientIp(ip): ClientIp,
     Json(body): Json<ChangePassword>,
 ) -> ApiResult<StatusCode> {
     st.limiter
@@ -145,11 +156,14 @@ pub async fn change_password(
             "Neues Passwort muss sich vom aktuellen unterscheiden".into(),
         ));
     }
-    let (id, hash): (i64, String) =
-        sqlx::query_as("SELECT id, password_hash FROM admin_users WHERE username = $1")
-            .bind(&admin.username)
+    let (id, hash): (i64, Option<String>) =
+        sqlx::query_as("SELECT id, password_hash FROM admin_users WHERE id = $1")
+            .bind(admin.id)
             .fetch_one(&st.pool)
             .await?;
+    let Some(hash) = hash else {
+        return Err(ApiError::Forbidden("Dieses Konto hat kein Passwort (Anmeldung über OIDC)"));
+    };
     let current = body.current_password;
     let ok = tokio::task::spawn_blocking(move || security::verify_password(&hash, &current))
         .await
@@ -175,6 +189,7 @@ pub async fn change_password(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    audit::record(&st.pool, Some(id), &admin.username, "password.changed", Some(&admin.username), Outcome::Ok, &ip).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -184,14 +199,23 @@ pub async fn me(
 ) -> ApiResult<Json<serde_json::Value>> {
     // Zeitstempel des Profilbilds (Sekunden) dient der Oberfläche als Cache-Schlüssel; `null` = kein eigenes Bild.
     let avatar: Option<i64> = sqlx::query_scalar(
-        "SELECT extract(epoch FROM avatar_updated_at)::bigint FROM admin_users WHERE username = $1 AND avatar IS NOT NULL",
+        "SELECT extract(epoch FROM avatar_updated_at)::bigint FROM admin_users WHERE id = $1 AND avatar IS NOT NULL",
     )
-    .bind(&admin.username)
+    .bind(admin.id)
     .fetch_optional(&st.pool)
     .await?
     .flatten();
+    let display: Option<String> = sqlx::query_scalar("SELECT display_name FROM admin_users WHERE id = $1")
+        .bind(admin.id)
+        .fetch_optional(&st.pool)
+        .await?;
     Ok(Json(json!({
         "username": admin.username,
+        "display_name": display,
+        "role": admin.role.key(),
+        "role_title": admin.role.title(),
+        "permissions": admin.role.permissions().iter().map(|p| p.name()).collect::<Vec<_>>(),
+        "auth_kind": admin.auth_kind,
         "csrf_token": admin.csrf_token,
         "must_change_password": admin.must_change_password,
         "avatar": avatar,
@@ -229,7 +253,7 @@ fn avatar_response(kind: &'static str, data: Vec<u8>) -> Response {
 /// Eigenes Profilbild (nur für angemeldete Admins; 404, wenn keines gesetzt ist).
 pub async fn avatar_get(
     State(st): State<AppState>,
-    Admin { username, .. }: Admin,
+    SelfAdmin(Admin { username, .. }): SelfAdmin,
 ) -> ApiResult<Response> {
     let row: Option<(Option<Vec<u8>>, Option<String>)> =
         sqlx::query_as("SELECT avatar, avatar_type FROM admin_users WHERE username = $1")
@@ -253,7 +277,7 @@ pub async fn avatar_get(
 /// Setzt das Profilbild. Erwartet das im Browser neu kodierte Bild (PNG oder WebP, 128×128, höchstens 64 KB) als Rohdaten.
 pub async fn avatar_put(
     State(st): State<AppState>,
-    CsrfAdmin(admin): CsrfAdmin,
+    SelfCsrfAdmin(admin): SelfCsrfAdmin,
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
@@ -295,7 +319,7 @@ pub async fn avatar_put(
 /// Entfernt das Profilbild (danach gilt wieder der Kreis mit Initialen).
 pub async fn avatar_delete(
     State(st): State<AppState>,
-    CsrfAdmin(admin): CsrfAdmin,
+    SelfCsrfAdmin(admin): SelfCsrfAdmin,
 ) -> ApiResult<StatusCode> {
     sqlx::query("UPDATE admin_users SET avatar = NULL, avatar_type = NULL, avatar_updated_at = NULL WHERE username = $1")
         .bind(&admin.username)

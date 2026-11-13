@@ -1,7 +1,8 @@
 //! `GET /api/v1/live`: WebSocket, nur Server -> Client. Voraussetzungen: gültige Session und passende Origin.
 
+use crate::authz;
 use crate::error::ApiError;
-use crate::extract::Admin;
+use crate::extract::Authed;
 use crate::state::AppState;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -36,7 +37,7 @@ fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
 }
 
 pub async fn live(
-    admin: Admin,
+    Authed(admin, _): Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,

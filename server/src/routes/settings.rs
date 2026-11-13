@@ -1,7 +1,8 @@
 //! Einstellungen, die zur Laufzeit in der UI änderbar sind (Tabelle `settings`).
 
+use crate::authz;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{Admin, CsrfAdmin};
+use crate::extract::{Authed, CsrfAuthed};
 use crate::schedule::{self, ReportSchedule};
 use crate::state::AppState;
 use axum::extract::State;
@@ -28,7 +29,10 @@ pub async fn retention_days(pool: &PgPool, fallback: i64) -> i64 {
         .unwrap_or(fallback)
 }
 
-pub async fn get(_: Admin, State(st): State<AppState>) -> ApiResult<Json<Value>> {
+pub async fn get(
+    _: Authed<authz::p::SettingsRead>,
+    State(st): State<AppState>,
+) -> ApiResult<Json<Value>> {
     let now = Utc::now();
     let mut feeds = Vec::new();
     for src in crate::cve::sources::list(&st).await? {
@@ -84,7 +88,7 @@ pub struct Body {
 }
 
 pub async fn put(
-    CsrfAdmin(_): CsrfAdmin,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::SettingsWrite>,
     State(st): State<AppState>,
     Json(body): Json<Body>,
 ) -> ApiResult<Json<Value>> {

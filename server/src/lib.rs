@@ -1,4 +1,6 @@
 pub mod admin;
+pub mod audit;
+pub mod authz;
 pub mod avatar;
 pub mod config;
 pub mod cve;
