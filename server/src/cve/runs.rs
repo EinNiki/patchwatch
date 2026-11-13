@@ -66,6 +66,9 @@ struct Inner {
     requests: u32,
     retries: u32,
     wait_ms: u64,
+    /// Wartezeit je Phase, in der sie anfiel; die Anzeige rechnet sie zu „Herunterladen“ (die Phase selbst bleibt,
+    /// damit der Verbinden-Wächter weiter greift).
+    waited_in: Vec<(Phase, u64)>,
     page_size: Option<u32>,
     statuses: std::collections::BTreeMap<u16, u32>,
     /// Je Anfrage [Status, Bytes, Millisekunden]; begrenzt auf `MAX_PAGE_STATS`.
@@ -96,6 +99,7 @@ impl Default for Sink {
             requests: 0,
             retries: 0,
             wait_ms: 0,
+            waited_in: Vec::new(),
             page_size: None,
             statuses: std::collections::BTreeMap::new(),
             page_stats: Vec::new(),
@@ -204,6 +208,8 @@ impl Sink {
     pub fn add_wait(&self, ms: u64) {
         if let Ok(mut i) = self.0.lock() {
             i.wait_ms = i.wait_ms.saturating_add(ms);
+            let cur = i.phase;
+            i.waited_in.push((cur, ms));
         }
     }
 
@@ -243,6 +249,19 @@ impl Sink {
             i.phase.as_str().into(),
             json!(i.since.elapsed().as_millis() as u64),
         );
+        // Wartezeit auf die Gegenstelle (Drosselung, Retry-After, Seitenpause) zählt als „Herunterladen“, nicht als
+        // „Verbinden“/„Auswerten“.
+        for (p, w) in &i.waited_in {
+            if *p == Phase::Download {
+                continue;
+            }
+            let key = p.as_str();
+            let have = phases.get(key).and_then(Value::as_u64).unwrap_or(0);
+            let moved = (*w).min(have);
+            phases.insert(key.into(), json!(have - moved));
+            let dl = phases.get("download").and_then(Value::as_u64).unwrap_or(0);
+            phases.insert("download".into(), json!(dl + moved));
+        }
         Some(Snapshot {
             phase: i.phase,
             bytes: i.bytes,
@@ -324,12 +343,7 @@ pub fn report_page_size(n: u32) {
 
 /// Pause, die als Wartezeit des Laufs gezählt wird (Backoff, Retry-After, Seitenpause).
 pub async fn wait(d: Duration) {
-    // Die Wartezeit auf die Gegenstelle (Drosselung, Retry-After, Seitenpause) gehört zu „Herunterladen“, nicht zu
-    // „Verbinden“ oder „Auswerten“; Phasen gehen nie zurück, spätere Phasen bleiben also unberührt.
-    let _ = SINK.try_with(|s| {
-        s.set_phase(Phase::Download);
-        s.add_wait(d.as_millis() as u64)
-    });
+    let _ = SINK.try_with(|s| s.add_wait(d.as_millis() as u64));
     tokio::time::sleep(d).await;
 }
 
@@ -870,15 +884,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_counts_as_download_phase() {
+    async fn wait_is_shown_as_download_time_but_keeps_the_phase() {
         let sink = Arc::new(Sink::default());
         SINK.scope(sink.clone(), async {
             report_phase(Phase::Connect);
-            wait(Duration::from_millis(1)).await;
-            assert_eq!(current_phase_age().unwrap().0, Phase::Download);
-            report_phase(Phase::Parse);
-            wait(Duration::from_millis(1)).await;
-            assert_eq!(current_phase_age().unwrap().0, Phase::Parse);
+            wait(Duration::from_millis(60)).await;
+            // die Phase bleibt „Verbinden“ (Wächter), die Zeit steht bei „Herunterladen“
+            assert_eq!(current_phase_age().unwrap().0, Phase::Connect);
+            let snap = sink.take(true).unwrap();
+            let dl = snap.phases["download"].as_u64().unwrap();
+            assert!(dl >= 60, "{dl}");
+            assert!(snap.phases["connect"].as_u64().unwrap() < 60);
         })
         .await;
     }
