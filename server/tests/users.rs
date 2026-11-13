@@ -212,6 +212,7 @@ fn matrix() -> Vec<(Method, &'static str, Permission, bool)> {
         (Method::PUT, "/api/v1/settings", SettingsWrite, false),
         (Method::GET, "/api/v1/settings/oidc", OidcManage, true),
         (Method::PUT, "/api/v1/settings/oidc", OidcManage, false),
+        (Method::POST, "/api/v1/settings/oidc/test", OidcManage, true),
         (Method::GET, "/api/v1/roles", UsersManage, true),
         (Method::GET, "/api/v1/users", UsersManage, true),
         (Method::POST, "/api/v1/users", UsersManage, false),

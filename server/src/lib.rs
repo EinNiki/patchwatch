@@ -11,6 +11,7 @@ pub mod hostops;
 pub mod jobs;
 pub mod live;
 pub mod notify;
+pub mod oidc;
 pub mod ratelimit;
 pub mod routes;
 pub mod schedule;

@@ -154,7 +154,7 @@ fn role_of(raw: &str) -> ApiResult<Role> {
 }
 
 /// Eigenes Passwort bzw. frische Anmeldung (OIDC) für Administratorrechte verlangen.
-async fn reauth(st: &AppState, me: &Admin, password: Option<&str>) -> ApiResult<()> {
+pub(super) async fn reauth(st: &AppState, me: &Admin, password: Option<&str>) -> ApiResult<()> {
     st.limiter
         .check(&format!("reauth:{}", me.id), 5, Duration::from_secs(600))
         .map_err(|w| ApiError::TooManyRequests {

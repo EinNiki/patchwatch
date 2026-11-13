@@ -94,6 +94,7 @@ pub fn router(state: AppState) -> Router {
             "/settings/oidc",
             get(oidc::settings_get).put(oidc::settings_put),
         )
+        .route("/settings/oidc/test", post(oidc::settings_test))
         .route("/live", get(live::live))
         .route("/roles", get(users::roles))
         .route("/users", get(users::list).post(users::create))

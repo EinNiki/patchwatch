@@ -23,6 +23,8 @@ pub struct AppState {
     pub checkin_waiters: Arc<std::sync::Mutex<std::collections::HashMap<i64, u64>>>,
     /// ... und höchstens `MAX_OPEN_CHECKINS` gleichzeitig; weitere Aufrufe werden sofort beantwortet.
     pub checkin_slots: Arc<tokio::sync::Semaphore>,
+    /// Öffentliche Schlüssel des OIDC-Anbieters (JWKS) mit Ablauf und Neuabruf-Begrenzung.
+    pub jwks: Arc<crate::oidc::JwksCache>,
 }
 
 /// Globale Obergrenze offener Check-in-Long-Polls.
@@ -49,6 +51,7 @@ impl AppState {
             live_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             checkin_waiters: Arc::default(),
             checkin_slots: Arc::new(tokio::sync::Semaphore::new(MAX_OPEN_CHECKINS)),
+            jwks: Arc::default(),
         })
     }
 }

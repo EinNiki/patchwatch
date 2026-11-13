@@ -219,6 +219,8 @@ pub struct Config {
     /// Standard: nur die Origin, die zum `Host`-Header passt.
     pub allowed_origins: Vec<String>,
     pub oidc: Oidc,
+    /// Öffentliche Adresse der Installation (`https://patchwatch.example.org`); daraus entsteht die OIDC-Redirect-URI.
+    pub public_url: Option<String>,
 }
 
 impl Default for Config {
@@ -239,6 +241,7 @@ impl Default for Config {
             notify_allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             oidc: Oidc::default(),
+            public_url: None,
         }
     }
 }
@@ -331,6 +334,10 @@ impl Config {
                 .map(|x| x.trim().trim_end_matches('/').to_ascii_lowercase())
                 .filter(|x| !x.is_empty())
                 .collect();
+        }
+        if let Some(v) = s("PUBLIC_URL") {
+            c.public_url =
+                Some(v.trim().trim_end_matches('/').to_owned()).filter(|v| !v.is_empty());
         }
         if let Some(v) = s("OIDC_ISSUER") {
             c.oidc.issuer = Some(v.trim_end_matches('/').to_owned());
@@ -443,17 +450,23 @@ impl Config {
         }
         let o = &self.oidc;
         if o.enabled() {
-            let local =
-                |u: &str| u.starts_with("http://localhost") || u.starts_with("http://127.0.0.1");
+            // http:// nur für Hosts, die der Betreiber ausdrücklich freigegeben hat (z. B. ein Anbieter im Heimnetz).
             let issuer = o.issuer.as_deref().unwrap_or_default();
-            if !(issuer.starts_with("https://") || local(issuer)) {
-                bail!("OIDC_ISSUER muss mit https:// beginnen");
+            let ok = crate::notify::ssrf::parse_url(issuer, false).is_ok_and(|u| {
+                u.scheme() == "https"
+                    || crate::notify::ssrf::host_allowed(
+                        u.host_str().unwrap_or_default(),
+                        &self.notify_allowed_hosts,
+                    )
+            });
+            if !ok {
+                bail!("OIDC_ISSUER muss mit https:// beginnen (http nur für Hosts aus PATCHWATCH_NOTIFY_ALLOWED_HOSTS)");
             }
-            if o.client_id.is_none() || o.client_secret.is_none() || o.redirect_url.is_none() {
-                bail!("OIDC: OIDC_CLIENT_ID, OIDC_CLIENT_SECRET und OIDC_REDIRECT_URL sind nötig");
+            if o.client_id.is_none() || o.client_secret.is_none() {
+                bail!("OIDC: OIDC_CLIENT_ID und OIDC_CLIENT_SECRET sind nötig");
             }
-            if o.allowed_emails.is_empty() && o.allowed_domains.is_empty() {
-                bail!("OIDC: OIDC_ALLOWED_EMAILS oder OIDC_ALLOWED_DOMAINS setzen (wer darf sich anmelden?)");
+            if o.redirect_url.is_none() && self.public_url.is_none() {
+                bail!("OIDC: PATCHWATCH_PUBLIC_URL (oder OIDC_REDIRECT_URL) ist nötig");
             }
         }
         if self.cve.interval_minutes < 5 {
