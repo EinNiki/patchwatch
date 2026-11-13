@@ -40,7 +40,12 @@ export default function UsersPage() {
   const router = useRouter();
   // OIDC liegt jetzt unter Einstellungen: alte Lesezeichen auf /users#oidc führen dorthin.
   useEffect(() => {
-    if (window.location.hash === "#oidc") router.replace("/settings#oidc");
+    const go = () => {
+      if (window.location.hash === "#oidc") router.replace("/settings#oidc");
+    };
+    go();
+    window.addEventListener("hashchange", go);
+    return () => window.removeEventListener("hashchange", go);
   }, [router]);
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   if (!allowed) return <Forbidden />;

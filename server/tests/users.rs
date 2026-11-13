@@ -1452,3 +1452,86 @@ async fn revoking_users_manage_from_the_last_manager_is_refused(pool: PgPool) {
     .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
 }
+
+/// Eine Rechteänderung beendet die Sitzungen des Benutzers und steht ohne Geheimnisse im Protokoll.
+#[sqlx::test(migrations = "./migrations")]
+async fn permission_change_ends_sessions_and_is_audited_without_secrets(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "boss", "admin", "active").await;
+    let id = mk(&pool, "target", "viewer", "active").await;
+    let a = login(&app, "boss").await;
+    let s = login(&app, "target").await;
+    let alive = |s: Sess| {
+        let app = app.clone();
+        async move {
+            call(&app, Method::GET, "/api/v1/hosts", &s.h(), None)
+                .await
+                .status
+                == StatusCode::OK
+        }
+    };
+    assert!(alive(s.clone()).await);
+    let r = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/users/{id}"),
+        &a.h(),
+        Some(json!({"permissions": ["hosts.read", "cves.read"], "confirm_name": "target"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert!(!alive(s).await, "alte Sitzung nach Rechteänderung");
+    let log: String = sqlx::query_scalar(
+        "SELECT string_agg(action || ' ' || coalesce(target,''), ',') FROM audit_log WHERE action = 'user.permissions_changed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(log.contains("user.permissions_changed"), "{log}");
+    assert!(!log.contains(PW), "Passwort im Protokoll");
+}
+
+/// Die Migration fügt nur eine Spalte ohne Vorgabe hinzu: bestehende Konten behalten `NULL` und damit die Rechte ihrer Rolle.
+#[sqlx::test(migrations = "./migrations")]
+async fn migration_leaves_existing_accounts_on_their_role_template(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    let nullable: (String, Option<String>) = sqlx::query_as(
+        "SELECT is_nullable, column_default FROM information_schema.columns WHERE table_name = 'admin_users' AND column_name = 'permissions'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(nullable.0, "YES");
+    assert!(
+        nullable.1.is_none(),
+        "keine Vorgabe, sonst änderte die Migration Bestandskonten"
+    );
+    for (n, role) in [
+        ("old-admin", "admin"),
+        ("old-op", "operator"),
+        ("old-ro", "viewer"),
+    ] {
+        mk(&pool, n, role, "active").await;
+        let p: Option<Vec<String>> =
+            sqlx::query_scalar("SELECT permissions FROM admin_users WHERE username = $1")
+                .bind(n)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(p.is_none(), "{n}: Rechte folgen der Rolle");
+        let me = call(
+            &app,
+            Method::GET,
+            "/api/v1/auth/me",
+            &login(&app, n).await.h(),
+            None,
+        )
+        .await;
+        let got: Vec<String> = serde_json::from_value(me.json["permissions"].clone()).unwrap();
+        let want: Vec<String> = authz::effective(Role::parse(role).unwrap(), None)
+            .iter()
+            .map(|p| p.name().to_owned())
+            .collect();
+        assert_eq!(got, want, "{n}");
+    }
+}

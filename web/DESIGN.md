@@ -245,18 +245,26 @@ Gemessener Kontrast auf dem dunkelsten Verlaufspunkt (links, Zeilenhintergrund =
 
 Alle Werte liegen über 4.5:1 (schwächster: `text-3` hell, 4.68).
 
-## Benutzerseite und Rechtevorschau (v2.3)
+## Benutzerseite und Rechteschalter (v2.4)
 
 Menüpunkt „Benutzer“ (Symbol `users`, zwischen Agents und Benachrichtigungen) nur mit `users.manage`; Direktaufruf ohne Recht
 zeigt eine 403-Seite (`role="alert"`, Link zur Übersicht). Die Seite hat Tabs (`role="tablist"`, Pfeiltasten, Tab-Stop nur auf
-dem aktiven Tab): *Benutzer*, *OIDC*, *Aktivität*. Tabellen wie Agents: `tbl stack-lg`, Zeilen ≤ 56 px, keine Klickfläche
-auf der Zeile, Aktionen nebeneinander (Hauptaktion „Bearbeiten“/„Freigeben“ plus „…“-Menü), Avatar-Platzhalter 20 px,
-Status als Chip mit Symbol und Text (aktiv / gesperrt / wartet auf Freigabe), mobil gestapelt mit 44-px-Zielen.
+dem aktiven Tab): *Benutzer*, *Aktivität*. OIDC liegt unter Einstellungen (Anker `#oidc`, Unternavigation Allgemein | Zeitpläne | OIDC);
+`/users#oidc` leitet um. Tabellen wie Agents: `tbl stack-lg`, Zeilen ≤ 56 px, keine Klickfläche auf der Zeile, Aktionen als
+`ActionCell`, Avatar-Platzhalter 20 px, Status als Chip mit Symbol und Text, mobil gestapelt mit 44-px-Zielen.
+Gesperrte Zeilenaktionen (eigenes Konto, letzter lokaler Verwalter, Konto mit stärkeren Rechten) sind `aria-disabled`, tragen den
+Grund als Tooltip **und** als sichtbaren Satz unter dem Namen (`data-guard-reason`).
 Dialoge nutzen `Dialog`/`ConfirmDialog` mit X-Knopf (`aria-label="Schließen"`); nur der Dialog mit dem Einmalpasswort hat bewusst
-keinen X und kein Esc, weil der Wert nur einmal sichtbar ist. Die **Rechtevorschau** (`RolePreview`) listet je Recht Symbol
-(Haken bzw. gestrichelter Kreis) **und** Text „darf“ / „darf nicht“, am Ende „Kann Geheimnisse sehen: nein“; der Bereich ist
-per Tastatur scrollbar. Unter dem Formular steht die Zusammenfassung „Benutzer <Name> wird mit der Rolle <Rolle> angelegt.“.
+keinen X und kein Esc, weil der Wert nur einmal sichtbar ist.
+**Benutzerdialog:** Name, Anmeldeart, E-Mail, Vorlage (`Select`: Administrator / Betreiber / Nur Lesen / Eigene), dann je Gruppe
+`PermissionSwitches` aus `Switch` (`role="switch"`, ganze Zeile 44 px hoch, Text umbricht, Schalter in fester Spalte, Zustand durch
+Daumenstellung). Es gibt genau **einen** Scrollbereich (`Dialog` mit `footerRef`: Kopf und Fußleiste bleiben stehen). Rechte, die man selbst
+nicht hat, sind gesperrt (mit Hinweis); es gibt keine Zeile „Kann Geheimnisse sehen“ und kein „darf nicht“. Die Zusammenfassung
+(„Benutzer <Name> wird mit der Vorlage <Vorlage> (n Rechte) angelegt.“) erscheint erst, wenn ein Name eingegeben ist.
 Schreibaktionen ohne Recht werden ausgeblendet (nie nur deaktiviert); der Server bleibt maßgeblich.
+
+**Hinweiskasten (`role="note"`):** ruhig, neutral (`border-line`, `bg-sunk`), für Zustände ohne Fehler (z. B. `PATCHWATCH_SECRET_KEY` fehlt);
+Warn- und Fehlertöne nur für echte Warnungen und Fehler.
 
 ## Knöpfe
 

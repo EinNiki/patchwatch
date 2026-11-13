@@ -597,34 +597,39 @@ Ubuntu-API (paginiert, `limit` höchstens 20), Ubuntu-Einzelabruf und die OVAL-D
 Quellen stehen in der Konfiguration (`PATCHWATCH_CVE_UBUNTU_URL`, `..._OVAL_URL`, `..._DEBIAN_URL`) und dürfen auf Loopback
 zeigen; der SSRF-Schutz für in der UI angelegte Quellen bleibt unverändert.
 
-## Benutzer und Rollen
+## Benutzer und Rechte
 
-Menü **Benutzer** (nur für Administratoren) mit den Tabs *Benutzer*, *OIDC* und *Aktivität*. Es gibt drei feste Rollen; der
-**Server** prüft bei jeder Anfrage das benannte Recht der Route (Standard: verweigert, 401 ohne Anmeldung, 403 ohne Recht).
-Die Oberfläche blendet Aktionen ohne Recht nur aus. Rolle und Status werden bei **jeder** Anfrage aus der Datenbank gelesen;
+Menü **Benutzer** (nur mit dem Recht `users.manage`) mit den Tabs *Benutzer* und *Aktivität*. Die OIDC-Anmeldung wird unter
+**Einstellungen → OIDC** eingerichtet (`/settings#oidc`, Recht `oidc.manage`); `/users#oidc` leitet dorthin um. Der **Server**
+prüft bei jeder Anfrage das benannte Recht der Route (Standard: verweigert, 401 ohne Anmeldung, 403 ohne Recht). Die Oberfläche
+blendet Aktionen ohne Recht nur aus. Rechte und Status werden bei **jeder** Anfrage aus der Datenbank gelesen; Rechteänderung,
 Rollenwechsel, Sperren, Löschen, Passwortwechsel und -reset beenden alle Sitzungen des Benutzers sofort.
 
-| Recht | Administrator | Betreiber | Nur Lesen |
-|---|:-:|:-:|:-:|
-| Hosts, CVEs, Quellen-Zustand, Kanäle, Einstellungen ansehen | ja | ja | ja |
-| Hosts anlegen/löschen, Daten abrufen (`hosts.write`, `hosts.run`) | ja | ja | nein |
-| Agent-Token erneuern (`agents.tokens`) | ja | ja | nein |
-| CVEs beobachten/manuell prüfen (`cves.watch`) | ja | ja | nein |
-| Quellen anlegen/ändern/löschen/abrufen (`sources.*`) | ja | ja | nein |
-| Kanäle ändern, Testnachricht (`channels.write`, `channels.test`) | ja | ja | nein |
-| Einstellungen und Zeitpläne ändern (`settings.write`) | ja | ja | nein |
-| Benutzer verwalten, OIDC einrichten, Aktivitätsprotokoll (`users.manage`, `oidc.manage`, `audit.read`) | ja | nein | nein |
+Es gibt drei **Vorlagen** (Administrator, Betreiber, Nur Lesen); jeder Benutzer kann zusätzlich **einzelne Rechte** haben („Eigene“).
+Im Dialog setzt die Vorlage die Schalter, danach lässt sich jedes der 20 Rechte einzeln ändern. Schreiben, Ausführen und Löschen
+setzen das jeweilige Lesen voraus (die Abhängigkeit steht an einer Stelle im Server, die Schalter folgen ihr). Ältere Konten ohne
+eigene Auswahl folgen weiter ihrer Rolle; Migration 0024 ändert kein bestehendes Konto.
 
-Keine Rolle sieht Geheimnisse (Token, Passwörter, Client-Secret): Die API gibt sie nie aus, nur „gesetzt/nicht gesetzt“.
-Das Anlegen-Fenster zeigt die Rechte der gewählten Rolle als Vorschau.
+| Vorlage | Rechte |
+|---|---|
+| Nur Lesen | Hosts, CVEs, Quellen-Zustand, Kanäle, Einstellungen ansehen |
+| Betreiber | wie Nur Lesen, dazu Hosts anlegen/löschen und abrufen, Agent-Token erneuern, CVEs beobachten, Quellen und Kanäle ändern und abrufen/testen, Schlüssel setzen, Einstellungen und Zeitpläne ändern |
+| Administrator | alle Rechte, auch Benutzer verwalten (`users.manage`), OIDC einrichten (`oidc.manage`), Aktivitätsprotokoll (`audit.read`) |
 
+Keine Vorlage und kein Recht zeigt Geheimnisse (Token, Passwörter, Client-Secret): Die API gibt sie nie aus, nur „gesetzt/nicht
+gesetzt“; vergeben wird nur das **Setzen** (`sources.secrets.write`, `channels.secrets.write`). Die vollständige Sicherheitsliste steht in
+[docs/users-security.md](docs/users-security.md).
+
+- **Keine Rechteausweitung:** Man vergibt nur Rechte, die man selbst hat, und verwaltet (ändern, sperren, löschen, freigeben,
+  Passwort zurücksetzen) nur Benutzer, deren Rechte eine Teilmenge der eigenen sind (sonst 403 mit Klartext).
 - **Einmalpasswort:** Lokale Konten bekommen ein Zufallspasswort (32 Zeichen), das **einmal** angezeigt wird (nie in Logs,
   nie erneut abrufbar) und beim ersten Anmelden geändert werden muss (mindestens 12 Zeichen).
-- **Administratorrechte** zu vergeben oder zu entziehen verlangt das eigene Passwort (bei OIDC-Konten eine Anmeldung, die
-  höchstens 5 Minuten alt ist); Rollenwechsel verlangen zusätzlich den Namen des Benutzers. Niemand ändert die eigene Rolle
-  oder löscht/sperrt sich selbst.
-- **Aussperrschutz:** Der letzte aktive Administrator und der letzte **lokale** Administrator lassen sich nicht löschen,
-  sperren oder herabstufen (Transaktion mit Zeilensperre, auch bei gleichzeitigen Anfragen).
+- **Sensible Rechte** (`users.manage`, `oidc.manage`, `audit.read`) zu vergeben oder zu entziehen und jeder Rollenwechsel verlangen
+  das eigene Passwort (bei OIDC-Konten eine Anmeldung, die höchstens 5 Minuten alt ist); Rechteänderungen verlangen zusätzlich den
+  Namen des Benutzers. Niemand ändert die eigenen Rechte oder löscht/sperrt sich selbst.
+- **Aussperrschutz:** Der letzte aktive **lokale** Benutzer mit `users.manage` lässt sich nicht löschen, sperren, herabstufen
+  oder ihm das Recht entziehen (Transaktion mit Zeilensperre, auch bei gleichzeitigen Anfragen). In der Liste sind die Knöpfe
+  dafür gesperrt, mit Tooltip und sichtbarem Grund.
 - **Löschen ist weich:** Das Konto wird gesperrt und anonymisiert (Name, E-Mail, OIDC-Identität, Passwort, Bild entfernt),
   damit das Aktivitätsprotokoll gültige Verweise behält.
 - **Aktivitätsprotokoll:** Anmeldungen, Benutzer- und OIDC-Änderungen mit Zeit, Benutzer, Ergebnis und **gekürzter** IP
@@ -635,10 +640,10 @@ Das Anlegen-Fenster zeigt die Rechte der gewählten Rolle als Vorschau.
 
 ## OIDC einrichten
 
-Neben dem Passwort lässt sich ein OIDC-Anbieter einrichten (Tab *OIDC* oder `PATCHWATCH_OIDC_*`, siehe `.env.example`).
+Neben dem Passwort lässt sich ein OIDC-Anbieter einrichten (*Einstellungen → OIDC* oder `PATCHWATCH_OIDC_*`, siehe `.env.example`).
 Voraussetzung: `PATCHWATCH_PUBLIC_URL=https://patchwatch.example.org` (daraus entsteht die Redirect-URI
 `<public-url>/api/v1/auth/oidc/callback`, ersatzweise `PATCHWATCH_OIDC_REDIRECT_URL`) und `PATCHWATCH_SECRET_KEY`
-(das Client-Secret wird verschlüsselt gespeichert). Den Tab *OIDC → Verbindung testen* nutzen, bevor jemand sich anmeldet.
+(das Client-Secret wird verschlüsselt gespeichert). *Verbindung testen* (erst nach dem Speichern möglich) nutzen, bevor jemand sich anmeldet.
 
 1. **Authentik:** Provider *OAuth2/OpenID*, Client-Typ vertraulich, Redirect-URI wie oben (exakt), Signaturschlüssel
    *RS256* (Zertifikat zuweisen), Scopes `openid email profile`; Issuer ist die *OpenID-Konfigurations-Aussteller*-URL
@@ -657,7 +662,7 @@ Schlüsseltyp-Verwechslung werden abgelehnt), außerdem `iss`, `aud`, `azp`, `ex
 JWKS-Cache 10 Minuten, Neuabruf bei unbekannter `kid` höchstens einmal je Minute. Ein Konto wird **nur** über (Issuer, `sub`)
 gefunden, **nie** über E-Mail oder Namen: gleiche E-Mail mit neuem `sub` ergibt ein neues, getrenntes Konto.
 Neue Konten sind standardmäßig *ausstehend* (ohne Rechte, bis ein Administrator sie freigibt und die Rolle wählt); es gibt nie
-automatisch Administratorrechte. Optionen im Tab *OIDC*: *Nur Lesen vergeben* (nur bei Gruppenzuordnung oder verifizierter
+automatisch Administratorrechte. Optionen unter *Einstellungen → OIDC*: *Nur Lesen vergeben* (nur bei Gruppenzuordnung oder verifizierter
 E-Mail in `…_ALLOWED_DOMAINS`/`…_ALLOWED_EMAILS`) oder *Ablehnen*; **Gruppe → Rolle**: ist eine Zuordnung eingerichtet, gilt sie
 als maßgeblich (keine passende Gruppe = Nur Lesen). Eine **Hochstufung** durch den Anbieter wartet auf die Bestätigung eines
 Administrators (Hinweis in der Tabelle), eine **Herabstufung** wirkt sofort; eine Administrator-Zuordnung speichert nur,
@@ -691,7 +696,7 @@ nie in Argumenten, Umgebung oder Dateien (ohne Terminal liest der Befehl die ers
 - `PATCHWATCH_PUBLIC_URL` und `PATCHWATCH_SECRET_KEY` setzen, sonst lässt sich OIDC nicht speichern.
 - Hinter einem Reverse-Proxy `trust_proxy=true` nur setzen, wenn der Proxy `X-Forwarded-For` anhängt (Rate-Limits und
   Aktivitätsprotokoll nutzen die Client-IP).
-- Vergib die Rolle Administrator sparsam; Betreiber können Hosts, Quellen und Kanäle ändern, aber keine Benutzer verwalten.
+- Vergib `users.manage`, `oidc.manage` und `audit.read` (Vorlage Administrator) sparsam; Betreiber können Hosts, Quellen und Kanäle ändern, aber keine Benutzer verwalten.
 
 ### Ubuntu-Erstabruf: Umfang und Entscheidung
 
