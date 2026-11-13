@@ -421,4 +421,66 @@ if (want("A7")) {
     await ctx.close();
   }
 }
+
+if (want("A9")) {
+  // Klick daneben: Popover/Menüs/Auswahl/Fenster schließen sich, Klick innen nicht; erweiterte Trefferfläche des Auslösers schaltet um.
+  for (const touch of [false, true]) {
+    const { ctx, page } = await open(1440, 900, "light", touch ? { hasTouch: true } : {});
+    const L = touch ? "Touch" : "Maus";
+    const tap = (x, y) => (touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y));
+    for (const path of ["/", "/agents", "/cves"]) {
+      await page.goto(`${base}${path}`);
+      await page.locator("main table, main [data-section-header]").first().waitFor();
+      await page.waitForTimeout(400);
+      const trig = page.locator("main [aria-haspopup][aria-expanded]:visible, main [role=combobox]:visible");
+      const n = Math.min(await trig.count(), 4);
+      ok(n > 0, `A9 ${L} ${path}: Auslöser gefunden (${n})`);
+      for (let i = 0; i < n; i++) {
+        const t = trig.nth(i);
+        const name = ((await t.getAttribute("aria-label")) ?? (await t.innerText()) ?? "").trim().slice(0, 24) || `#${i}`;
+        const state = async () => (await t.getAttribute("aria-expanded")) === "true";
+        await t.scrollIntoViewIfNeeded();
+        await t.click(); await page.waitForTimeout(150);
+        if (!(await state())) { ok(false, `A9 ${L} ${path} „${name}“: öffnet`); continue; }
+        // 1) Klick auf Leerfläche (Seitenüberschrift) schließt
+        const h = await page.locator("h1").first().boundingBox();
+        await tap(h.x + h.width + 40, h.y + h.height / 2); await page.waitForTimeout(150);
+        ok(!(await state()), `A9 ${L} ${path} „${name}“: Klick daneben schließt`);
+        // 2) Klick innen schließt nicht (Fensterfläche ohne Bedienelement)
+        await t.click(); await page.waitForTimeout(150);
+        // Auswahllisten (listbox) wählen beim Klick im Fenster eine Option und schließen daher absichtlich
+        const panel = page.locator("[role=menu]:visible, [role=dialog]:visible").first();
+        if (await panel.count()) {
+          const pb = await panel.boundingBox();
+          await tap(pb.x + pb.width / 2, pb.y + pb.height - 4); await page.waitForTimeout(150);
+          ok(await state(), `A9 ${L} ${path} „${name}“: Klick im Fenster schließt nicht`);
+        }
+        // 3) Escape schließt und der Fokus kehrt zum Auslöser zurück
+        await page.keyboard.press("Escape"); await page.waitForTimeout(150);
+        ok(!(await state()), `A9 ${L} ${path} „${name}“: Escape schließt`);
+        // 4) Erneut öffnen, dann Klick auf die erweiterte Fläche des Auslösers (3 px daneben) schaltet um (schließt, öffnet nicht neu)
+        if (!touch) {
+          await t.click(); await page.waitForTimeout(150);
+          const b = await t.boundingBox();
+          await page.mouse.click(b.x + b.width / 2, b.y + b.height + 3); await page.waitForTimeout(200);
+          ok(!(await state()), `A9 ${L} ${path} „${name}“: zweiter Klick auf den Auslöser (auch erweiterte Fläche) schließt`);
+        }
+      }
+    }
+    // Fenster: Hintergrundklick schließt, Ziehen von innen nach außen nicht
+    await page.goto(`${base}/agents`);
+    await page.getByRole("button", { name: "Agent hinzufügen" }).waitFor();
+    await page.getByRole("button", { name: "Agent hinzufügen" }).click();
+    const dlg = page.getByRole("dialog"); await dlg.waitFor();
+    const db = await dlg.boundingBox();
+    if (!touch) {
+      await page.mouse.move(db.x + db.width / 2, db.y + db.height - 8); await page.mouse.down(); await page.mouse.move(5, 5); await page.mouse.up();
+      await page.waitForTimeout(200);
+      ok(await dlg.isVisible(), "A9 Maus: Ziehen von innen nach außen schließt nicht");
+    }
+    await tap(5, 5); await page.waitForTimeout(200);
+    ok(!(await dlg.isVisible()), `A9 ${L}: Klick auf den Hintergrund schließt das Fenster`);
+    await ctx.close();
+  }
+}
 await browser.close();
