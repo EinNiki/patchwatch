@@ -98,14 +98,3 @@ test("a 304 shows zero transferred; unknown wire size is said so, never guessed"
   assert.equal(un[0], "Übertragen: nicht messbar (entpackt 83,9 MB)");
   assert.ok(!transferLines({ last: null } as never).length);
 });
-
-test("Quellen-Tabelle öffnet bei Lauf, Fehler oder Einschränkung, nicht bei abgeschalteten Quellen", async () => {
-  const { needsAttention } = await import("../src/lib/feedView.ts");
-  assert.equal(needsAttention([], false), false);
-  assert.equal(needsAttention(undefined, false), false);
-  assert.equal(needsAttention([{ enabled: true, state: "ok", last_error: null }], false), false);
-  assert.equal(needsAttention([{ enabled: true, state: "ok", last_error: null }], true), true);
-  assert.equal(needsAttention([{ enabled: true, state: "error", last_error: "x" }], false), true);
-  assert.equal(needsAttention([{ enabled: true, state: "ok", last_error: "x" }], false), true);
-  assert.equal(needsAttention([{ enabled: false, state: "error", last_error: "x" }], false), false);
-});

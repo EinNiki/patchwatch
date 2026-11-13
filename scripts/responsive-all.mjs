@@ -219,14 +219,7 @@ const GROUPS = {
   ] },
   "cve-detail": { states: [{ name: "CVE-Detail", path: "/cves/CVE-2024-1086" }] },
   "cve-sources": { states: [
-    { name: "Quellen eingeklappt", path: "/cves", prep: async (page) => {
-      const b = page.getByRole("button", { name: "Verwalten", exact: true });
-      if ((await b.getAttribute("aria-expanded")) === "true") { await b.click(); await page.waitForTimeout(300); }
-    } },
-    { name: "Quellen Verwalten aufgeklappt", path: "/cves", shift: false, prep: async (page) => {
-      const b = page.getByRole("button", { name: "Verwalten", exact: true });
-      if ((await b.getAttribute("aria-expanded")) !== "true") { await b.click(); await page.waitForTimeout(400); }
-    } },
+    { name: "Quellen-Tabelle", path: "/cves" },
     { name: "Dialog Quelle hinzufügen", path: "/cves", shift: false, prep: async (page) => {
       await page.getByRole("button", { name: "Quelle hinzufügen" }).first().click();
       await page.getByRole("dialog", { name: "Quelle hinzufügen" }).waitFor();

@@ -9,8 +9,7 @@ import type { StatusInfo } from "@/lib/status";
 import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
-import { Icon, NavIcon } from "@/components/Icons";
-import { useStoredFlag } from "@/lib/useStoredFlag";
+import { NavIcon } from "@/components/Icons";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { writeFailure } from "@/lib/apiErrors";
@@ -19,7 +18,7 @@ import { useFeedRuns } from "@/lib/useFeedRuns";
 import { isActive, isFailure, latestBySource, runText, summary, type FeedRun } from "@/lib/feedRuns";
 import { MiniStepper, RunStepper } from "@/components/RunStepper";
 import { StatusBadge } from "@/components/StatusBadge";
-import { VISIBLE_DETAIL_LINES, detailLines, errorChip, errorLine, needsAttention } from "@/lib/feedView";
+import { VISIBLE_DETAIL_LINES, detailLines, errorChip, errorLine } from "@/lib/feedView";
 import { Mono } from "@/components/Version";
 
 export const FEED_STATE: Record<Feed["state"], StatusInfo> = {
@@ -109,8 +108,6 @@ export function FeedSources() {
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [allBusy, setAllBusy] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState<ReadonlySet<string>>(new Set());
-  // „Verwalten“: Tabelle von Hand auf- oder zuklappen (bleibt gemerkt); sie öffnet sich außerdem selbst, wenn etwas Aufmerksamkeit braucht.
-  const [manage, setManage] = useStoredFlag("pw-feeds-manage");
   const done = useRef(new Set<number>());
   const labels = useRef(new Map<string, string>());
   useEffect(() => {
@@ -270,32 +267,14 @@ export function FeedSources() {
 
 
   const anyRunning = runs.runs.some(isActive);
-  const attention = needsAttention(feeds.data, anyRunning) || (feeds.data ?? []).some((f) => expanded(latest.get(f.source)));
-  const tableOpen = manage === true || attention;
-  const newest = (feeds.data ?? []).map((f) => f.last_success_at).filter((x): x is string => !!x).sort().pop() ?? null;
 
   return (
     <section id="feeds" aria-labelledby="feeds-h" className="mb-4 scroll-mt-4">
-      <h2 id="feeds-h" className="sr-only">
-        CVE-Quellen
-      </h2>
-      <div className="mb-2 flex items-center gap-x-4 gap-y-2 text-sm max-[640px]:flex-wrap" data-testid="sources-bar">
-        <p className="m-0 flex min-w-0 flex-1 flex-wrap max-[640px]:basis-full items-center gap-x-3 gap-y-1">
-          <span className="text-fg2">Quellen:</span>
-          {(feeds.data ?? []).map((f) => (
-            <span key={f.source} className={`inline-flex items-center gap-1 ${f.state === "ok" ? "" : f.state === "disabled" || f.state === "never" ? "text-unknown" : "text-warn"}`} title={`${f.label}: ${FEED_STATE[f.state].label}`}>
-              <Icon name={FEED_STATE[f.state].icon} size={14} />
-              <span className="text-fg">{f.label}</span>
-              <span className="sr-only">: {FEED_STATE[f.state].label}</span>
-            </span>
-          ))}
-          {newest ? (
-            <span className="text-fg3">
-              · <RelTime iso={newest} /> aktualisiert
-            </span>
-          ) : null}
-        </p>
-        {/* Knopfreihe: rechts neben dem Text; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eine eigene Zeile, gleich breit. */}
+      {/* Kopfzeile: Titel links, Aktionen rechts; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eigene Zeile. */}
+      <div className="mb-2 flex items-center gap-x-4 gap-y-2 max-[640px]:flex-wrap" data-testid="sources-bar">
+        <h2 id="feeds-h" className="m-0 text-lg font-semibold">
+          CVE-Quellen
+        </h2>
         <span className="src-actions ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
             {allBusy ? null : <NavIcon name="refresh" />}
@@ -305,21 +284,13 @@ export function FeedSources() {
             <NavIcon name="plus" />
             <span className={HEAD_TXT}>Quelle hinzufügen</span>
           </Button>
-          <Button size="wide" className={HEAD_ICON} title="Verwalten" aria-expanded={tableOpen} aria-controls="feeds-table" onClick={() => setManage(!tableOpen)}>
-            <span className={`transition-transform duration-(--dur-1) ${tableOpen ? "rotate-180" : ""}`}>
-              <NavIcon name="chevron" size={14} />
-            </span>
-            <span className={HEAD_TXT}>Verwalten</span>
-          </Button>
         </span>
       </div>
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
       {!feeds.data ? null : feeds.data.length === 0 ? (
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>
       ) : (
-        // Auf- und Zuklappen über die Zeilenhöhe (150 ms), damit die Seite darunter nicht springt.
-        <div id="feeds-table" className={`grid transition-[grid-template-rows] duration-(--dur-1) ${tableOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`} inert={!tableOpen}>
-        <div className="min-h-0 overflow-hidden">
+        <div id="feeds-table">
         <div>
           {/* Spalten nach Anteilen bei fester Breite (siehe .dist1024): Zähler und Laufmeldungen ändern sich im Sekundentakt und dürfen die
               Spalten nicht verschieben. Unter 1024 px erscheint jede Quelle als Karte. */}
@@ -398,7 +369,6 @@ export function FeedSources() {
       <p className="mt-2 max-w-[45rem] text-xs text-fg3">
         Das Abruf-Intervall stellst du unter Einstellungen → Zeitpläne ein. Eine abgeschaltete oder ausgefallene Quelle gilt nie als aktuell.
       </p>
-        </div>
         </div>
       )}
 

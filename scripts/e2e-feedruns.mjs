@@ -16,8 +16,6 @@ const mkRun = (o) => ({ id: 1, source: "", trigger: "manual", started_by: "admin
 async function open(browser, viewport, scheme = "light") {
   const ctx = await browser.newContext({ viewport, colorScheme: scheme });
   const page = await ctx.newPage();
-  // Die Quellen-Tabelle ist im Ruhezustand eingeklappt („Verwalten“); diese Tests prüfen die Tabelle, also aufgeklappt starten.
-  await page.addInitScript(() => { try { localStorage.setItem("pw-feeds-manage", "1"); } catch {} });
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);

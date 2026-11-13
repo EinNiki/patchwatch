@@ -220,16 +220,12 @@ try {
   await page.goto(`${base}/cves`);
   const bar = page.getByTestId("sources-bar");
   await bar.waitFor();
-  await bar.getByText(/Debian/).first().waitFor();
+  await page.locator("#feeds-table").getByText(/Debian/).first().waitFor();
   const bt = await bar.innerText();
-  ok(/Quellen:/.test(bt) && /Debian/.test(bt) && /Ubuntu/.test(bt), `Quellenzeile: „${bt.replace(/\s+/g, " ")}“`);
-  ok((await bar.getByRole("button").evaluateAll((l) => l.map((b) => b.getAttribute("title")))).join("|") === "Alle abrufen|Quelle hinzufügen|Verwalten", "Quellenzeile: „Alle abrufen“, „Quelle hinzufügen“, „Verwalten“ in dieser Reihenfolge");
-  const mg = bar.getByRole("button", { name: /Verwalten/ });
-  const open0 = (await mg.getAttribute("aria-expanded")) === "true";
-  await mg.click();
-  // Eine Quelle mit Störung hält die Tabelle von selbst offen (needsAttention); dann bleibt sie auch nach dem Klick offen.
-  ok((await mg.getAttribute("aria-expanded")) === (open0 ? "false" : "true") || open0, "Quellenzeile: „Verwalten“ schaltet die Tabelle um");
-  if ((await mg.getAttribute("aria-expanded")) === "false") await mg.click();
+  ok(/CVE-Quellen/.test(bt) && !/Verwalten/.test(bt) && !/Quellen:/.test(bt), `Kopfzeile: „${bt.replace(/\s+/g, " ")}“ (Titel, keine Zusammenfassungszeile)`);
+  ok((await bar.getByRole("button").evaluateAll((l) => l.map((b) => b.getAttribute("title")))).join("|") === "Alle abrufen|Quelle hinzufügen", "Kopfzeile: „Alle abrufen“, „Quelle hinzufügen“ in dieser Reihenfolge");
+  ok((await page.getByRole("button", { name: "Verwalten" }).count()) === 0, "Knopf „Verwalten“ nicht im DOM");
+  ok(await page.locator("#feeds-table").isVisible(), "Quellen-Tabelle immer sichtbar");
   {
     const t = page.locator("#feeds-table");
     ok(await t.getByRole("button", { name: "Jetzt abrufen" }).first().isVisible(), "Quellen-Tabelle: „Jetzt abrufen“ sichtbar");

@@ -165,13 +165,3 @@ export function detailLines(f: Pick<Feed, "backfill" | "bulk"> & { run_stats?: F
 
 /** So viele Zeilen sind ohne Aufklappen sichtbar. */
 export const VISIBLE_DETAIL_LINES = 2;
-
-/**
- * Die Quellen-Tabelle klappt von selbst auf, wenn etwas Aufmerksamkeit braucht: ein Fehler, eine Einschränkung
- * (veraltet, unvollständig, nie abgerufen) oder ein laufender Abruf. Abgeschaltete Quellen sind eine bewusste
- * Entscheidung und öffnen nichts.
- */
-export function needsAttention(feeds: Pick<Feed, "enabled" | "state" | "last_error">[] | undefined, running: boolean): boolean {
-  if (running) return true;
-  return (feeds ?? []).some((f) => f.enabled && (f.state !== "ok" || !!f.last_error));
-}

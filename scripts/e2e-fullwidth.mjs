@@ -115,7 +115,7 @@ try {
       await table.waitFor();
       await page.waitForTimeout(300);
       const tag = `Quellen ${w}px ${scheme}`;
-      const names = ["Alle abrufen", "Quelle hinzufügen", "Verwalten"];
+      const names = ["Alle abrufen", "Quelle hinzufügen"];
       // Layout abwarten (Kopfzeile lädt nach): zweimal hintereinander gleiche Lage.
       let bs = [], prev = "";
       for (let k = 0; k < 20; k++) {
