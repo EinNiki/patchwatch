@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/PageHeader";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/useApi";
@@ -44,15 +45,17 @@ export default function HostDetailPage() {
       <p className="mb-2">
         <Link href="/">← Alle Hosts</Link>
       </p>
-      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h1 className="text-xl font-semibold">{h.name}</h1>
-        <StatusBadge info={info} />
-        {h.status_changed_at ? (
-          <span className="text-xs text-fg3">
-            Status geändert <RelTime iso={h.status_changed_at} />
-          </span>
-        ) : null}
-      </div>
+      <PageHeader
+        title={h.name}
+        badge={<StatusBadge info={info} />}
+        count={
+          h.status_changed_at ? (
+            <span className="text-xs">
+              Status geändert <RelTime iso={h.status_changed_at} />
+            </span>
+          ) : undefined
+        }
+      />
 
       {/* Ab 1280 px (Variante side, bei großer Schrift erst ab 60 rem Inhaltsbreite): CVE-Lage links, Host-Details rechts
           (mitlaufend). Sonst stehen die Details aufklappbar unter den Kacheln. */}

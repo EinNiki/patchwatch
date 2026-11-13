@@ -10,6 +10,7 @@ import type { CveDetail, CveListItem, Host } from "@/lib/types";
 import { Empty, ErrorNote } from "@/components/States";
 import { TableSkeleton } from "@/components/Skeleton";
 import { Icon, NavIcon } from "@/components/Icons";
+import { PageHeader } from "@/components/PageHeader";
 import { affectedHosts, affectingShort, filterDeviations, hostChips, hostState, statParts, listStats, parseAffectsAll, parseSort, updatedTitle } from "@/lib/cveList";
 import { absTime, relTime } from "@/lib/format";
 import { useRowLink } from "@/lib/rowLink";
@@ -308,10 +309,10 @@ function CveView() {
 
   return (
     <>
-      <header className="mb-3 border-b border-line pb-3">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-xl font-semibold">CVEs</h1>
-          <p className="m-0 text-sm text-fg3" data-testid="affects-count">
+      <PageHeader
+        title="CVEs"
+        count={
+          <span data-testid="affects-count">
             {scopeCount.data ? (
               <>
                 {affectingShort(scopeCount.data.affecting)}
@@ -320,18 +321,19 @@ function CveView() {
             ) : (
               "CVEs werden gezählt …"
             )}
-          </p>
-        </div>
-        {/* Kennzahlen: nur Anzeige, aus den geladenen Zeilen berechnet (deckungsgleich mit der Tabelle), Nullwerte entfallen. */}
-        {parts.length > 0 ? (
-          <p className="m-0 mt-1 text-xs text-fg2" aria-live="polite" data-testid="cve-stats">
-            {parts.join(" · ")}
-            {truncated ? <span className="text-fg3"> (in den ersten {cves.data?.length} der Liste)</span> : null}
-          </p>
-        ) : (
-          <span data-testid="cve-stats" className="hidden" />
-        )}
-      </header>
+          </span>
+        }
+        description={
+          parts.length > 0 ? (
+            <p className="m-0" aria-live="polite" data-testid="cve-stats">
+              {parts.join(" · ")}
+              {truncated ? <span className="text-fg3"> (in den ersten {cves.data?.length} der Liste)</span> : null}
+            </p>
+          ) : (
+            <span data-testid="cve-stats" className="hidden" />
+          )
+        }
+      />
       <FeedSources />
 
       <section aria-labelledby="wl-h">

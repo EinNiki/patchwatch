@@ -14,6 +14,7 @@ import { Uptime } from "@/components/Uptime";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Marker } from "@/components/DistroChip";
 import { Icon, NavIcon } from "@/components/Icons";
+import { PageHeader } from "@/components/PageHeader";
 import { SortHead } from "@/components/SortHead";
 import { TableSkeleton } from "@/components/Skeleton";
 import { useFlash } from "@/lib/useFlash";
@@ -136,12 +137,10 @@ function HostsView() {
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-xl font-semibold">Hosts</h1>
-        <p className="text-sm text-fg3" aria-live="polite">
-          {filtering ? `${rows.length} von ${all.length}` : all.length} {all.length === 1 ? "Host" : "Hosts"}
-        </p>
-      </div>
+      <PageHeader
+        title="Hosts"
+        count={<span aria-live="polite">{filtering ? `${rows.length} von ${all.length}` : all.length} {all.length === 1 ? "Host" : "Hosts"}</span>}
+      />
 
       {all.length === 0 ? (
         <Empty title="Noch keine Hosts">

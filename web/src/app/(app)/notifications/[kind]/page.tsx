@@ -9,7 +9,7 @@ import { channelLabel, EVENTS, isChannelKind, type ChannelKind } from "@/lib/cha
 import type { ChannelView, NotificationsResponse } from "@/lib/types";
 import { Button, Checkbox, Field, Select, TextInput } from "@/components/Controls";
 import { Icon } from "@/components/Icons";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, SectionHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
 import { ErrorNote, Loading } from "@/components/States";
 import { Mono } from "@/components/Version";
@@ -220,11 +220,15 @@ function Form({ kind, ch, secretStorage, reload }: { kind: ChannelKind; ch: Chan
 
   return (
     <>
-      <PageHeader title={label}>
-        <Button onClick={() => void sendTest()} busy={testing} disabled={dirty || !ch.enabled}>
-          Testnachricht senden
-        </Button>
-      </PageHeader>
+      <PageHeader title={label} />
+      <SectionHeader
+        title="Kanal"
+        actions={
+          <Button onClick={() => void sendTest()} busy={testing} disabled={dirty || !ch.enabled}>
+            Testnachricht senden
+          </Button>
+        }
+      />
       <p className="mb-4 max-w-prose text-fg2">{spec.intro}</p>
 
       {ch.from_env ? (

@@ -17,7 +17,7 @@ import { SET_TOKEN_COMMAND, installCommand } from "@/lib/agentCommands";
 import { writeFailure } from "@/lib/apiErrors";
 import { toast } from "@/lib/toastStore";
 import { Icon, NavIcon } from "@/components/Icons";
-import { PageHeader } from "@/components/PageHeader";
+import { PageHeader, SectionHeader } from "@/components/PageHeader";
 import { Popover } from "@/components/Popover";
 import { RowMenu } from "@/components/RowMenu";
 import { RelTime } from "@/components/RelTime";
@@ -272,7 +272,11 @@ export default function AgentsPage() {
   const list = hosts.data;
   return (
     <>
-      <PageHeader title="Agents" count={list ? `${list.length} ${list.length === 1 ? "Agent" : "Agents"}` : undefined}>
+      <PageHeader title="Agents" count={list ? `${list.length} ${list.length === 1 ? "Agent" : "Agents"}` : undefined} />
+      <SectionHeader
+        title="Agent-Liste"
+        actions={
+          <>
         {canRun ? (
           <>
             <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0}>
@@ -288,7 +292,9 @@ export default function AgentsPage() {
             Agent hinzufügen
           </Button>
         ) : null}
-      </PageHeader>
+                </>
+        }
+      />
 
       <section aria-labelledby="agent-update" className="mb-3">
         <h2 id="agent-update" className="sr-only">Agent aktualisieren</h2>

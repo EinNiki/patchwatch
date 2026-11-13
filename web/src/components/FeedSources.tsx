@@ -10,6 +10,7 @@ import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
 import { NavIcon } from "@/components/Icons";
+import { SectionHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote } from "@/components/States";
 import { useAuth } from "@/components/AuthProvider";
@@ -275,12 +276,13 @@ export function FeedSources() {
 
   return (
     <section id="feeds" aria-labelledby="feeds-h" className="mb-4 scroll-mt-4">
-      {/* Kopfzeile: Titel links, Aktionen rechts; unter 1100 px nur Symbole (Tooltip, aria-label), unter 640 px eigene Zeile. */}
-      <div className="mb-2 flex items-center gap-x-4 gap-y-2 max-[640px]:flex-wrap" data-testid="sources-bar">
-        <h2 id="feeds-h" className="m-0 text-lg font-semibold">
-          CVE-Quellen
-        </h2>
-        <span className="src-actions ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+      <SectionHeader
+        id="feeds-h"
+        testId="sources-bar"
+        actionsClassName="src-actions"
+        title="CVE-Quellen"
+        actions={
+          <>
           {canRun ? (
             <Button size="wide" className={HEAD_ICON} title="Alle abrufen" onClick={() => void refreshAll()} disabled={anyRunning} busy={allBusy}>
               {allBusy ? null : <NavIcon name="refresh" />}
@@ -293,8 +295,9 @@ export function FeedSources() {
               <span className={HEAD_TXT}>Quelle hinzufügen</span>
             </Button>
           ) : null}
-        </span>
-      </div>
+                  </>
+        }
+      />
       {feeds.error && !feeds.data ? <ErrorNote message={feeds.error} /> : null}
       {!feeds.data ? null : feeds.data.length === 0 ? (
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>

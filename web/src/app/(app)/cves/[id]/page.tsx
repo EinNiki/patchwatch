@@ -41,7 +41,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
   return (
     <>
       <Back />
-      <PageHeader title={cve.id}>{cve.watched ? <Marker>Watchlist</Marker> : null}</PageHeader>
+      <PageHeader title={cve.id} badge={cve.watched ? <Marker>Watchlist</Marker> : undefined} />
       <p className="mb-3 max-w-[45rem] text-fg2">{cve.description ?? "Noch nicht in den Feeds. Sobald ein Feed die CVE kennt, erscheinen Beschreibung und Status."}</p>
       {cve.exploited ? <p className="mb-2 font-semibold text-crit">Aktiv ausgenutzt (CISA KEV). Der Fix-Stand der Hosts bleibt davon unberührt.</p> : null}
       {cve.note ? <p className="mb-2 text-accent">Notiz: {cve.note}</p> : null}
