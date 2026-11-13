@@ -875,3 +875,10 @@ main:has([data-outside="yes"]) .chip-legend {
     animation: none;
   }
 }
+
+/* Ziel eines Ankers (HashScroller): 1,5 s dezent hervorgehoben; bei reduzierter Bewegung ohne Übergang, aber ebenso lange sichtbar. */
+[data-hash-target] {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+}

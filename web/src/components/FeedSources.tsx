@@ -9,6 +9,7 @@ import type { StatusInfo } from "@/lib/status";
 import { Button, Field, Select, TextInput } from "@/components/Controls";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog } from "@/components/Dialog";
+import Link from "next/link";
 import { NavIcon } from "@/components/Icons";
 import { SectionHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -383,7 +384,7 @@ export function FeedSources() {
           </table>
         </div>
       <p className="mt-2 max-w-[45rem] text-xs text-fg3">
-        Das Abruf-Intervall stellst du unter Einstellungen → Zeitpläne ein. Eine abgeschaltete oder ausgefallene Quelle gilt nie als aktuell.
+        Das Abruf-Intervall stellst du unter <Link href="/settings#sched-h" className="underline">Einstellungen → Zeitpläne</Link> ein. Eine abgeschaltete oder ausgefallene Quelle gilt nie als aktuell.
       </p>
         </div>
       )}

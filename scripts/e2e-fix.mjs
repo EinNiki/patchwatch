@@ -129,4 +129,61 @@ if (want("A2")) {
   console.log("INFO 390px", JSON.stringify(mm));
   await mob.ctx.close();
 }
+
+if (want("A3")) {
+  const view = async (page, sel) => page.evaluate((q) => { const el = document.querySelector(q); const r = el.getBoundingClientRect(); const bar = document.querySelector("header.sticky"); const top = bar && getComputedStyle(bar).display !== "none" ? bar.getBoundingClientRect().bottom : 0; return { top: r.top, bottom: r.bottom, barBottom: top, vh: innerHeight, flash: el.closest("section")?.hasAttribute("data-hash-target") ?? el.hasAttribute("data-hash-target") }; }, sel);
+  for (const [w, h] of [[1440, 700], [390, 700]]) {
+    const { ctx, page } = await open(w, h);
+    // Klick vom Agents-Seitenlink
+    await page.goto(`${base}/agents`);
+    await page.getByRole("link", { name: "Einstellungen → Zeitpläne" }).click();
+    await page.waitForURL(/\/settings#sched-h/);
+    await page.waitForTimeout(700);
+    ok((await view(page, "#sched-h")).flash, `A3 ${w}px: Abschnitt hervorgehoben`);
+    ok(await page.evaluate(() => document.activeElement?.id === "sched-h"), `A3 ${w}px: Überschrift fokussiert`);
+    await page.waitForTimeout(2100);
+    let v = await view(page, "#sched-h");
+    ok(v.top >= v.barBottom && v.top < v.vh - 60, `A3 ${w}px: Klick → Ziel unter der Kopfzeile sichtbar (top ${Math.round(v.top)}, bar ${Math.round(v.barBottom)})`);
+    ok(!(await view(page, "#sched-h")).flash, `A3 ${w}px: Hervorhebung endet nach 1,5 s`);
+    // direkter Aufruf (frisches Laden der Adresse)
+    await page.goto(`${base}/agents`);
+    await page.goto(`${base}/settings#sched-h`);
+    await page.waitForTimeout(2800);
+    v = await view(page, "#sched-h");
+    ok(v.top >= v.barBottom && v.top < v.vh - 60, `A3 ${w}px: direkter Aufruf scrollt zum Ziel`);
+    // langsames Laden: API künstlich verzögern
+    await page.route("**/api/v1/settings*", async (r) => { await new Promise((f) => setTimeout(f, 1200)); await r.continue(); });
+    await page.goto(`${base}/agents`);
+    await page.getByRole("link", { name: "Einstellungen → Zeitpläne" }).click();
+    await page.waitForTimeout(3500);
+    v = await view(page, "#sched-h");
+    ok(v.top >= v.barBottom && v.top < v.vh - 60, `A3 ${w}px: langsames Laden → trotzdem am Ziel`);
+    await page.unroute("**/api/v1/settings*");
+    // Ankerwechsel auf derselben Seite
+    await page.evaluate(() => { history.replaceState(null, "", location.pathname); window.scrollTo(0, 0); });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { location.hash = "sched-h"; });
+    await page.waitForTimeout(900);
+    await page.waitForTimeout(1500);
+    ok((await view(page, "#sched-h")).top < v.vh - 60, `A3 ${w}px: Ankerwechsel auf derselben Seite`);
+    // unbekannter Anker: kein Fehler
+    const errs = [];
+    page.on("pageerror", (e) => errs.push(e.message));
+    await page.goto(`${base}/settings#gibt-es-nicht`);
+    await page.waitForTimeout(3600);
+    ok(errs.length === 0 && (await page.locator("h1").first().isVisible()), `A3 ${w}px: unbekannter Anker ohne Fehler`);
+    // andere Links dieser Art: CVE-Quellen
+    await page.goto(`${base}/cves#feeds`);
+    await page.waitForTimeout(1200);
+    ok((await view(page, "#feeds")).top < v.vh - 60, `A3 ${w}px: /cves#feeds`);
+    await ctx.close();
+  }
+  // reduzierte Bewegung: sofortiges Springen, Hervorhebung statisch
+  const rm = await open(1440, 700, "light", { reducedMotion: "reduce" });
+  await rm.page.goto(`${base}/settings#sched-h`);
+  await rm.page.waitForTimeout(500);
+  const rv = await view(rm.page, "#sched-h");
+  ok(rv.top < 640 && rv.flash, "A3 reduzierte Bewegung: am Ziel und hervorgehoben");
+  await rm.ctx.close();
+}
 await browser.close();
