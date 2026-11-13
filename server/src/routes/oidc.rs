@@ -80,6 +80,11 @@ fn decrypt_secret(st: &AppState, stored: &Stored) -> Option<String> {
     crate::notify::crypto::decrypt(key.bytes(), SECRET_AAD, &blob).ok()
 }
 
+/// Der konfigurierte Issuer (für ausdrücklich angelegte OIDC-Konten); `None`, wenn OIDC aus ist.
+pub async fn configured_issuer(st: &AppState) -> Option<String> {
+    resolve(st).await.map(|r| r.issuer)
+}
+
 /// UI-Einstellung vor Umgebungsvariablen; `None` = Anmeldung per OIDC ist aus.
 pub async fn resolve(st: &AppState) -> Option<Resolved> {
     if let Some(s) = load_stored(st).await {

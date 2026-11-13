@@ -69,11 +69,13 @@ pub async fn record(
 
 /// Einträge älter als `days` Tage entfernen.
 pub async fn purge_older_than(pool: &PgPool, days: i64) -> sqlx::Result<u64> {
-    Ok(sqlx::query("DELETE FROM audit_log WHERE at < now() - make_interval(days => $1::int)")
-        .bind(days)
-        .execute(pool)
-        .await?
-        .rows_affected())
+    Ok(
+        sqlx::query("DELETE FROM audit_log WHERE at < now() - make_interval(days => $1::int)")
+            .bind(days)
+            .execute(pool)
+            .await?
+            .rows_affected(),
+    )
 }
 
 #[cfg(test)]

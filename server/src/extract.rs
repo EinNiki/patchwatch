@@ -47,6 +47,17 @@ pub struct SelfAdmin(pub Admin);
 /// [`SelfAdmin`] mit CSRF-Prüfung.
 pub struct SelfCsrfAdmin(pub Admin);
 
+/// Spalten der Sitzungsabfrage (siehe `load_admin`).
+type SessionRow = (
+    i64,
+    String,
+    String,
+    String,
+    chrono::DateTime<chrono::Utc>,
+    String,
+    bool,
+);
+
 async fn load_admin(parts: &Parts, state: &AppState) -> Result<Admin, ApiError> {
     let cookie = parts
         .headers
@@ -55,7 +66,7 @@ async fn load_admin(parts: &Parts, state: &AppState) -> Result<Admin, ApiError> 
         .and_then(|c| security::cookie_value(c, SESSION_COOKIE))
         .ok_or(ApiError::Unauthorized)?;
     let hash = security::sha256(cookie);
-    let row: Option<(i64, String, String, String, chrono::DateTime<chrono::Utc>, String, bool)> = sqlx::query_as(
+    let row: Option<SessionRow> = sqlx::query_as(
         "SELECT a.id, a.username, a.role, s.csrf_token, s.created_at, a.auth_kind, a.must_change_password \
          FROM sessions s JOIN admin_users a ON a.id = s.admin_id \
          WHERE s.id_hash = $1 AND s.expires_at > now() AND a.status = 'active' AND a.deleted_at IS NULL",

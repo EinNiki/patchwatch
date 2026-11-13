@@ -1,5 +1,5 @@
-use crate::error::{ApiError, ApiResult};
 use crate::audit::{self, Outcome};
+use crate::error::{ApiError, ApiResult};
 use crate::extract::{Admin, ClientIp, PendingAdmin, PendingCsrfAdmin, SelfAdmin, SelfCsrfAdmin};
 use crate::security;
 use crate::state::AppState;
@@ -62,14 +62,32 @@ pub async fn login(
         .await
         .map_err(anyhow::Error::from)?;
     let Some(admin_id) = admin_id.filter(|_| ok) else {
-        audit::record(&st.pool, None, &body.username, "login", None, Outcome::Failed, &ip).await;
+        audit::record(
+            &st.pool,
+            None,
+            &body.username,
+            "login",
+            None,
+            Outcome::Failed,
+            &ip,
+        )
+        .await;
         return Err(ApiError::Unauthorized);
     };
     sqlx::query("UPDATE admin_users SET last_login_at = now() WHERE id = $1")
         .bind(admin_id)
         .execute(&st.pool)
         .await?;
-    audit::record(&st.pool, Some(admin_id), &body.username, "login", None, Outcome::Ok, &ip).await;
+    audit::record(
+        &st.pool,
+        Some(admin_id),
+        &body.username,
+        "login",
+        None,
+        Outcome::Ok,
+        &ip,
+    )
+    .await;
 
     let session_id = security::new_session_id();
     let csrf = security::new_csrf_token();
@@ -162,7 +180,9 @@ pub async fn change_password(
             .fetch_one(&st.pool)
             .await?;
     let Some(hash) = hash else {
-        return Err(ApiError::Forbidden("Dieses Konto hat kein Passwort (Anmeldung über OIDC)"));
+        return Err(ApiError::Forbidden(
+            "Dieses Konto hat kein Passwort (Anmeldung über OIDC)",
+        ));
     };
     let current = body.current_password;
     let ok = tokio::task::spawn_blocking(move || security::verify_password(&hash, &current))
@@ -189,7 +209,16 @@ pub async fn change_password(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    audit::record(&st.pool, Some(id), &admin.username, "password.changed", Some(&admin.username), Outcome::Ok, &ip).await;
+    audit::record(
+        &st.pool,
+        Some(id),
+        &admin.username,
+        "password.changed",
+        Some(&admin.username),
+        Outcome::Ok,
+        &ip,
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -205,10 +234,11 @@ pub async fn me(
     .fetch_optional(&st.pool)
     .await?
     .flatten();
-    let display: Option<String> = sqlx::query_scalar("SELECT display_name FROM admin_users WHERE id = $1")
-        .bind(admin.id)
-        .fetch_optional(&st.pool)
-        .await?;
+    let display: Option<String> =
+        sqlx::query_scalar("SELECT display_name FROM admin_users WHERE id = $1")
+            .bind(admin.id)
+            .fetch_optional(&st.pool)
+            .await?;
     Ok(Json(json!({
         "username": admin.username,
         "display_name": display,

@@ -10,6 +10,7 @@ mod notifications;
 mod oidc;
 mod report;
 pub mod settings;
+mod users;
 
 use crate::extract::ClientIp;
 use crate::state::AppState;
@@ -94,6 +95,17 @@ pub fn router(state: AppState) -> Router {
             get(oidc::settings_get).put(oidc::settings_put),
         )
         .route("/live", get(live::live))
+        .route("/roles", get(users::roles))
+        .route("/users", get(users::list).post(users::create))
+        .route(
+            "/users/{id}",
+            axum::routing::patch(users::update).delete(users::remove),
+        )
+        .route("/users/{id}/lock", post(users::lock))
+        .route("/users/{id}/unlock", post(users::unlock))
+        .route("/users/{id}/approve", post(users::approve))
+        .route("/users/{id}/reset-password", post(users::reset_password))
+        .route("/audit", get(users::audit_list))
         .route("/feeds", get(feeds::list).post(feeds::create))
         .route("/feeds/refresh", post(feeds::refresh))
         .route("/feeds/runs", get(feeds::runs_list))

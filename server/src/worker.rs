@@ -205,6 +205,16 @@ pub async fn cleanup(state: &AppState) -> anyhow::Result<()> {
         .execute(&state.pool)
         .await?;
     let sources = crate::cve::sources::purge_deleted(&state.pool).await?;
+    // Aktivitätsprotokoll: Aufbewahrung in Tagen (Setting `audit.retention_days`, Standard 365, mindestens 30).
+    let days: i64 = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT value FROM settings WHERE key = 'audit.retention_days'",
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .and_then(|v| v.as_i64())
+    .unwrap_or(365)
+    .clamp(30, 3650);
+    crate::audit::purge_older_than(&state.pool, days).await?;
     tracing::info!(
         reports_deleted = reports,
         sources_purged = sources,
