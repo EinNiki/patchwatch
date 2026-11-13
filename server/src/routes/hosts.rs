@@ -561,7 +561,7 @@ pub async fn rotate_token(
 }
 
 pub async fn remove(
-    CsrfAuthed(_, _): CsrfAuthed<authz::p::HostsWrite>,
+    CsrfAuthed(_, _): CsrfAuthed<authz::p::HostsDelete>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {

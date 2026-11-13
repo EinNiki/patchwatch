@@ -600,10 +600,15 @@ fn reevaluate_in_background(st: &AppState) {
 /// Quelle hinzufügen (nur bekannte Typen). Alles wird vor dem Speichern geprüft, gespeichert wird mit einem einzigen
 /// INSERT: bei einem Fehler entsteht nichts, ein gleichzeitiger Doppelversand scheitert am Unique-Index.
 pub async fn create(
-    CsrfAuthed(_, _): CsrfAuthed<authz::p::SourcesWrite>,
+    CsrfAuthed(me, _): CsrfAuthed<authz::p::SourcesWrite>,
     State(st): State<AppState>,
     Json(b): Json<CreateBody>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
+    if b.secret.is_some() && !me.can(authz::Permission::SourcesSecrets) {
+        return Err(ApiError::Forbidden(
+            "Schlüssel setzen darfst du nicht (Recht sources.secrets fehlt)",
+        ));
+    }
     if !sources::is_known(&b.kind) {
         return Err(ApiError::BadRequest(
             "Unbekannter Quellentyp (erlaubt: debian, ubuntu, osv, nvd, cisa_kev)".into(),
@@ -660,11 +665,18 @@ pub async fn create(
 }
 
 pub async fn update(
-    CsrfAuthed(_, _): CsrfAuthed<authz::p::SourcesWrite>,
+    CsrfAuthed(me, _): CsrfAuthed<authz::p::SourcesWrite>,
     State(st): State<AppState>,
     Path(id): Path<String>,
     Json(b): Json<UpdateBody>,
 ) -> ApiResult<StatusCode> {
+    if (b.secret.is_some() || b.clear_secret == Some(true))
+        && !me.can(authz::Permission::SourcesSecrets)
+    {
+        return Err(ApiError::Forbidden(
+            "Schlüssel setzen oder löschen darfst du nicht (Recht sources.secrets fehlt)",
+        ));
+    }
     let old: Option<(String, Option<String>)> = sqlx::query_as(
         "SELECT kind, base_url FROM cve_sources WHERE id = $1 AND deleted_at IS NULL",
     )

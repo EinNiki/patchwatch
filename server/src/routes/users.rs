@@ -9,7 +9,7 @@
 //! Das Einmalpasswort steht nur in der Antwort auf Anlegen/Zurücksetzen und wird nie gespeichert oder geloggt.
 
 use crate::audit::{self, Outcome};
-use crate::authz::{self, Role, ROLES};
+use crate::authz::{self, Permission, Role, ROLES};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{Admin, Authed, ClientIp, CsrfAuthed};
 use crate::security;
@@ -42,70 +42,96 @@ struct UserRow {
     oidc_linked: bool,
     /// Vom OIDC-Anbieter gewünschte Rolle, die ein Administrator noch bestätigen muss.
     requested_role: Option<String>,
+    /// Eigene Rechteauswahl (NULL = folgt der Rolle). Ausgegeben wird nur die wirksame Menge (`view`).
+    #[serde(skip)]
+    permissions: Option<Vec<String>>,
 }
 
 const SELECT_USER: &str = "SELECT id, username, display_name, email, auth_kind, role, status, created_at, last_login_at, \
-    (avatar IS NOT NULL) AS has_avatar, (oidc_subject IS NOT NULL) AS oidc_linked, requested_role FROM admin_users";
+    (avatar IS NOT NULL) AS has_avatar, (oidc_subject IS NOT NULL) AS oidc_linked, requested_role, permissions FROM admin_users";
 
 fn view(u: &UserRow, me: i64) -> Value {
     let mut v = serde_json::to_value(u).unwrap_or(Value::Null);
     v["is_self"] = json!(u.id == me);
     v["role_title"] = json!(Role::parse(&u.role).map(Role::title));
+    v["permissions"] = json!(eff_of(u).iter().map(|p| p.name()).collect::<Vec<_>>());
+    v["custom_permissions"] = json!(u.permissions.is_some());
     v
+}
+
+/// Wirksame Rechte eines Kontos (unbekannte Rolle = keine Rechte).
+fn eff_of(u: &UserRow) -> Vec<Permission> {
+    Role::parse(&u.role).map_or_else(Vec::new, |r| authz::effective(r, u.permissions.as_deref()))
 }
 
 /// Alle Rollen mit ihren Rechten, gruppiert für die Rechtevorschau der Oberfläche. Quelle der Wahrheit ist der Server.
 pub async fn roles(_: Authed<authz::p::UsersManage>) -> Json<Value> {
-    let groups: [(&str, &[authz::Permission]); 6] = {
-        use authz::Permission::*;
-        [
-            ("Hosts", &[HostsRead, HostsWrite, HostsRun]),
-            ("Agents", &[AgentsTokens]),
-            (
-                "CVEs und Quellen",
-                &[CvesRead, CvesWatch, SourcesRead, SourcesWrite, SourcesRun],
-            ),
-            (
-                "Benachrichtigungen",
-                &[ChannelsRead, ChannelsWrite, ChannelsTest],
-            ),
-            ("Einstellungen", &[SettingsRead, SettingsWrite]),
-            ("Benutzer", &[UsersManage, OidcManage, AuditRead]),
-        ]
-    };
-    let label = |p: authz::Permission| -> &'static str {
-        use authz::Permission::*;
-        match p {
-            HostsRead => "Hosts ansehen",
-            HostsWrite => "Hosts anlegen und löschen",
-            HostsRun => "Daten jetzt abrufen",
-            AgentsTokens => "Agent-Token erneuern",
-            CvesRead => "CVEs ansehen",
-            CvesWatch => "Beobachten und manuell prüfen",
-            SourcesRead => "Quellen-Zustand ansehen",
-            SourcesWrite => "Quellen anlegen, ändern, löschen",
-            SourcesRun => "Quellen abrufen",
-            ChannelsRead => "Kanäle ansehen",
-            ChannelsWrite => "Kanäle ändern",
-            ChannelsTest => "Testnachricht senden",
-            SettingsRead => "Einstellungen ansehen",
-            SettingsWrite => "Einstellungen und Zeitpläne ändern",
-            UsersManage => "Benutzer und Rollen verwalten",
-            OidcManage => "OIDC-Anmeldung einrichten",
-            AuditRead => "Aktivitätsprotokoll lesen",
-        }
-    };
+    use Permission::*;
+    // (Gruppe, [(Recht, Beschriftung, Erklärung)]): Quelle der Wahrheit für die Oberfläche (Schalter und Vorlagen).
+    type Entry = (Permission, &'static str, &'static str);
+    let groups: [(&str, &[Entry]); 6] = [
+        (
+            "Hosts",
+            &[
+                (HostsRead, "Hosts ansehen", "Hostliste, Details und Verlauf lesen."),
+                (HostsWrite, "Hosts anlegen und ändern", "Neue Hosts anlegen."),
+                (HostsDelete, "Hosts löschen", "Einen Host samt Verlauf dauerhaft entfernen."),
+                (HostsRun, "Daten jetzt abrufen", "Agents bitten, sofort neue Daten zu senden."),
+            ],
+        ),
+        (
+            "Agents",
+            &[(AgentsTokens, "Agent-Token erneuern", "Das Token eines Agents ersetzen; das alte gilt sofort nicht mehr.")],
+        ),
+        (
+            "CVEs und Quellen",
+            &[
+                (CvesRead, "CVEs ansehen", "CVE-Liste und Details lesen."),
+                (CvesWatch, "Beobachten und manuell prüfen", "CVEs auf die Beobachtungsliste setzen und manuell prüfen."),
+                (SourcesRead, "Quellen-Zustand ansehen", "Zustand und Läufe der CVE-Quellen lesen."),
+                (SourcesWrite, "Quellen anlegen und ändern", "Quellen anlegen, ein- und ausschalten, ändern, löschen."),
+                (SourcesRun, "Quellen abrufen", "Einen Abruf einer Quelle starten."),
+                (SourcesSecrets, "Quellen-Schlüssel setzen", "API-Schlüssel einer Quelle setzen oder löschen (lesen kann sie niemand)."),
+            ],
+        ),
+        (
+            "Benachrichtigungen",
+            &[
+                (ChannelsRead, "Kanäle ansehen", "Zustand der Benachrichtigungskanäle lesen."),
+                (ChannelsWrite, "Kanäle ändern", "Kanäle ein- und ausschalten und konfigurieren."),
+                (ChannelsTest, "Testnachricht senden", "Eine Testnachricht über einen Kanal senden."),
+                (ChannelsSecrets, "Kanal-Geheimnisse setzen", "Tokens und Webhooks eines Kanals setzen oder löschen (lesen kann sie niemand)."),
+            ],
+        ),
+        (
+            "Einstellungen",
+            &[
+                (SettingsRead, "Einstellungen ansehen", "Einstellungen und Zeitpläne lesen."),
+                (SettingsWrite, "Einstellungen und Zeitpläne ändern", "Einstellungen und Zeitpläne ändern."),
+            ],
+        ),
+        (
+            "Benutzer",
+            &[
+                (UsersManage, "Benutzer verwalten", "Benutzer anlegen, ändern, sperren, löschen und Rechte vergeben, aber nur bis zu den eigenen Rechten."),
+                (OidcManage, "OIDC-Anmeldung einrichten", "Anbieter, Zugangsdaten und Rollenzuordnung für OIDC."),
+                (AuditRead, "Aktivitätsprotokoll lesen", "Das Aktivitätsprotokoll einsehen."),
+            ],
+        ),
+    ];
     Json(json!({
         "roles": ROLES.iter().map(|r| json!({
             "key": r.key(), "title": r.title(),
-            "permissions": r.permissions().iter().map(|p| p.name()).collect::<Vec<_>>(),
+            "permissions": authz::close(&r.permissions()).iter().map(|p| p.name()).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "groups": groups.iter().map(|(g, ps)| json!({
             "title": g,
-            "permissions": ps.iter().map(|p| json!({"name": p.name(), "label": label(*p)})).collect::<Vec<_>>(),
+            "permissions": ps.iter().map(|(p, label, desc)| json!({
+                "name": p.name(), "label": label, "description": desc,
+                "requires": p.requires().iter().map(|r| r.name()).collect::<Vec<_>>(),
+                "sensitive": p.is_sensitive(),
+            })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-        // Rollen sehen nie Geheimnisse: sie werden von keiner Route ausgegeben (nur "gesetzt/nicht gesetzt").
-        "can_see_secrets": false,
     }))
 }
 
@@ -194,19 +220,103 @@ pub(super) async fn reauth(st: &AppState, me: &Admin, password: Option<&str>) ->
     }
 }
 
-/// Sperrt die aktiven Administratoren (Reihenfolge nach ID, damit gleichzeitige Anfragen sich nicht verklemmen).
+/// Sperrt die aktiven Benutzer mit dem Recht `users.manage` (Reihenfolge nach ID, damit gleichzeitige Anfragen sich nicht
+/// verklemmen) und liefert (id, Anmeldeart). Wer verwalten darf, hängt von den wirksamen Rechten ab, nicht von der Rolle.
 async fn lock_admins(tx: &mut PgConnection) -> sqlx::Result<Vec<(i64, String)>> {
-    sqlx::query_as(
-        "SELECT id, auth_kind FROM admin_users WHERE role = 'admin' AND status = 'active' AND deleted_at IS NULL ORDER BY id FOR UPDATE",
+    let rows: Vec<(i64, String, String, Option<Vec<String>>)> = sqlx::query_as(
+        "SELECT id, auth_kind, role, permissions FROM admin_users WHERE status = 'active' AND deleted_at IS NULL ORDER BY id FOR UPDATE",
     )
     .fetch_all(tx)
-    .await
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, _, role, perms)| {
+            Role::parse(role).is_some_and(|r| {
+                authz::effective(r, perms.as_deref()).contains(&Permission::UsersManage)
+            })
+        })
+        .map(|(id, kind, _, _)| (id, kind))
+        .collect())
 }
 
-/// Nach der Änderung muss mindestens ein aktiver Administrator und davon mindestens einer lokal bleiben.
+/// Nach der Änderung muss mindestens ein aktiver Benutzer mit `users.manage` und davon mindestens einer lokal bleiben.
 fn keeps_admins(admins: &[(i64, String)], target: i64) -> bool {
     let rest: Vec<_> = admins.iter().filter(|a| a.0 != target).collect();
     !rest.is_empty() && rest.iter().any(|a| a.1 == "local")
+}
+
+/// Ist das Konto ein aktiver Verwalter (hat `users.manage`)?
+fn is_manager(admins: &[(i64, String)], id: i64) -> bool {
+    admins.iter().any(|a| a.0 == id)
+}
+
+/// Rechteausweitung verhindern: wer ein Konto ändert, sperrt, löscht, freigibt oder dessen Passwort zurücksetzt, muss
+/// alle Rechte dieses Kontos selbst haben (sonst könnte ein Verwalter einen stärkeren Benutzer übernehmen).
+fn require_covers(me: &Admin, t: &UserRow) -> ApiResult<()> {
+    let missing: Vec<&str> = eff_of(t)
+        .iter()
+        .filter(|p| !me.permissions.contains(p))
+        .map(|p| p.name())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::Forbidden(
+            "Dieses Konto hat Rechte, die du selbst nicht hast; du darfst es nicht verwalten",
+        ))
+    }
+}
+
+/// Ergebnis einer Rechtevergabe: was gespeichert wird (`None` = folgt der Rolle) und die wirksame Menge.
+struct Grant {
+    stored: Option<Vec<String>>,
+    effective: Vec<Permission>,
+}
+
+/// Prüft eine Vergabe: bekannte Namen, Voraussetzungen erfüllt (Schreiben setzt Lesen voraus) und nur Rechte, die der
+/// Vergebende selbst hat. Ohne `custom` gilt die Vorlage der Rolle.
+fn resolve_grant(me: &Admin, role: Role, custom: Option<&[String]>) -> ApiResult<Grant> {
+    let grant = match custom {
+        None => Grant {
+            stored: None,
+            effective: authz::effective(role, None),
+        },
+        Some(names) => {
+            let mut parsed = Vec::new();
+            for n in names {
+                let p = Permission::parse(n)
+                    .ok_or_else(|| ApiError::BadRequest(format!("Unbekanntes Recht: {n}")))?;
+                if !parsed.contains(&p) {
+                    parsed.push(p);
+                }
+            }
+            for p in &parsed {
+                if let Some(r) = p.requires().iter().find(|r| !parsed.contains(r)) {
+                    return Err(ApiError::BadRequest(format!(
+                        "Das Recht {} setzt {} voraus",
+                        p.name(),
+                        r.name()
+                    )));
+                }
+            }
+            let effective = authz::close(&parsed);
+            Grant {
+                stored: Some(effective.iter().map(|p| p.name().to_owned()).collect()),
+                effective,
+            }
+        }
+    };
+    if !authz::is_subset(&grant.effective, &me.permissions) {
+        return Err(ApiError::Forbidden(
+            "Du kannst nur Rechte vergeben, die du selbst hast",
+        ));
+    }
+    Ok(grant)
+}
+
+/// Mindestens eines der Rechte, deren Vergabe das eigene Passwort verlangt, ist in `a` aber nicht in `b`.
+fn gains_sensitive(a: &[Permission], b: &[Permission]) -> bool {
+    a.iter().any(|p| p.is_sensitive() && !b.contains(p))
 }
 
 async fn target(tx: &mut PgConnection, id: i64) -> ApiResult<UserRow> {
@@ -251,6 +361,8 @@ pub struct CreateBody {
     auth_kind: String,
     email: Option<String>,
     role: String,
+    /// Eigene Rechteauswahl statt der Vorlage der Rolle; nie mehr, als der Vergebende selbst hat.
+    permissions: Option<Vec<String>>,
     /// Nur OIDC: `sub` des Anbieters (Verknüpfung nur ausdrücklich durch einen Administrator, nie per E-Mail).
     oidc_subject: Option<String>,
     /// Eigenes Passwort, nötig bei der Rolle Administrator.
@@ -272,7 +384,8 @@ pub async fn create(
     if super::has_nul(&name) {
         return Err(ApiError::BadRequest("ungültige Eingabe".into()));
     }
-    if role == Role::Admin {
+    let grant = resolve_grant(&me, role, b.permissions.as_deref())?;
+    if grant.effective.iter().any(|p| p.is_sensitive()) {
         reauth(&st, &me, b.confirm_password.as_deref()).await?;
     }
     let (id, initial) = match b.auth_kind.as_str() {
@@ -283,14 +396,15 @@ pub async fn create(
                 .await
                 .map_err(anyhow::Error::from)??;
             let id: i64 = sqlx::query_scalar(
-                "INSERT INTO admin_users (username, display_name, email, auth_kind, role, status, password_hash, must_change_password, created_by) \
-                 VALUES ($1, $1, $2, 'local', $3, 'active', $4, true, $5) RETURNING id",
+                "INSERT INTO admin_users (username, display_name, email, auth_kind, role, status, password_hash, must_change_password, created_by, permissions) \
+                 VALUES ($1, $1, $2, 'local', $3, 'active', $4, true, $5, $6) RETURNING id",
             )
             .bind(&name)
             .bind(&email)
             .bind(role.key())
             .bind(hash)
             .bind(me.id)
+            .bind(&grant.stored)
             .fetch_one(&st.pool)
             .await
             .map_err(map_unique)?;
@@ -310,8 +424,8 @@ pub async fn create(
                 ));
             };
             let id: i64 = sqlx::query_scalar(
-                "INSERT INTO admin_users (username, display_name, email, auth_kind, role, status, oidc_issuer, oidc_subject, created_by) \
-                 VALUES ($1, $1, $2, 'oidc', $3, 'active', $4, $5, $6) RETURNING id",
+                "INSERT INTO admin_users (username, display_name, email, auth_kind, role, status, oidc_issuer, oidc_subject, created_by, permissions) \
+                 VALUES ($1, $1, $2, 'oidc', $3, 'active', $4, $5, $6, $7) RETURNING id",
             )
             .bind(&name)
             .bind(&email)
@@ -319,6 +433,7 @@ pub async fn create(
             .bind(issuer)
             .bind(sub)
             .bind(me.id)
+            .bind(&grant.stored)
             .fetch_one(&st.pool)
             .await
             .map_err(map_unique)?;
@@ -354,6 +469,9 @@ pub struct UpdateBody {
     display_name: Option<String>,
     email: Option<String>,
     role: Option<String>,
+    /// Eigene Rechteauswahl (ersetzt die Vorlage); `use_template = true` kehrt zur Vorlage der Rolle zurück.
+    permissions: Option<Vec<String>>,
+    use_template: Option<bool>,
     /// Name des Benutzers zur Bestätigung einer Rollenänderung.
     confirm_name: Option<String>,
     confirm_password: Option<String>,
@@ -381,12 +499,25 @@ pub async fn update(
     let mut tx = st.pool.begin().await?;
     let admins = lock_admins(&mut tx).await?;
     let t = target(&mut tx, id).await?;
+    require_covers(&me, &t)?;
     let old_role = Role::parse(&t.role).ok_or(ApiError::NotFound)?;
+    let old_eff = eff_of(&t);
     let role_changes = new_role.is_some_and(|r| r != old_role);
-    if role_changes {
+    // Rechte ändern sich bei Rollenwechsel (zurück auf die Vorlage), eigener Auswahl oder ausdrücklich "Vorlage".
+    let wants_rights = role_changes || b.permissions.is_some() || b.use_template == Some(true);
+    let grant = if wants_rights {
+        Some(resolve_grant(
+            &me,
+            new_role.unwrap_or(old_role),
+            b.permissions.as_deref(),
+        )?)
+    } else {
+        None
+    };
+    if let Some(g) = &grant {
         if t.id == me.id {
             return Err(ApiError::Forbidden(
-                "Du kannst deine eigene Rolle nicht ändern",
+                "Du kannst deine eigene Rolle und deine Rechte nicht ändern",
             ));
         }
         if b.confirm_name.as_deref().map(str::trim) != Some(t.display_name.as_str()) {
@@ -394,12 +525,19 @@ pub async fn update(
                 "Zur Bestätigung den Namen des Benutzers eingeben".into(),
             ));
         }
-        if old_role == Role::Admin && !keeps_admins(&admins, t.id) {
+        if is_manager(&admins, t.id)
+            && !g.effective.contains(&Permission::UsersManage)
+            && !keeps_admins(&admins, t.id)
+        {
             return Err(ApiError::Conflict(
                 "Der letzte (lokale) Administrator kann nicht herabgestuft werden".into(),
             ));
         }
-        if old_role == Role::Admin || new_role == Some(Role::Admin) {
+        // Rollenwechsel und jede Vergabe oder jeder Entzug sensibler Rechte verlangen Passwort bzw. frische Anmeldung.
+        if role_changes
+            || gains_sensitive(&g.effective, &old_eff)
+            || gains_sensitive(&old_eff, &g.effective)
+        {
             // Passwortprüfung außerhalb der Sperre wäre sauberer, ist aber kurz; die Sperre verhindert Rennen.
             reauth(&st, &me, b.confirm_password.as_deref()).await?;
         }
@@ -419,11 +557,12 @@ pub async fn update(
             .execute(&mut *tx)
             .await?;
     }
-    if role_changes {
+    if let Some(g) = &grant {
         let r = new_role.unwrap_or(old_role);
-        sqlx::query("UPDATE admin_users SET role = $2 WHERE id = $1")
+        sqlx::query("UPDATE admin_users SET role = $2, permissions = $3 WHERE id = $1")
             .bind(id)
             .bind(r.key())
+            .bind(&g.stored)
             .execute(&mut *tx)
             .await?;
         end_sessions(&mut tx, id).await?;
@@ -431,6 +570,8 @@ pub async fn update(
     tx.commit().await?;
     let action = if role_changes {
         "user.role_changed"
+    } else if grant.is_some() {
+        "user.permissions_changed"
     } else {
         "user.updated"
     };
@@ -465,8 +606,9 @@ async fn set_locked(
     let mut tx = st.pool.begin().await?;
     let admins = lock_admins(&mut tx).await?;
     let t = target(&mut tx, id).await?;
+    require_covers(me, &t)?;
     if lock {
-        if t.role == "admin" && t.status == "active" && !keeps_admins(&admins, t.id) {
+        if is_manager(&admins, t.id) && t.status == "active" && !keeps_admins(&admins, t.id) {
             return Err(ApiError::Conflict(
                 "Der letzte (lokale) Administrator kann nicht gesperrt werden".into(),
             ));
@@ -529,6 +671,7 @@ pub async fn unlock(
 #[serde(deny_unknown_fields)]
 pub struct ApproveBody {
     role: String,
+    permissions: Option<Vec<String>>,
     confirm_password: Option<String>,
 }
 
@@ -542,11 +685,13 @@ pub async fn approve(
     Json(b): Json<ApproveBody>,
 ) -> ApiResult<Json<Value>> {
     let role = role_of(&b.role)?;
-    if role == Role::Admin {
+    let grant = resolve_grant(&me, role, b.permissions.as_deref())?;
+    if grant.effective.iter().any(|p| p.is_sensitive()) {
         reauth(&st, &me, b.confirm_password.as_deref()).await?;
     }
     let mut tx = st.pool.begin().await?;
     let t = target(&mut tx, id).await?;
+    require_covers(&me, &t)?;
     if t.status != "pending" {
         return Err(ApiError::Conflict(
             "Das Konto wartet nicht auf Freigabe".into(),
@@ -555,11 +700,14 @@ pub async fn approve(
     if !t.oidc_linked {
         return Err(ApiError::Conflict("Das Konto ist nicht mit einer OIDC-Identität verknüpft und kann nicht freigegeben werden".into()));
     }
-    sqlx::query("UPDATE admin_users SET status = 'active', role = $2 WHERE id = $1")
-        .bind(id)
-        .bind(role.key())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE admin_users SET status = 'active', role = $2, permissions = $3 WHERE id = $1",
+    )
+    .bind(id)
+    .bind(role.key())
+    .bind(&grant.stored)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     audit::record(
         &st.pool,
@@ -592,6 +740,7 @@ pub async fn reset_password(
     }
     let mut tx = st.pool.begin().await?;
     let t = target(&mut tx, id).await?;
+    require_covers(&me, &t)?;
     if t.auth_kind != "local" {
         return Err(ApiError::Conflict(
             "Nur lokale Konten haben ein Passwort".into(),
@@ -651,16 +800,17 @@ pub async fn remove(
             "Zur Bestätigung den Namen des Benutzers eingeben".into(),
         ));
     }
-    if t.role == "admin" {
+    require_covers(&me, &t)?;
+    if eff_of(&t).iter().any(|p| p.is_sensitive()) {
         reauth(&st, &me, b.confirm_password.as_deref()).await?;
-        if t.status == "active" && !keeps_admins(&admins, t.id) {
-            return Err(ApiError::Conflict(
-                "Der letzte (lokale) Administrator kann nicht gelöscht werden".into(),
-            ));
-        }
+    }
+    if is_manager(&admins, t.id) && t.status == "active" && !keeps_admins(&admins, t.id) {
+        return Err(ApiError::Conflict(
+            "Der letzte (lokale) Administrator kann nicht gelöscht werden".into(),
+        ));
     }
     sqlx::query(
-        "UPDATE admin_users SET deleted_at = now(), status = 'locked', role = 'viewer', username = 'geloescht-' || id::text, \
+        "UPDATE admin_users SET deleted_at = now(), status = 'locked', role = 'viewer', permissions = NULL, username = 'geloescht-' || id::text, \
          display_name = 'gelöscht-' || id::text, email = NULL, oidc_issuer = NULL, oidc_subject = NULL, \
          password_hash = NULL, must_change_password = false, avatar = NULL, avatar_type = NULL, avatar_updated_at = NULL WHERE id = $1",
     )

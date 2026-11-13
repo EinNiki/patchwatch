@@ -69,7 +69,7 @@ pub async fn recover_admin(pool: &PgPool, username: &str, password: &str) -> Res
          VALUES ($1, $2, false, 'admin', 'active', 'local') \
          ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, must_change_password = false, \
          role = 'admin', status = 'active', auth_kind = 'local', oidc_issuer = NULL, oidc_subject = NULL, \
-         requested_role = NULL, deleted_at = NULL RETURNING id",
+         requested_role = NULL, permissions = NULL, deleted_at = NULL RETURNING id",
     )
     .bind(username)
     .bind(hash)

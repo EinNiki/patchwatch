@@ -141,11 +141,16 @@ fn clean_config(kind: &str, raw: &Value) -> ApiResult<Value> {
 }
 
 pub async fn put(
-    CsrfAuthed(_, _): CsrfAuthed<authz::p::ChannelsWrite>,
+    CsrfAuthed(me, _): CsrfAuthed<authz::p::ChannelsWrite>,
     State(st): State<AppState>,
     Path(kind): Path<String>,
     Json(body): Json<PutBody>,
 ) -> ApiResult<Json<Value>> {
+    if (body.secret.is_some() || body.clear_secret) && !me.can(authz::Permission::ChannelsSecrets) {
+        return Err(ApiError::Forbidden(
+            "Geheimnisse setzen oder löschen darfst du nicht (Recht channels.secrets fehlt)",
+        ));
+    }
     known_kind(&kind)?;
     let existing = store::load(&st.pool, &st.cfg, &kind)
         .await?

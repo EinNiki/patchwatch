@@ -244,7 +244,7 @@ pub async fn me(
         "display_name": display,
         "role": admin.role.key(),
         "role_title": admin.role.title(),
-        "permissions": admin.role.permissions().iter().map(|p| p.name()).collect::<Vec<_>>(),
+        "permissions": admin.permissions.iter().map(|p| p.name()).collect::<Vec<_>>(),
         "auth_kind": admin.auth_kind,
         "csrf_token": admin.csrf_token,
         "must_change_password": admin.must_change_password,

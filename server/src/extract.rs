@@ -13,6 +13,8 @@ pub struct Admin {
     pub id: i64,
     pub username: String,
     pub role: Role,
+    /// Wirksame Rechte (Vorlage der Rolle oder eigene Auswahl), bei jeder Anfrage aus der Datenbank gelesen.
+    pub permissions: Vec<Permission>,
     pub csrf_token: String,
     pub session_hash: Vec<u8>,
     /// Beginn der Sitzung (für "frische Anmeldung" bei OIDC-Konten).
@@ -24,7 +26,7 @@ pub struct Admin {
 
 impl Admin {
     pub fn can(&self, p: Permission) -> bool {
-        self.role.allows(p)
+        self.permissions.contains(&p)
     }
 }
 
@@ -56,6 +58,7 @@ type SessionRow = (
     chrono::DateTime<chrono::Utc>,
     String,
     bool,
+    Option<Vec<String>>,
 );
 
 async fn load_admin(parts: &Parts, state: &AppState) -> Result<Admin, ApiError> {
@@ -67,21 +70,23 @@ async fn load_admin(parts: &Parts, state: &AppState) -> Result<Admin, ApiError> 
         .ok_or(ApiError::Unauthorized)?;
     let hash = security::sha256(cookie);
     let row: Option<SessionRow> = sqlx::query_as(
-        "SELECT a.id, a.username, a.role, s.csrf_token, s.created_at, a.auth_kind, a.must_change_password \
+        "SELECT a.id, a.username, a.role, s.csrf_token, s.created_at, a.auth_kind, a.must_change_password, a.permissions \
          FROM sessions s JOIN admin_users a ON a.id = s.admin_id \
          WHERE s.id_hash = $1 AND s.expires_at > now() AND a.status = 'active' AND a.deleted_at IS NULL",
     )
     .bind(&hash)
     .fetch_optional(&state.pool)
     .await?;
-    let (id, username, role, csrf_token, session_created, auth_kind, must_change_password) =
+    let (id, username, role, csrf_token, session_created, auth_kind, must_change_password, stored) =
         row.ok_or(ApiError::Unauthorized)?;
     // Unbekannte Rolle (kann die Prüfregel der Datenbank nicht liefern) gilt als nicht angemeldet.
     let role = Role::parse(&role).ok_or(ApiError::Unauthorized)?;
+    let permissions = crate::authz::effective(role, stored.as_deref());
     Ok(Admin {
         id,
         username,
         role,
+        permissions,
         csrf_token,
         session_hash: hash,
         session_created,

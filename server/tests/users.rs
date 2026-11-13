@@ -140,7 +140,7 @@ fn matrix() -> Vec<(Method, &'static str, Permission, bool)> {
         (Method::GET, "/api/v1/hosts/1/updates", HostsRead, true),
         (Method::GET, "/api/v1/matrix", HostsRead, true),
         (Method::POST, "/api/v1/hosts", HostsWrite, false),
-        (Method::DELETE, "/api/v1/hosts/1", HostsWrite, true),
+        (Method::DELETE, "/api/v1/hosts/1", HostsDelete, true),
         (
             Method::POST,
             "/api/v1/hosts/1/rotate-token",
@@ -452,7 +452,9 @@ fn every_handler_requires_a_permission_extractor() {
 #[test]
 fn matrix_covers_every_permission() {
     let used: Vec<Permission> = matrix().iter().map(|m| m.2).collect();
-    for p in authz::ALL {
+    // `*.secrets` hängen vom Inhalt der Anfrage ab (Schlüssel gesetzt oder nicht); eigene Tests: secrets_rights_*.
+    let by_body = [Permission::SourcesSecrets, Permission::ChannelsSecrets];
+    for p in authz::ALL.iter().copied().filter(|p| !by_body.contains(p)) {
         assert!(
             used.contains(&p),
             "Recht {} wird von keiner Route der Matrix verlangt",
@@ -547,7 +549,7 @@ async fn sessions_end_on_role_change_lock_reset_and_delete(pool: PgPool) {
         Method::PATCH,
         &format!("/api/v1/users/{}", ids["u-role"]),
         &a.h(),
-        Some(json!({"role": "operator", "confirm_name": "u-role"})),
+        Some(json!({"role": "operator", "confirm_name": "u-role", "confirm_password": PW})),
     )
     .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
@@ -1028,4 +1030,425 @@ async fn startup_default_password_scan_skips_accounts_without_a_hash(pool: PgPoo
         .await
         .unwrap()
         .is_empty());
+}
+
+// ---------- Einzelrechte ----------
+
+async fn set_perms(pool: &PgPool, name: &str, perms: Option<&[&str]>) {
+    let v: Option<Vec<String>> = perms.map(|p| p.iter().map(|s| (*s).to_owned()).collect());
+    sqlx::query("UPDATE admin_users SET permissions = $2 WHERE username = $1")
+        .bind(name)
+        .bind(v)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// Betreiber-Rechte plus `users.manage`: ein Verwalter, der kein Administrator ist.
+fn manager_perms() -> Vec<String> {
+    let mut v: Vec<String> = Role::Operator
+        .permissions()
+        .iter()
+        .map(|p| p.name().to_owned())
+        .collect();
+    v.push("users.manage".into());
+    v
+}
+
+async fn mk_manager(pool: &PgPool, name: &str) -> i64 {
+    let id = mk(pool, name, "operator", "active").await;
+    let v = manager_perms();
+    let refs: Vec<&str> = v.iter().map(String::as_str).collect();
+    set_perms(pool, name, Some(&refs)).await;
+    id
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn manager_without_all_admin_rights_cannot_take_over_an_admin(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    let adm = mk(&pool, "the-admin", "admin", "active").await;
+    mk(&pool, "second-admin", "admin", "active").await;
+    mk_manager(&pool, "mgr").await;
+    let m = login(&app, "mgr").await;
+    let url = |id: i64, tail: &str| format!("/api/v1/users/{id}{tail}");
+    // Passwort zurücksetzen, sperren, ändern, löschen: alles 403 mit Klartext.
+    for (method, tail, body) in [
+        (Method::POST, "/reset-password", json!({})),
+        (Method::POST, "/lock", json!({})),
+        (Method::POST, "/unlock", json!({})),
+        (Method::PATCH, "", json!({"display_name": "Neu"})),
+        (
+            Method::DELETE,
+            "",
+            json!({"confirm_name": "the-admin", "confirm_password": PW}),
+        ),
+    ] {
+        let r = call(&app, method.clone(), &url(adm, tail), &m.h(), Some(body)).await;
+        assert_eq!(
+            r.status,
+            StatusCode::FORBIDDEN,
+            "{method} {tail}: {}",
+            r.raw
+        );
+        assert!(r.raw.contains("Rechte"), "Klartext fehlt: {}", r.raw);
+    }
+    // Das Konto des Administrators ist unverändert.
+    let st: String = sqlx::query_scalar("SELECT status FROM admin_users WHERE id = $1")
+        .bind(adm)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(st, "active");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn nobody_can_grant_rights_they_do_not_have(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "boss", "admin", "active").await;
+    mk_manager(&pool, "mgr").await;
+    let victim = mk(&pool, "vic", "viewer", "active").await;
+    let m = login(&app, "mgr").await;
+    // Anlegen mit Rolle Administrator oder mit einzelnem Recht, das der Verwalter nicht hat.
+    for body in [
+        json!({"display_name": "n1", "auth_kind": "local", "role": "admin", "confirm_password": PW}),
+        json!({"display_name": "n2", "auth_kind": "local", "role": "viewer", "permissions": ["hosts.read", "audit.read"], "confirm_password": PW}),
+        json!({"display_name": "n3", "auth_kind": "local", "role": "viewer", "permissions": ["hosts.read", "oidc.manage", "settings.read"], "confirm_password": PW}),
+    ] {
+        let r = call(&app, Method::POST, "/api/v1/users", &m.h(), Some(body)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    }
+    // Einem anderen Rechte geben, die man nicht hat.
+    let r = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/users/{victim}"),
+        &m.h(),
+        Some(json!({"permissions": ["hosts.read", "audit.read"], "confirm_name": "vic", "confirm_password": PW})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    // Sich selbst Rechte geben (auch solche, die er hätte): verboten.
+    let me: i64 = sqlx::query_scalar("SELECT id FROM admin_users WHERE username = 'mgr'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let r = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/users/{me}"),
+        &m.h(),
+        Some(json!({"permissions": ["hosts.read"], "confirm_name": "mgr", "confirm_password": PW})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    // Erlaubt: Rechte, die er hat (kein sensibles Recht, also ohne Passwort), mit Namensbestätigung.
+    let r = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/users/{victim}"),
+        &m.h(),
+        Some(json!({"permissions": ["hosts.read", "hosts.write"], "confirm_name": "vic"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert_eq!(r.json["permissions"], json!(["hosts.read", "hosts.write"]));
+    assert_eq!(r.json["custom_permissions"], true);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn sensitive_grants_and_role_changes_need_the_password(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "boss", "admin", "active").await;
+    let victim = mk(&pool, "vic", "viewer", "active").await;
+    let a = login(&app, "boss").await;
+    let url = format!("/api/v1/users/{victim}");
+    // Sensibles Recht ohne Passwort: abgelehnt; mit falscher Namensbestätigung: 400.
+    let r = call(
+        &app,
+        Method::PATCH,
+        &url,
+        &a.h(),
+        Some(json!({"permissions": ["audit.read"], "confirm_name": "vic"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    let r = call(&app, Method::PATCH, &url, &a.h(), Some(json!({"permissions": ["audit.read"], "confirm_name": "falsch", "confirm_password": PW}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.raw);
+    // Rollenwechsel (auch zu Betreiber) ohne Passwort: abgelehnt.
+    let r = call(
+        &app,
+        Method::PATCH,
+        &url,
+        &a.h(),
+        Some(json!({"role": "operator", "confirm_name": "vic"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    let r = call(
+        &app,
+        Method::PATCH,
+        &url,
+        &a.h(),
+        Some(json!({"permissions": ["audit.read"], "confirm_name": "vic", "confirm_password": PW})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    // Rollenwechsel setzt die Einzelrechte auf die Vorlage zurück.
+    let r = call(
+        &app,
+        Method::PATCH,
+        &url,
+        &a.h(),
+        Some(json!({"role": "operator", "confirm_name": "vic", "confirm_password": PW})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert_eq!(r.json["custom_permissions"], false);
+    let stored: Option<Vec<String>> =
+        sqlx::query_scalar("SELECT permissions FROM admin_users WHERE id = $1")
+            .bind(victim)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(stored.is_none());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn unknown_names_and_missing_prerequisites_are_not_granted(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "boss", "admin", "active").await;
+    mk(&pool, "u-unknown", "viewer", "active").await;
+    mk(&pool, "u-nodeps", "viewer", "active").await;
+    mk(&pool, "u-allbogus", "admin", "active").await;
+    // Unbekannter Name daneben: bekannte Rechte gelten, der unbekannte ist nie ein Fehler und nie erlaubt.
+    set_perms(&pool, "u-unknown", Some(&["hosts.read", "hosts.erase", ""])).await;
+    // Schreibrecht ohne Leserecht in den gespeicherten Daten: fällt weg (auch hosts.delete kaskadiert).
+    set_perms(
+        &pool,
+        "u-nodeps",
+        Some(&["hosts.write", "hosts.delete", "cves.read"]),
+    )
+    .await;
+    // Nur Unbekanntes: keine Rechte (nicht "wie die Rolle").
+    set_perms(&pool, "u-allbogus", Some(&["alles.erlaubt"])).await;
+    let get = |app: Router, s: Sess, path: &'static str| async move {
+        call(&app, Method::GET, path, &s.h(), None).await.status
+    };
+    let s = login(&app, "u-unknown").await;
+    assert_eq!(
+        get(app.clone(), s.clone(), "/api/v1/hosts").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        get(app.clone(), s.clone(), "/api/v1/cves").await,
+        StatusCode::FORBIDDEN
+    );
+    let s = login(&app, "u-nodeps").await;
+    assert_eq!(
+        get(app.clone(), s.clone(), "/api/v1/hosts").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(app.clone(), s.clone(), "/api/v1/cves").await,
+        StatusCode::OK
+    );
+    let r = call(&app, Method::DELETE, "/api/v1/hosts/1", &s.h(), None).await;
+    assert_eq!(
+        r.status,
+        StatusCode::FORBIDDEN,
+        "hosts.delete ohne hosts.read/write"
+    );
+    let s = login(&app, "u-allbogus").await;
+    assert_eq!(
+        get(app.clone(), s.clone(), "/api/v1/hosts").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(app.clone(), s, "/api/v1/users").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn api_rejects_unknown_rights_and_missing_prerequisites(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "boss", "admin", "active").await;
+    let victim = mk(&pool, "vic", "viewer", "active").await;
+    let a = login(&app, "boss").await;
+    let url = format!("/api/v1/users/{victim}");
+    for perms in [
+        json!(["hosts.erase"]),
+        json!(["hosts.write"]),
+        json!(["hosts.read", "hosts.delete"]),
+    ] {
+        let r = call(
+            &app,
+            Method::PATCH,
+            &url,
+            &a.h(),
+            Some(json!({"permissions": perms, "confirm_name": "vic"})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{perms}: {}", r.raw);
+    }
+    // Leserecht später entziehen: die abhängigen Schreibrechte fallen mit weg.
+    let r = call(&app, Method::PATCH, &url, &a.h(), Some(json!({"permissions": ["hosts.read", "hosts.write", "hosts.delete", "cves.read"], "confirm_name": "vic"}))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    set_perms(
+        &pool,
+        "vic",
+        Some(&["hosts.write", "hosts.delete", "cves.read"]),
+    )
+    .await; // hosts.read entzogen
+    let r = call(&app, Method::GET, "/api/v1/users", &a.h(), None).await;
+    let vic = r.json["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["id"] == victim)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        vic["permissions"],
+        json!(["cves.read"]),
+        "abhängige Rechte fallen mit weg"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn secrets_rights_are_separate_from_write_rights(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "boss", "admin", "active").await;
+    mk(&pool, "nosecret", "operator", "active").await;
+    let v: Vec<String> = Role::Operator
+        .permissions()
+        .iter()
+        .map(|p| p.name().to_owned())
+        .filter(|n| !n.ends_with(".secrets"))
+        .collect();
+    let refs: Vec<&str> = v.iter().map(String::as_str).collect();
+    set_perms(&pool, "nosecret", Some(&refs)).await;
+    let s = login(&app, "nosecret").await;
+    // Kanal: Geheimnis setzen oder löschen verboten, ohne Geheimnis nicht an dieser Stelle abgewiesen (erst später 404).
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/notifications/ntfy",
+        &s.h(),
+        Some(json!({"enabled": true, "secret": "TESTWERT-geheim-1234"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    assert!(
+        !r.raw.contains("TESTWERT-geheim"),
+        "Geheimnis in der Antwort"
+    );
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/notifications/ntfy",
+        &s.h(),
+        Some(json!({"enabled": true, "clear_secret": true})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/notifications/ntfy",
+        &s.h(),
+        Some(json!({"enabled": true})),
+    )
+    .await;
+    assert_ne!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    // Quelle: Schlüssel verboten.
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/feeds/nvd",
+        &s.h(),
+        Some(json!({"secret": "TESTWERT-schluessel-12"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/feeds",
+        &s.h(),
+        Some(json!({"type": "nvd", "secret": "TESTWERT-schluessel-12"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
+}
+
+/// Zwei Verwalter löschen sich gleichzeitig gegenseitig: einer bleibt immer übrig (Sperre in der Transaktion).
+#[sqlx::test(migrations = "./migrations")]
+async fn last_local_manager_survives_parallel_deletes(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    let a = mk_manager(&pool, "mgr-a").await;
+    let b = mk_manager(&pool, "mgr-b").await;
+    let sa = login(&app, "mgr-a").await;
+    let sb = login(&app, "mgr-b").await;
+    let del = |app: Router, s: Sess, id: i64, name: &'static str| async move {
+        call(
+            &app,
+            Method::DELETE,
+            &format!("/api/v1/users/{id}"),
+            &s.h(),
+            Some(json!({"confirm_name": name, "confirm_password": PW})),
+        )
+        .await
+        .status
+    };
+    let (r1, r2) = tokio::join!(
+        del(app.clone(), sa, b, "mgr-b"),
+        del(app.clone(), sb, a, "mgr-a")
+    );
+    let alive: i64 = sqlx::query_scalar("SELECT count(*) FROM admin_users WHERE username IN ('mgr-a','mgr-b') AND deleted_at IS NULL AND status = 'active'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(alive >= 1, "beide Verwalter weg: {r1} {r2}");
+    assert!(
+        r1 != StatusCode::NO_CONTENT || r2 != StatusCode::NO_CONTENT,
+        "beide Löschungen gelangen"
+    );
+}
+
+/// Entzug von `users.manage` beim letzten (lokalen) Verwalter wird abgelehnt.
+#[sqlx::test(migrations = "./migrations")]
+async fn revoking_users_manage_from_the_last_manager_is_refused(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    let only = mk_manager(&pool, "only-mgr").await;
+    // Ein zweites, eigenes Konto mit allen Rechten, aber gesperrt (zählt nicht als Verwalter).
+    mk(&pool, "frozen-admin", "admin", "locked").await;
+    mk(&pool, "boss", "admin", "active").await;
+    let a = login(&app, "boss").await;
+    // boss ist Verwalter und lokal: Entzug beim anderen ist erlaubt. Dann boss herabstufen lassen: nicht möglich.
+    let r = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/users/{only}"),
+        &a.h(),
+        Some(json!({"permissions": ["hosts.read"], "confirm_name": "only-mgr", "confirm_password": PW})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    // boss ist nun der einzige Verwalter: ein anderer Verwalter gibt es nicht, also auch kein Weg, ihn herabzustufen; Selbständerung verboten.
+    let boss: i64 = sqlx::query_scalar("SELECT id FROM admin_users WHERE username = 'boss'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let r = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/users/{boss}"),
+        &a.h(),
+        Some(
+            json!({"permissions": ["hosts.read"], "confirm_name": "boss", "confirm_password": PW}),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.raw);
 }
