@@ -85,7 +85,7 @@ test("transfer lines separate wire, unpacked, database and disk", () => {
   const s = stats({ bytes_wire: 4_928_307, bytes_unpacked: 85 * 1024 * 1024, rows_written: 1204 });
   const t = transferLines({ ...s, day: { runs: 3, not_modified: 1, bytes_wire: 9_000_000, bytes_unpacked: 170 * 1024 * 1024, rows_written: 1300, unmeasured: 0 } } as never).map((l) => l.text);
   assert.equal(t[0], "Übertragen 4,7 MB (entpackt 85 MB)");
-  assert.equal(t[1], "Gespeichert in der Datenbank: +1.204 Zeilen");
+  assert.equal(t[1], "Gespeichert in der Datenbank: +1.204 Zeilen geändert");
   assert.equal(t[2], "Temporär auf Platte: 0 B");
   assert.equal(t[3], "Letzte 24 Stunden: 3 Läufe · 1× unverändert (304) · übertragen 8,6 MB · entpackt 170 MB · +1.300 Zeilen");
 });
@@ -93,7 +93,7 @@ test("transfer lines separate wire, unpacked, database and disk", () => {
 test("a 304 shows zero transferred; unknown wire size is said so, never guessed", () => {
   const nm = transferLines(stats({ bytes_wire: 0, bytes_unpacked: 0, rows_written: 0, statuses: { "304": 1 } }) as never).map((l) => l.text);
   assert.equal(nm[0], "Unverändert (304), 0 B übertragen");
-  assert.equal(nm[1], "Gespeichert in der Datenbank: 0 Zeilen");
+  assert.equal(nm[1], "Gespeichert in der Datenbank: keine Zeile geändert");
   const un = transferLines(stats({ bytes_wire: null, bytes_unpacked: 88_000_000, rows_written: 5 }) as never).map((l) => l.text);
   assert.equal(un[0], "Übertragen: nicht messbar (entpackt 83,9 MB)");
   assert.ok(!transferLines({ last: null } as never).length);

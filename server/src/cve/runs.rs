@@ -324,7 +324,12 @@ pub fn report_page_size(n: u32) {
 
 /// Pause, die als Wartezeit des Laufs gezählt wird (Backoff, Retry-After, Seitenpause).
 pub async fn wait(d: Duration) {
-    let _ = SINK.try_with(|s| s.add_wait(d.as_millis() as u64));
+    // Die Wartezeit auf die Gegenstelle (Drosselung, Retry-After, Seitenpause) gehört zu „Herunterladen“, nicht zu
+    // „Verbinden“ oder „Auswerten“; Phasen gehen nie zurück, spätere Phasen bleiben also unberührt.
+    let _ = SINK.try_with(|s| {
+        s.set_phase(Phase::Download);
+        s.add_wait(d.as_millis() as u64)
+    });
     tokio::time::sleep(d).await;
 }
 
@@ -488,14 +493,44 @@ async fn report_loop(pool: PgPool, run_id: i64, sink: Arc<Sink>) {
     }
 }
 
-fn status_of(o: &Outcome) -> &'static str {
+/// Ergebnis eines Laufs (eine Regel für Anzeige und Speicher): Erfolgreich (`ok`, `not_modified`), Teilweise
+/// (`incomplete`: der Lauf brachte Daten, die Quelle hat aber noch offene Arbeit, z. B. Rückstandsabbau oder fehlende
+/// Massendaten), Fehlgeschlagen (`failed`) oder Abgebrochen (`interrupted`, vom Wächter/Neustart gesetzt).
+/// Ein Lauf ohne Fehler ist nur dann „ok“, wenn die Quelle danach nichts Offenes mehr hat; sonst sagte die Zeile
+/// „Erfolgreich“, während die Quelle „Unvollständig“ zeigt.
+fn status_of(o: &Outcome, open_work: bool) -> &'static str {
     match o {
+        Outcome::NotModified | Outcome::Updated { .. } if open_work => "incomplete",
         Outcome::NotModified => "not_modified",
         Outcome::Updated { .. } => "ok",
         Outcome::Incomplete { .. } => "incomplete",
         Outcome::Failed(_) => "failed",
         Outcome::Skipped => "skipped",
     }
+}
+
+/// Hat die Quelle nach dem Lauf noch offene Arbeit: Rückstandsabbau oder (Hybridquellen) unvollständige/abgelaufene Massendaten.
+fn has_open_work(
+    backfill: Option<&serde_json::Value>,
+    bulk: Option<&serde_json::Value>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    if backfill.is_some() {
+        return true;
+    }
+    bulk.and_then(|v| serde_json::from_value::<crate::cve::Bulk>(v.clone()).ok())
+        .is_some_and(|b| !b.complete || b.ok.values().any(|u| *u <= now))
+}
+
+async fn open_work_of(pool: &PgPool, source: &str) -> bool {
+    let row: Option<(Option<serde_json::Value>, Option<serde_json::Value>)> =
+        sqlx::query_as("SELECT backfill, bulk FROM feed_state WHERE source = $1")
+            .bind(source)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.is_some_and(|(b, k)| has_open_work(b.as_ref(), k.as_ref(), chrono::Utc::now()))
 }
 
 fn short(msg: &str) -> String {
@@ -605,9 +640,10 @@ pub async fn execute(state: &AppState, run_id: i64, source: &str) -> Outcome {
     let snap = sink.take(true);
     let final_phase = snap.as_ref().map_or(Phase::Done, |s| s.phase);
 
+    let open_work = open_work_of(&state.pool, source).await;
     let (status, error) = match &outcome {
-        Outcome::Failed(e) => (status_of(&outcome), Some(short(e))),
-        o => (status_of(o), None),
+        Outcome::Failed(e) => (status_of(&outcome, open_work), Some(short(e))),
+        o => (status_of(o, open_work), None),
     };
     let metrics = snap.as_ref().map(|s| s.metrics.clone()).unwrap_or_default();
     let (bytes, items, hosts, phases) = snap
@@ -811,6 +847,40 @@ mod tests {
             current_phase_age().is_none(),
             "außerhalb eines Laufs nichts"
         );
+    }
+
+    #[test]
+    fn run_result_rule_is_consistent_with_open_work() {
+        let upd = Outcome::Updated {
+            changed_rows: 1,
+            events: 0,
+        };
+        assert_eq!(status_of(&upd, false), "ok");
+        // der Fall aus der Oberfläche: Lauf fehlerfrei, Quelle aber noch unvollständig -> nie „ok“
+        assert_eq!(status_of(&upd, true), "incomplete");
+        assert_eq!(status_of(&Outcome::NotModified, true), "incomplete");
+        assert_eq!(status_of(&Outcome::NotModified, false), "not_modified");
+        assert_eq!(status_of(&Outcome::Failed("x".into()), true), "failed");
+        assert!(has_open_work(
+            Some(&serde_json::json!({})),
+            None,
+            chrono::Utc::now()
+        ));
+        assert!(!has_open_work(None, None, chrono::Utc::now()));
+    }
+
+    #[tokio::test]
+    async fn wait_counts_as_download_phase() {
+        let sink = Arc::new(Sink::default());
+        SINK.scope(sink.clone(), async {
+            report_phase(Phase::Connect);
+            wait(Duration::from_millis(1)).await;
+            assert_eq!(current_phase_age().unwrap().0, Phase::Download);
+            report_phase(Phase::Parse);
+            wait(Duration::from_millis(1)).await;
+            assert_eq!(current_phase_age().unwrap().0, Phase::Parse);
+        })
+        .await;
     }
 
     #[test]

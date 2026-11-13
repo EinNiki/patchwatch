@@ -32,7 +32,7 @@ export const PHASE_LABEL: Record<RunPhase, string> = {
   done: "Fertig",
 };
 
-export type StepState = "done" | "active" | "pending" | "failed" | "skipped";
+export type StepState = "done" | "active" | "pending" | "failed" | "skipped" | "partial";
 
 export function isActive(r: Pick<FeedRun, "status">): boolean {
   return r.status === "queued" || r.status === "running";
@@ -86,12 +86,12 @@ export function runText(r: FeedRun, nowMs?: number): string {
     const phase = `${PHASE_LABEL[r.phase]}, ${Math.round(phaseElapsedMs(r, nowMs) / 1000)} s`;
     return since ? `${phase} · läuft ${since}` : phase;
   }
-  if (r.status === "not_modified") return "Unverändert";
-  if (r.status === "incomplete") return "Unvollständig abgeschlossen";
-  if (r.status === "interrupted") return "Unterbrochen (Server beendet oder neu gestartet)";
-  if (isHung(r)) return `Lauf hängt, abgebrochen (bei „${PHASE_LABEL[r.phase]}“)`;
+  if (r.status === "not_modified") return "Erfolgreich beendet, unverändert";
+  if (r.status === "incomplete") return "Teilweise beendet";
+  if (r.status === "interrupted") return "Abgebrochen (Server beendet oder neu gestartet)";
+  if (isHung(r)) return `Abgebrochen, der Lauf hing (bei „${PHASE_LABEL[r.phase]}“)`;
   if (r.status === "failed") return `Fehlgeschlagen bei „${PHASE_LABEL[r.phase]}“`;
-  return "Abgeschlossen";
+  return "Erfolgreich beendet";
 }
 
 /** Zustand jedes Schritts. Fehlschlag: die Phase, in der er auftrat, ist „failed“, danach „pending“. */
@@ -101,6 +101,8 @@ export function stepStates(r: Pick<FeedRun, "status" | "phase">): StepState[] {
     if (r.status === "queued") return "pending";
     if (isFailure(r)) return i < at ? "done" : i === at ? "failed" : "pending";
     if (r.status === "running") return i < at ? "done" : i === at ? "active" : "pending";
+    // Teilweise beendet: alle Schritte liefen, das Ergebnis (letzter Schritt) ist aber nur teilweise (Warnfarbe, nie grün).
+    if (r.status === "incomplete") return i === PHASES.length - 1 ? "partial" : "done";
     // Erfolgreich beendet: alles erledigt (nicht geänderte Quelle überspringt die Zwischenschritte).
     if (r.status === "not_modified" || r.status === "skipped") return i === 0 || i === PHASES.length - 1 ? "done" : "skipped";
     return "done";

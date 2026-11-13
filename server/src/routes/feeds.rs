@@ -28,6 +28,9 @@ struct FeedDb {
     next_attempt_at: Option<DateTime<Utc>>,
     /// Hybridquelle (Ubuntu): Massendaten je Release und stündlicher Abruf (siehe `cve::Bulk`).
     bulk: Option<Value>,
+    /// Zuletzt gespeicherter Zustand und seit wann er gilt (siehe `track_state`).
+    state_label: Option<String>,
+    state_since: Option<DateTime<Utc>>,
 }
 
 /// Fortschritt eines Rückstandsabbaus oder Erstabrufs für die Feed-Tabelle.
@@ -241,6 +244,8 @@ pub struct FeedRow {
     last_success_at: Option<DateTime<Utc>>,
     /// Seit wann die Daten dieser Quelle veraltet sind (= letzter erfolgreicher Abruf).
     stale_since: Option<DateTime<Utc>>,
+    /// Seit wann der Zustand `state` gilt; ändert sich nur bei einem Zustandswechsel (nicht bei jedem Lauf).
+    state_since: Option<DateTime<Utc>>,
     last_error: Option<String>,
     last_error_at: Option<DateTime<Utc>>,
     consecutive_failures: i32,
@@ -325,13 +330,49 @@ fn classify(
     }
 }
 
+/// Zustandswechsel für `state_since`: gleicher Zustand behält seinen Zeitpunkt, ein neuer Zustand beginnt jetzt.
+/// Ohne gespeicherten Zeitpunkt (Altbestand) beginnt er bei der ersten Beobachtung.
+pub(crate) fn next_state_since(
+    stored_label: Option<&str>,
+    stored_since: Option<DateTime<Utc>>,
+    label: &str,
+    now: DateTime<Utc>,
+) -> (bool, DateTime<Utc>) {
+    // Auf Mikrosekunden kürzen wie die Datenbank, damit der gespeicherte und der gelieferte Wert gleich sind.
+    match (stored_label, stored_since) {
+        (Some(l), Some(t)) if l == label => (false, t),
+        _ => (true, chrono::SubsecRound::trunc_subsecs(now, 6)),
+    }
+}
+
+/// Liefert den „seit“-Zeitpunkt des Zustands und speichert einen Wechsel (nur wenn die Quelle schon einen Zustandssatz hat).
+async fn track_state(
+    pool: &sqlx::PgPool,
+    f: &FeedDb,
+    label: &str,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let (changed, since) = next_state_since(f.state_label.as_deref(), f.state_since, label, now);
+    if changed {
+        let _ = sqlx::query(
+            "UPDATE feed_state SET state_label = $2, state_since = $3 WHERE source = $1",
+        )
+        .bind(&f.source)
+        .bind(label)
+        .bind(since)
+        .execute(pool)
+        .await;
+    }
+    Some(since)
+}
+
 pub async fn list(
     _: Authed<authz::p::SourcesRead>,
     State(st): State<AppState>,
 ) -> ApiResult<Json<Vec<FeedRow>>> {
     let sources = sources::list(&st).await?;
     let rows: Vec<FeedDb> = sqlx::query_as(
-        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill, retry_step, next_attempt_at, bulk FROM feed_state",
+        "SELECT source, last_attempt_at, last_success_at, last_error, last_error_at, consecutive_failures, backfill, retry_step, next_attempt_at, bulk, state_label, state_since FROM feed_state",
     )
     .fetch_all(&st.pool)
     .await?;
@@ -354,11 +395,14 @@ pub async fn list(
             retry_step: 0,
             next_attempt_at: None,
             bulk: None,
+            state_label: None,
+            state_since: None,
         };
         let f = f.unwrap_or(&empty);
         let interval = crate::schedule::feed_interval_minutes(&st.pool, &src.id, default).await;
         // Ohne Erfolg seit 3 Intervallen gilt ein Feed auch dann als veraltet, wenn kein Fehler gespeichert wurde.
         let (state, stale_since) = classify(f, src.enabled, now, Duration::minutes(3 * interval));
+        let state_since = track_state(&st.pool, f, state, now).await;
         // Nächster Versuch: nach einem Fehllauf die Leiter, sonst letzter Versuch + Intervall (höchstens so lange).
         let by_interval = f.last_attempt_at.map(|t| t + Duration::minutes(interval));
         let next_attempt_at = if src.enabled {
@@ -400,6 +444,7 @@ pub async fn list(
             healthy: state == "ok",
             state,
             stale_since,
+            state_since,
             last_attempt_at: f.last_attempt_at,
             last_success_at: f.last_success_at,
             last_error: f.last_error.clone(),
@@ -1037,9 +1082,32 @@ mod tests {
                 retry_step: 0,
                 next_attempt_at: None,
                 bulk: None,
+                state_label: None,
+                state_since: None,
             },
             now,
         )
+    }
+
+    #[test]
+    fn state_since_changes_only_when_the_state_changes() {
+        let t0 = Utc::now() - Duration::hours(5);
+        let now = chrono::SubsecRound::trunc_subsecs(Utc::now(), 6);
+        // gleicher Zustand: Zeitpunkt bleibt, auch nach vielen Läufen
+        assert_eq!(
+            next_state_since(Some("incomplete"), Some(t0), "incomplete", now),
+            (false, t0)
+        );
+        // Wechsel: neuer Zeitpunkt
+        assert_eq!(
+            next_state_since(Some("incomplete"), Some(t0), "ok", now),
+            (true, now)
+        );
+        // Altbestand ohne Zustandssatz: beginnt bei der ersten Beobachtung
+        assert_eq!(
+            next_state_since(None, None, "ok", now),
+            (true, chrono::SubsecRound::trunc_subsecs(now, 6))
+        );
     }
 
     #[test]

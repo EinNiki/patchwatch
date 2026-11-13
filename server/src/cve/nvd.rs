@@ -183,7 +183,7 @@ impl CveSource for Nvd {
         let mut records = Vec::new();
         for (i, id) in todo.iter().enumerate() {
             if i > 0 {
-                tokio::time::sleep(self.pause).await;
+                crate::cve::runs::wait(self.pause).await;
             }
             let url = format!("{}?cveId={id}", self.base);
             let key = self.key.as_deref();

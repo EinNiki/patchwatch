@@ -50,7 +50,7 @@ test("a running run shows how long it runs; a hung, aborted one says so (differe
   assert.equal(runText(running, start + 30_000), "Verbinden, 30 s · läuft seit 30 Sekunden");
   const hung = run({ status: "failed", phase: "connect", error: "Zeitüberschreitung beim Verbinden", finished_at: "2026-11-07T10:02:30Z" });
   assert.ok(isHung(hung));
-  assert.equal(runText(hung, start), "Lauf hängt, abgebrochen (bei „Verbinden“)");
+  assert.equal(runText(hung, start), "Abgebrochen, der Lauf hing (bei „Verbinden“)");
   assert.ok(!runText(hung, start).includes("läuft"));
   // Ein gewöhnlicher Fehlschlag ist kein hängender Lauf.
   const failed = run({ status: "failed", phase: "download", error: "HTTP 503" });
@@ -62,7 +62,7 @@ test("after a restart the orphaned run is interrupted: nothing active, no spinne
   const orphan = run({ status: "interrupted", phase: "download", error: "Der Lauf wurde unterbrochen (Server beendet oder neu gestartet)." });
   assert.ok(!stepStates(orphan).includes("active"));
   assert.equal(stepStates(orphan)[1], "failed");
-  assert.match(runText(orphan), /Unterbrochen/);
+  assert.match(runText(orphan), /Abgebrochen/);
   assert.ok(!runText(orphan).includes("läuft"));
   // Ein verspätetes Live-Ereignis macht ihn nicht wieder lebendig.
   const out = applyLive([orphan], { run_id: 1, status: "running", phase: "parse" });
@@ -89,4 +89,21 @@ test("phase time counts from the finished phases; slow means more than 3x the me
   assert.equal(isSlow(r, start + 22_000, undefined), false, "ohne Vergleichswert keine Warnung");
   assert.equal(isSlow({ ...r, status: "failed" }, start + 22_000, med), false);
   assert.equal(isSlow({ ...r, phase: "parse" }, start + 22_000, { download: 5000 }), false, "nur die Phase mit Median zählt");
+});
+
+test("Laufergebnis: vier Ergebnisse, kein „Abgeschlossen“", () => {
+  const base = { id: 1, source: "ubuntu", trigger: "manual", started_by: null, phase: "done", created_at: "2026-01-01T00:00:00Z", started_at: "2026-01-01T00:00:00Z", finished_at: "2026-01-01T00:01:00Z", bytes: 0, items: null, hosts: null, error: null, phases: {} } as const;
+  const text = (status: FeedRun["status"], error: string | null = null) => runText({ ...base, status, error } as FeedRun);
+  assert.equal(text("ok"), "Erfolgreich beendet");
+  assert.equal(text("not_modified"), "Erfolgreich beendet, unverändert");
+  assert.equal(text("incomplete"), "Teilweise beendet");
+  assert.match(text("failed", "HTTP 500"), /^Fehlgeschlagen/);
+  assert.match(text("interrupted"), /^Abgebrochen/);
+  for (const s of ["ok", "not_modified", "incomplete", "failed", "interrupted"] as const) assert.ok(!/Abgeschlossen/.test(text(s)), s);
+});
+
+test("Stepper: teilweise beendeter Lauf ist nie ganz grün (letzter Schritt „partial“), erfolgreicher schon", () => {
+  assert.equal(stepStates({ status: "incomplete", phase: "done" }).at(-1), "partial");
+  assert.ok(stepStates({ status: "incomplete", phase: "done" }).slice(0, -1).every((s) => s === "done"));
+  assert.ok(stepStates({ status: "ok", phase: "done" }).every((s) => s === "done"));
 });

@@ -93,7 +93,7 @@ try {
     const samples = await sampling;
     const d = deviations(samples);
     const lastTexts = await page.getByRole("table", { name: "Zustand der CVE-Quellen" }).innerText();
-    ok(/Abgeschlossen|Fertig/.test(lastTexts), `${label}: der Lauf wurde bis zum Ende angezeigt`);
+    ok(/Erfolgreich beendet|Teilweise beendet|Fertig/.test(lastTexts), `${label}: der Lauf wurde bis zum Ende angezeigt`);
     if (process.env.REPORT) {
       const f0 = new Map(samples[0].cols.map(([k, x, ww]) => [k, [x, ww]]));
       const per = new Map();

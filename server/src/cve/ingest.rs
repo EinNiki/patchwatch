@@ -251,7 +251,9 @@ pub async fn ingest_with(
             "INSERT INTO cve_source_status (cve_id, source, release, package, status, fix_version, raw, source_id) \
              SELECT c, $1, r, p, s, f, w::jsonb, $8 FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) AS t(c, r, p, s, f, w) \
              ON CONFLICT (cve_id, source, release, package) DO UPDATE SET status = EXCLUDED.status, \
-               fix_version = EXCLUDED.fix_version, raw = EXCLUDED.raw, source_id = EXCLUDED.source_id, updated_at = now()",
+               fix_version = EXCLUDED.fix_version, raw = EXCLUDED.raw, source_id = EXCLUDED.source_id, updated_at = now() \
+             WHERE (cve_source_status.status, cve_source_status.fix_version, cve_source_status.raw, cve_source_status.source_id) \
+               IS DISTINCT FROM (EXCLUDED.status, EXCLUDED.fix_version, EXCLUDED.raw, EXCLUDED.source_id)",
         )
         .bind(source)
         .bind(chunk.iter().map(|(r, _)| r.cve_id.clone()).collect::<Vec<_>>())

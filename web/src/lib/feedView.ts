@@ -140,7 +140,7 @@ export function transferLines(stats: FeedRunStats): DetailLine[] {
     out.push({ key: "transfer", tone: "muted", text: `Übertragen: nicht messbar (entpackt ${byteSize(unpacked)})` });
   }
   if (last.rows_written != null) {
-    out.push({ key: "stored", tone: "muted", text: `Gespeichert in der Datenbank: ${last.rows_written > 0 ? "+" : ""}${num(last.rows_written)} ${last.rows_written === 1 ? "Zeile" : "Zeilen"}` });
+    out.push({ key: "stored", tone: "muted", text: last.rows_written === 0 ? "Gespeichert in der Datenbank: keine Zeile geändert" : `Gespeichert in der Datenbank: +${num(last.rows_written)} ${last.rows_written === 1 ? "Zeile" : "Zeilen"} geändert` });
   }
   out.push({ key: "disk", tone: "muted", text: "Temporär auf Platte: 0 B" });
   const d = stats.day;

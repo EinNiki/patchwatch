@@ -6954,3 +6954,68 @@ async fn changed_source_address_discards_the_key_and_the_mock_never_sees_it(pool
     assert!(calls.iter().all(|l| l.ends_with("key=-")), "{calls:?}");
     assert!(log.iter().all(|l| !l.contains(KEYTXT)));
 }
+
+/// Laufergebnis und Quellenzustand passen zusammen, und „seit“ ändert sich nur beim Zustandswechsel: solange der Rückstand
+/// abgebaut wird, meldet jeder Lauf „Teilweise“ (nie „Erfolgreich“), die Quelle bleibt „unvollständig“ mit demselben
+/// „seit“-Zeitpunkt; erst der Lauf, der die Lücke schließt, ist „Erfolgreich“ und setzt „seit“ neu.
+#[sqlx::test(migrations = "./migrations")]
+async fn run_result_and_state_since_follow_the_state_change(pool: PgPool) {
+    use patchwatch_server::cve::runs;
+    let mock: Shared = Arc::default();
+    let base = start_mock(mock.clone()).await;
+    let st = setup(pool.clone(), &["ubuntu"], "ubuntu_max_pages = 2", &base).await;
+    let app = patchwatch_server::router(st.clone());
+    let h = login(&app, &pool).await;
+    let now = Utc::now();
+    async fn run_once(st: &AppState, pool: &PgPool) -> String {
+        let runs::Start::Created(id) = runs::start(pool, "ubuntu", runs::Trigger::Manual, None)
+            .await
+            .unwrap()
+        else {
+            panic!("Lauf nicht angelegt");
+        };
+        runs::execute(st, id, "ubuntu").await;
+        runs::get(pool, id).await.unwrap().unwrap().status
+    }
+    mock.lock().unwrap().ubuntu = ubuntu_batch(1, 20, now - Duration::hours(10));
+    assert_eq!(run_once(&st, &pool).await, "ok");
+    let f = ubuntu_feed(&app, &h).await;
+    assert_eq!(f["state"], "ok");
+    let ok_since = f["state_since"].as_str().unwrap().to_owned();
+
+    {
+        let mut m = mock.lock().unwrap();
+        let mut list = ubuntu_batch(2, 130, now - Duration::hours(1));
+        list.extend(m.ubuntu.clone());
+        m.ubuntu = list;
+    }
+    let mut since: Option<String> = None;
+    for n in 1..=12 {
+        let status = run_once(&st, &pool).await;
+        let f = ubuntu_feed(&app, &h).await;
+        if f["state"] == "incomplete" {
+            assert_eq!(
+                status, "incomplete",
+                "Lauf {n}: Quelle unvollständig, Lauf nie „ok“"
+            );
+            let s = f["state_since"].as_str().unwrap().to_owned();
+            assert_ne!(s, ok_since, "Wechsel ok -> unvollständig setzt „seit“ neu");
+            if let Some(prev) = &since {
+                assert_eq!(&s, prev, "Lauf {n}: „seit“ bleibt ohne Zustandswechsel");
+            }
+            since = Some(s);
+        } else {
+            assert_eq!(f["state"], "ok");
+            assert_eq!(
+                status, "ok",
+                "Lauf {n}: Lücke geschlossen, Lauf erfolgreich"
+            );
+            assert_ne!(
+                f["state_since"].as_str().unwrap(),
+                since.as_deref().unwrap()
+            );
+            return;
+        }
+    }
+    panic!("Rückstand wird nicht abgebaut");
+}

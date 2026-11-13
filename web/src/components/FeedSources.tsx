@@ -336,7 +336,7 @@ export function FeedSources() {
                   </td>
                   <td className="cell-status lead max-lg:flex-[1_0_100%]!">
                     <StatusBadge info={FEED_STATE[f.state]} />
-                    {(f.state === "stale" || f.state === "incomplete") && f.stale_since ? <span className="block w-full text-xs text-fg3">seit {absTime(f.stale_since)}</span> : null}
+                    {(f.state === "stale" || f.state === "incomplete") && f.state_since ? <span className="block w-full text-xs text-fg3">seit {absTime(f.state_since)}</span> : null}
                     {errorChip(f) ? <StatusBadge info={errorChip(f)!} /> : null}
                     {errorLine(f) ? <p className="w-full max-w-[28rem] text-xs text-warn">{errorLine(f)}</p> : null}
                     {latest.get(f.source) ? <MiniStepper run={latest.get(f.source)!} open={expanded(latest.get(f.source))} onToggle={() => toggleRun(latest.get(f.source)!)} /> : null}

@@ -252,6 +252,8 @@ export interface Feed {
   last_attempt_at: string | null;
   last_success_at: string | null;
   stale_since: string | null;
+  /** Seit wann der Zustand gilt; ändert sich nur bei einem Zustandswechsel. */
+  state_since: string | null;
   last_error: string | null;
   last_error_at: string | null;
   consecutive_failures: number;

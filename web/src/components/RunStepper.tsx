@@ -22,6 +22,13 @@ function StepIcon({ state }: { state: StepState }) {
         <path d="M5.8 5.8 10.2 10.2M10.2 5.8 5.8 10.2" />
       </svg>
     );
+  if (state === "partial")
+    return (
+      <svg {...common}>
+        <circle cx="8" cy="8" r="6.5" fill="currentColor" fillOpacity="0.15" />
+        <path d="M8 4.8v4M8 11.2v.1" />
+      </svg>
+    );
   if (state === "skipped")
     return (
       <svg {...common}>
@@ -47,11 +54,12 @@ const TONE: Record<StepState, string> = {
   done: "text-ok",
   active: "text-accent",
   failed: "text-crit",
+  partial: "text-warn",
   skipped: "text-fg3",
   pending: "text-fg3",
 };
 
-const STATE_WORD: Record<StepState, string> = { done: "erledigt", active: "läuft", failed: "fehlgeschlagen", skipped: "übersprungen", pending: "ausstehend" };
+const STATE_WORD: Record<StepState, string> = { done: "erledigt", active: "läuft", failed: "fehlgeschlagen", partial: "teilweise", skipped: "übersprungen", pending: "ausstehend" };
 
 /** Sekundentakt, solange ein Lauf aktiv ist (für „läuft seit N Sekunden“); sonst kein Timer. */
 function useNow(active: boolean): number {
