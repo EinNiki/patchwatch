@@ -26,7 +26,8 @@ function scan() {
       const x = r.left + r.width * fx, y = r.top + r.height * fy;
       if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
       const h = document.elementFromPoint(x, y);
-      if (h && !(h === e || e.contains(h) || h.contains(e) || h.closest("label") === e.closest("label") && e.closest("label"))) { stolenBy = (h.closest(SEL) ?? h).tagName + ":" + name(h.closest(SEL) ?? h); break; }
+      // Bewusste Überlagerung: das Aufklappsymbol der Seitenleiste (data-hit-overlay) liegt über dem Auffüllrand seines Links.
+      if (h && !h.closest("[data-hit-overlay]") && !(h === e || e.contains(h) || h.contains(e) || h.closest("label") === e.closest("label") && e.closest("label"))) { stolenBy = (h.closest(SEL) ?? h).tagName + ":" + name(h.closest(SEL) ?? h); break; }
     }
     // (2) Trefferfläche: Raster ±30 px, Schritt 1 px; Ausdehnung der Treffer pro Achse.
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -47,6 +48,7 @@ function scan() {
   for (let i = 0; i < ext.length; i++) for (let j = i + 1; j < ext.length; j++) {
     const a = ext[i], b = ext[j];
     if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+    if (a.e.hasAttribute("data-hit-overlay") || b.e.hasAttribute("data-hit-overlay")) continue;
     if (Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5 && (a.e.tagName === "BUTTON" || b.e.tagName === "BUTTON")) overlaps.push(name(a.e) + " ↔ " + name(b.e));
   }
   return { items: out, overlaps, overflow: document.documentElement.scrollWidth - innerWidth };

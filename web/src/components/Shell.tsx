@@ -211,7 +211,7 @@ function NavLinks({ pathname }: { pathname: string }) {
               <Link
                 href={n.href}
                 aria-current={exactNotifications || (active && !isGroup) ? "page" : undefined}
-                className={`${rowBase} font-semibold ${rowState(active && !(isGroup && onSub))} ${isGroup ? "pr-6 rail:pr-3" : ""} ${isGroup && onSub ? "text-fg" : ""}`}
+                className={`${rowBase} font-semibold ${rowState(active && !(isGroup && onSub))} ${isGroup ? "pr-9 rail:pr-3" : ""} ${isGroup && onSub ? "text-fg" : ""}`}
               >
                 <span className={ICON}>
                   <NavIcon name={n.icon} />
@@ -224,6 +224,7 @@ function NavLinks({ pathname }: { pathname: string }) {
               {isGroup ? (
                 <button
                   type="button"
+                  data-hit-overlay=""
                   aria-expanded={expanded}
                   aria-controls={subId}
                   aria-label={`${n.label}: Kanäle ${expanded ? "ausblenden" : "einblenden"}`}

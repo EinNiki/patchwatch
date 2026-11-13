@@ -926,6 +926,14 @@ button[data-hit="none"] {
   --hit-x: 0px;
   --hit-y: 0px;
 }
+:where([data-hit="none"]) button::before,
+button[data-hit="none"]::before {
+  inset: 0;
+}
+/* Quellentabelle: Knöpfe stehen dicht übereinander (Details, Bearbeiten), nur 2 px vertikale Erweiterung. */
+:where([data-t="feeds"]) button {
+  --hit-y: 2px;
+}
 /* Tabs liegen mit 4 px Abstand nebeneinander: seitlich 2 px; Sortierköpfe sind niedrig, die Kopfzeile ist 44 px hoch. */
 [role="tab"] {
   --hit-x: 2px;
@@ -941,6 +949,17 @@ aside button,
 [role="listbox"] button {
   --hit-x: 0px;
   --hit-y: 0px;
+}
+/* Ohne Erweiterung deckt die Fläche genau den Knopf (keine 1 px Rahmenkompensation, die den Nachbarn überlappen würde). */
+aside button::before,
+[aria-label="Kennzahlen"] button::before,
+[role="menu"] button::before,
+[role="listbox"] button::before {
+  inset: 0;
+}
+/* Auswahlfelder stehen eng über Tabellenköpfen: nur 2 px vertikal, damit die Flächen nicht in die Sortierknöpfe ragen. */
+button[data-select] {
+  --hit-y: 2px;
 }
 @media (hover: hover) {
   button:not(:disabled):active {

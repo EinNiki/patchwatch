@@ -181,7 +181,9 @@ export function Select({
         onKeyDown={onKey}
         className={`inline-flex min-h-8 w-full items-center justify-between gap-2 rounded-[3px] border border-control bg-sunk px-2 text-left text-sm font-normal text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11 ${className}`}
       >
-        <span className="min-w-0 truncate">{current >= 0 ? opts[current].label : ""}</span>
+        <span className="min-w-0 truncate" title={current >= 0 ? opts[current].label : undefined}>
+          {current >= 0 ? opts[current].label : ""}
+        </span>
         <NavIcon name="chevron" size={14} />
       </button>
       {open && box ? (

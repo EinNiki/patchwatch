@@ -63,8 +63,12 @@ for (const scheme of ["light", "dark"]) {
     await page.getByRole("button", { name: "Agent hinzufügen" }).first().click();
     await scan(page, `/agents (Dialog) ${vpName}/${scheme}`);
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Weitere Aktionen für web-01" }).click();
-    await scan(page, `/agents (Zeilenmenü) ${vpName}/${scheme}`);
+    // Die Aktionen stehen nebeneinander; das Zeilenmenü gibt es nur, wenn die Zelle zu schmal ist (Stufe 3 der ActionCell).
+    const more = page.getByRole("button", { name: "Weitere Aktionen für web-01" });
+    if (await more.count()) {
+      await more.click();
+      await scan(page, `/agents (Zeilenmenü) ${vpName}/${scheme}`);
+    }
     await page.getByRole("button", { name: "Agent web-01 löschen" }).click();
     await scan(page, `/agents (Bestätigung) ${vpName}/${scheme}`);
     await page.keyboard.press("Escape");

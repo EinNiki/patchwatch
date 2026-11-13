@@ -653,7 +653,7 @@ function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number
       </span>
     );
   }
-  const chip = "inline-flex h-(--chip-h) max-w-32 items-center gap-1 rounded-xs border border-line bg-sunk px-1.5 text-xs no-underline hover:border-accent hover:text-accent max-md:min-h-11 max-md:max-w-28 max-md:px-2";
+  const chip = "inline-flex h-(--chip-h) max-w-[min(8rem,100%)] items-center gap-1 rounded-xs border border-line bg-sunk px-1.5 text-xs no-underline hover:border-accent hover:text-accent max-md:min-h-11 max-md:max-w-[min(7rem,100%)] max-md:px-2";
   const hostLink = (n: string, cls: string) => {
     const id = ids.get(n);
     const label = `${n}: ${state ? state.text : "betroffen"}`;
@@ -691,6 +691,7 @@ function HostChips({ c, ids }: { c: CveListItem; ids: ReadonlyMap<string, number
             trigger={(t) => (
               <button
                 type="button"
+                data-hit="none"
                 ref={t.ref}
                 aria-haspopup={t["aria-haspopup"]}
                 aria-expanded={t["aria-expanded"]}

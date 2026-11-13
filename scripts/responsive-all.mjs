@@ -89,7 +89,27 @@ function inspect({ narrow, wide1024 }) {
   for (const el of textBoxes) {
     const r = rectOf(el);
     if (!r || getComputedStyle(el).display === "inline") continue;
-    if (el.scrollWidth > el.clientWidth + 1) {
+    // Knöpfe haben ein ::before für die erweiterte Trefferfläche, das in scrollWidth mitzählt (Fehlalarm): dort wird die
+    // tatsächliche Breite des Inhalts (Range) mit dem Knopf verglichen.
+    let cut = el.scrollWidth > el.clientWidth + 1;
+    if (cut && el.matches('button, [role="button"], summary')) {
+      // Nur sichtbarer Text: verborgene Hilfstexte (sr-only, absolut positioniert) zählen nicht.
+      const br = el.getBoundingClientRect();
+      let over = false;
+      const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        if (!n.textContent.trim()) continue;
+        const pe = n.parentElement;
+        if (pe && pe.closest("[class*=\"sr-only\"]") && el.contains(pe.closest("[class*=\"sr-only\"]"))) continue;
+        if (pe && getComputedStyle(pe).position === "absolute") continue;
+        const rg = document.createRange();
+        rg.selectNodeContents(n);
+        const cr = rg.getBoundingClientRect();
+        if (cr.width > 0 && (cr.right > br.right + 1 || cr.left < br.left - 1)) over = true;
+      }
+      cut = over;
+    }
+    if (cut) {
       const cs = getComputedStyle(el);
       // A6: Icon-Rail (768–1023 px) blendet Beschriftungen per opacity:0 aus; der Name bleibt im Link/Knopf lesbar.
       const railHidden = [...el.children].some((c) => c.textContent.trim() && getComputedStyle(c).opacity === "0");
@@ -228,6 +248,9 @@ const GROUPS = {
   agents: { states: [
     { name: "Agents Liste", path: "/agents" },
     { name: "Agents …-Menü offen", path: "/agents", shift: false, prep: async (page) => {
+      // Das Zeilenmenü gibt es nur bei zu schmaler Aktionszelle (Stufe 3); sonst stehen die Knöpfe nebeneinander.
+      await page.locator("[data-action-cell]").first().waitFor();
+      if (!(await first(page).count())) return "skip";
       await first(page).click();
       await page.getByRole("dialog", { name: /^Weitere Aktionen für / }).waitFor();
     } },

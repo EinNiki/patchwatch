@@ -82,7 +82,7 @@ function DetailsCell({ feed, open, onToggle }: { feed: Feed; open: boolean; onTo
         ))}
       </div>
       {lines.length > VISIBLE_DETAIL_LINES ? (
-        <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} aria-label={`${feed.label}: Details ${open ? "ausblenden" : "anzeigen"}`} className="inline-flex min-h-6 items-center self-start text-accent underline-offset-2 hover:underline max-lg:min-h-11">
+        <button type="button" data-hit="none" onClick={onToggle} aria-expanded={open} aria-controls={id} aria-label={`${feed.label}: Details ${open ? "ausblenden" : "anzeigen"}`} className="inline-flex min-h-6 items-center self-start text-accent underline-offset-2 hover:underline max-lg:min-h-11">
           {open ? "Details ausblenden" : "Details anzeigen"}
         </button>
       ) : null}
@@ -304,7 +304,7 @@ export function FeedSources() {
         <Empty title="Keine CVE-Quelle eingerichtet">Füge eine Quelle hinzu oder setze <Mono>PATCHWATCH_CVE_SOURCES</Mono> in der Server-Konfiguration.</Empty>
       ) : (
         <div id="feeds-table">
-        <div>
+        <div className="@container/tbl">
           {/* Spalten nach Anteilen bei fester Breite (siehe .dist1024): Zähler und Laufmeldungen ändern sich im Sekundentakt und dürfen die
               Spalten nicht verschieben. Unter 1024 px erscheint jede Quelle als Karte. */}
           <table data-t="feeds" className="tbl stack-lg dist1024 lg:[--tbl-min:46rem] hd:[table-layout:fixed] hd:[--tbl-min:59.5rem]">
