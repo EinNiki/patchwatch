@@ -7,7 +7,7 @@ import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { CVE_STATUS } from "@/lib/status";
 import type { CveDetail } from "@/lib/types";
-import { ChipLegend, distroName, DistroChip, Marker } from "@/components/DistroChip";
+import { distroName, DistroChip, Marker } from "@/components/DistroChip";
 import { NavIcon } from "@/components/Icons";
 import { PageHeader } from "@/components/PageHeader";
 import { RelTime } from "@/components/RelTime";
@@ -72,7 +72,6 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               </details>
             ) : null}
-            <ChipLegend />
           </>
         )}
       </section>

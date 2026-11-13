@@ -62,19 +62,6 @@ export function DistroChip({ d }: { d: Distro }) {
   );
 }
 
-/**
- * Legende zu den Chips in einer Zeile. Sie erscheint nur, wenn auf der Seite ein abgesetzter Chip steht
- * (`data-outside="yes"`), per CSS `:has()`.
- */
-export function ChipLegend() {
-  return (
-    <p className="chip-legend mt-2 hidden items-center gap-1.5 text-xs text-fg3" role="note">
-      <span className="inline-block h-3 w-6 rounded-xs border border-dashed border-line bg-sunk" aria-hidden="true" />
-      Gestrichelt: Release läuft auf keinem deiner Hosts
-    </p>
-  );
-}
-
 const TONE_TEXT: Record<Tone, string> = { ok: "text-ok", warn: "text-warn", crit: "text-crit", unknown: "text-unknown" };
 
 /** Gedämpfter Marker (Umriss statt Fläche), z. B. „Watchlist“, „Proxmox“. Gleiche Höhe wie die Chips. */

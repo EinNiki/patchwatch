@@ -852,11 +852,6 @@ summary {
   }
 }
 
-/* Chip-Legende nur zeigen, wenn die Seite einen abgesetzten (außerhalb des Umfangs liegenden) Chip enthält. */
-main:has([data-outside="yes"]) .chip-legend {
-  display: flex;
-}
-
 /* Abruf-Stepper: drehender Ring und pulsierendes Segment; bei prefers-reduced-motion stehen beide still. */
 .run-spin {
   animation: run-spin 0.9s linear infinite;

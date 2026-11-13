@@ -242,4 +242,33 @@ if (want("A4")) {
   ok((await g.page.evaluate(async () => (await window.axe.run(document)).violations.filter((v) => ["serious", "critical"].includes(v.impact)).map((v) => v.id))).length === 0, "A4: axe Hostliste");
   await g.ctx.close();
 }
+
+if (want("A5")) {
+  const { ctx, page } = await open(1440, 900);
+  const list = await page.evaluate(() => fetch("/api/v1/cves?limit=200").then((r) => r.json()).catch(() => []));
+  const ids = (Array.isArray(list) ? list : list.items ?? []).map((c) => c.id).slice(0, 6);
+  const texts = async () => page.evaluate(() => [document.body.innerText, ...[...document.querySelectorAll("[title],[aria-label]")].flatMap((e) => [e.title, e.getAttribute("aria-label")])].join("\n"));
+  for (const [w, scheme] of [[1440, "light"], [1440, "dark"], [390, "light"]]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.goto(`${base}/cves`);
+    await page.locator("table.tbl").nth(1).waitFor().catch(() => {});
+    await page.waitForTimeout(800);
+    ok(!/Gestrichelt/.test(await texts()), `A5 /cves ${w}px ${scheme}: keine Legende „Gestrichelt“`);
+    const more = page.locator("summary", { hasText: /weitere Releases/ });
+    if (await more.count()) { await more.first().click(); ok(!/Gestrichelt/.test(await texts()), `A5 /cves ${w}px: auch aufgeklappt`); }
+    for (const id of ids) {
+      await page.goto(`${base}/cves/${id}`);
+      await page.locator("h1").first().waitFor();
+      await page.waitForTimeout(500);
+      let t = await texts();
+      ok(!/Gestrichelt/.test(t), `A5 ${id} ${w}px ${scheme}: zugeklappt ohne Legende`);
+      for (const sm of await page.locator("summary").all()) await sm.click().catch(() => {});
+      t = await texts();
+      ok(!/Gestrichelt/.test(t), `A5 ${id} ${w}px ${scheme}: aufgeklappt ohne Legende`);
+    }
+  }
+  console.log("INFO A5 geprüfte CVE-Seiten:", ids.length);
+  await ctx.close();
+}
 await browser.close();

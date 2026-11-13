@@ -30,3 +30,13 @@ test("PageHeader nimmt keine Knöpfe entgegen", () => {
   const sig = s.slice(s.indexOf("export function PageHeader"), s.indexOf("return", s.indexOf("export function PageHeader")));
   assert.doesNotMatch(sig, /children|actions/);
 });
+
+test("Entfernte Texte stehen nirgends mehr im Quelltext der Oberfläche", () => {
+  const files: string[] = [];
+  const walk = (d: string) => readdirSync(d).forEach((n) => { const p = join(d, n); statSync(p).isDirectory() ? walk(p) : /\.(tsx?|css)$/.test(n) && files.push(p); });
+  walk("src");
+  for (const f of files) {
+    const s = readFileSync(f, "utf8");
+    assert.doesNotMatch(s, /Gestrichelt:/, `${f}: Legende „Gestrichelt: …“`);
+  }
+});

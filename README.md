@@ -346,8 +346,8 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
   aber in Security gefixt ist, zählt als „gefixt“.
 - **offen** = mindestens ein Release auf einem deiner Hosts hat einen Chip „verwundbar“ oder „Fix angekündigt“. Bei Debian:
   weder Security noch Archiv enthält die Fix-Version (z. B. nur in einem Zwischenarchiv).
-- Chips anderer Releases (Release läuft auf keinem deiner Hosts) sind gestrichelt und gedämpft; die Legende darüber
-  erscheint nur, wenn ein solcher Chip auf der Seite steht.
+- Chips anderer Releases (Release läuft auf keinem deiner Hosts) sind gestrichelt und gedämpft; eine Legende
+  dazu gibt es nicht (die Erklärung steht im Tooltip).
 - **egal** = keine Bedingung. Debian und Ubuntu sind mit **UND** verknüpft.
 - **Fester Bezug auf deine Hosts** (kein Auswahlfeld mehr): Die Filter „Debian/Ubuntu gefixt/offen“ und „Betrifft meine Hosts“
   beziehen sich ausschließlich auf Releases, die auf mindestens einem Host laufen. In der Spalte „Distributionen“ stehen zuerst
