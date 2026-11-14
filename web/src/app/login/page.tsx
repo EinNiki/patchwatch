@@ -19,7 +19,6 @@ const RINGS: { k: number; period: number; icons: string[] }[] = [
 ];
 
 const ICON = 40; // Durchmesser in px
-const MARGIN = 26; // Mindestabstand zum Fensterrand
 
 /** Startwinkel eines Logos auf seiner Bahn. */
 const baseAngle = (ri: number, i: number) => (i / RINGS[ri]!.icons.length) * Math.PI * 2 + ri;
@@ -46,10 +45,9 @@ function Orbits() {
     let drag: { i: number; id: number; gx: number; gy: number; px: number; py: number } | null = null;
 
     const radius = (ri: number) => {
-      const m = Math.min(size.w, size.h);
-      const r = RINGS[ri]!.k * m;
-      // Schmale Fenster (Handy): Bahn bleibt komplett im Bild.
-      return size.w < 768 ? Math.min(r, m / 2 - MARGIN) : r;
+      // Handy (hochkant): Radius nach der Höhe, damit die Logos oben und unten neben der Karte laufen statt dahinter.
+      const m = size.w < 768 ? size.h : Math.min(size.w, size.h);
+      return RINGS[ri]!.k * m;
     };
 
     const rel = (e: PointerEvent, gx: number, gy: number) => {
@@ -145,7 +143,11 @@ function Orbits() {
           s.x = Math.cos(s.theta) * R;
           s.y = Math.sin(s.theta) * R;
         }
-        // Abprallen an den Fensterrändern.
+        // Abprallen an den Fensterrändern (nur beim Ziehen/Fliegen; im Umlauf dürfen Logos seitlich aus dem Bild laufen).
+        if (!drag && !s.free) {
+          c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0)`;
+          return;
+        }
         if (s.x > hx || s.x < -hx) {
           s.x = Math.max(-hx, Math.min(hx, s.x));
           if (!(drag && drag.i === i)) s.vx *= -0.75;

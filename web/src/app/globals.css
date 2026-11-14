@@ -1005,10 +1005,6 @@ button[data-select] {
 }
 @media (max-width: 767px) {
   .orbit-icon {
-    transform: translate3d(
-      calc(var(--c) * min(var(--k) * min(100vw, 100vh), min(100vw, 100vh) / 2 - 26px)),
-      calc(var(--s) * min(var(--k) * min(100vw, 100vh), min(100vw, 100vh) / 2 - 26px)),
-      0
-    );
+    transform: translate3d(calc(var(--c) * var(--k) * 100vh), calc(var(--s) * var(--k) * 100vh), 0);
   }
 }
