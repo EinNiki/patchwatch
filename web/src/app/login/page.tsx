@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, setCsrf } from "@/lib/api";
 import type { Me } from "@/lib/types";
-import { Button, TextInput } from "@/components/Controls";
+import { Button, Field, TextInput } from "@/components/Controls";
 import { DISTRO_ICONS } from "@/lib/distroIcons";
 import { getPasskey, passkeyErrorText, webauthnSupported } from "@/lib/webauthn";
 
@@ -18,73 +18,187 @@ const RINGS: { k: number; period: number; icons: string[] }[] = [
   { k: 0.54, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
+const ICON = 40; // Durchmesser in px
+const MARGIN = 26; // Mindestabstand zum Fensterrand beim Werfen
+
+/** Startwinkel eines Logos auf seiner Bahn. */
+const baseAngle = (ri: number, i: number) => (i / RINGS[ri]!.icons.length) * Math.PI * 2 + ri;
+
 /**
- * Logos kreisen (ohne sichtbare Linien) in Abstand um die Anmeldekarte. Die Mitte folgt dem Mauszeiger ein paar Pixel (sanft
- * nachgezogen). Aus bei „weniger Bewegung“ (Logos stehen dann still) und auf kleinen Fenstern; reine Dekoration.
+ * Logos kreisen (ohne sichtbare Linien) in Abstand um die Anmeldekarte. Sie lassen sich anfassen und werfen: beim
+ * Loslassen behält ein Logo seinen Schwung, prallt an den Fensterrändern ab und wird von einer weichen Feder zurück
+ * auf seine Bahn gezogen. Die Bahn-Mitte folgt dem Mauszeiger ein paar Pixel. Die Startpositionen stehen schon im
+ * Server-HTML (CSS), damit nichts erst nach dem Laden des Skripts erscheint; „weniger Bewegung“: Logos stehen still und
+ * lassen sich nicht werfen. Reine Dekoration (aria-hidden), per Tastatur nicht nötig.
  */
 function Orbits() {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current;
-    if (!el) return;
+    if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const icons = Array.from(el.querySelectorAll<HTMLElement>("[data-orbit]"));
-    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const st = icons.map(() => ({ x: 0, y: 0, vx: 0, vy: 0 })); // Abweichung von der Bahn (px) und Geschwindigkeit
     let target = { x: 0, y: 0 };
     const cur = { x: 0, y: 0 };
-    const move = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse") return;
-      const r = el.getBoundingClientRect();
-      target = { x: ((e.clientX - r.left) / r.width - 0.5) * 36, y: ((e.clientY - r.top) / r.height - 0.5) * 36 };
-    };
-    if (!still) window.addEventListener("pointermove", move);
-    let raf = 0;
     const size = { w: 0, h: 0 };
+    let drag: { i: number; id: number; gx: number; gy: number; px: number; py: number; pt: number } | null = null;
+    let tilt = { x: 0, y: 0 };
+
+    const orbitPos = (i: number, t0: number) => {
+      const c = icons[i]!;
+      const ri = Number(c.dataset.ring);
+      const ring = RINGS[ri]!;
+      const a = baseAngle(ri, Number(c.dataset.i)) + (t0 / 1000 / ring.period) * Math.PI * 2;
+      let rx = Math.max(size.w * ring.k, 250 + ri * 60);
+      let ry = size.h * ring.k;
+      // Schmale Fenster (Handy): Bahnen bleiben komplett im Bild.
+      if (size.w < 768) {
+        rx = Math.min(rx, size.w / 2 - MARGIN);
+        ry = Math.min(ry, size.h / 2 - MARGIN);
+      }
+      return { x: Math.cos(a) * rx, y: Math.sin(a) * ry };
+    };
+
+    const move = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") {
+        const r = el.getBoundingClientRect();
+        target = { x: ((e.clientX - r.left) / r.width - 0.5) * 36, y: ((e.clientY - r.top) / r.height - 0.5) * 36 };
+      }
+      if (drag && e.pointerId === drag.id) {
+        // Zeigerposition relativ zur Mitte der Fläche, ohne die Neigung.
+        const r = el.getBoundingClientRect();
+        drag.px = e.clientX - r.left - r.width / 2 - tilt.x - drag.gx;
+        drag.py = e.clientY - r.top - r.height / 2 - tilt.y - drag.gy;
+      }
+    };
+    const up = (e: PointerEvent) => {
+      if (drag && e.pointerId === drag.id) {
+        icons[drag.i]!.style.cursor = "grab";
+        drag = null; // die Geschwindigkeit stammt aus den letzten Bewegungen (siehe tick)
+      }
+    };
+    const downs = icons.map((c, i) => {
+      const f = (e: PointerEvent) => {
+        if (e.button > 0) return;
+        const r = el.getBoundingClientRect();
+        const cr = c.getBoundingClientRect();
+        // Griffpunkt: Abstand des Zeigers zur Mitte des Logos.
+        const gx = e.clientX - (cr.left + cr.width / 2);
+        const gy = e.clientY - (cr.top + cr.height / 2);
+        drag = { i, id: e.pointerId, gx, gy, px: e.clientX - r.left - r.width / 2 - tilt.x - gx, py: e.clientY - r.top - r.height / 2 - tilt.y - gy, pt: performance.now() };
+        st[i]!.vx = 0;
+        st[i]!.vy = 0;
+        c.style.cursor = "grabbing";
+        c.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      };
+      c.addEventListener("pointerdown", f);
+      return f;
+    });
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+
+    let raf = 0;
+    let t0 = 0;
+    let last = 0;
     const tick = (t: number) => {
+      if (!t0) {
+        t0 = t;
+        last = t;
+      }
+      const dt = Math.min((t - last) / 1000, 0.04) || 0.016;
+      last = t;
       size.w = el.clientWidth;
       size.h = el.clientHeight;
       cur.x += (target.x - cur.x) * 0.05;
       cur.y += (target.y - cur.y) * 0.05;
+      tilt = cur;
       el.style.setProperty("--ox", `${cur.x.toFixed(1)}px`);
       el.style.setProperty("--oy", `${cur.y.toFixed(1)}px`);
-      icons.forEach((c) => {
-        const ri = Number(c.dataset.ring);
-        const ring = RINGS[ri]!;
-        const n = ring.icons.length;
-        const a = (Number(c.dataset.i) / n) * Math.PI * 2 + (still ? 0 : ((t / 1000) / ring.period) * Math.PI * 2) + Number(c.dataset.ring);
-        // Ellipse passend zum Fenster: rx/ry wachsen mit Breite/Höhe, nie enger als die Karte (Handy: Logos laufen dahinter).
-        let rx = Math.max(size.w * ring.k, 250 + ri * 60);
-        let ry = size.h * ring.k;
-        // Schmale Fenster (Handy): Logos bleiben komplett im Bild, statt seitlich hinauszufliegen.
-        if (size.w < 768) {
-          rx = Math.min(rx, size.w / 2 - 26);
-          ry = Math.min(ry, size.h / 2 - 26);
+      const hx = size.w / 2 - ICON / 2 - 4;
+      const hy = size.h / 2 - ICON / 2 - 4;
+      icons.forEach((c, i) => {
+        const o = orbitPos(i, t - t0);
+        const s = st[i]!;
+        if (drag && drag.i === i) {
+          // Folgt dem Zeiger; die Geschwindigkeit wird weich mitgeschrieben, damit der Wurf Schwung hat.
+          const nx = drag.px - o.x;
+          const ny = drag.py - o.y;
+          s.vx += ((nx - s.x) / dt - s.vx) * 0.35;
+          s.vy += ((ny - s.y) / dt - s.vy) * 0.35;
+          s.x = nx;
+          s.y = ny;
+        } else {
+          // Weiche Feder zurück auf die Bahn (leicht unterdämpft: schwingt kurz nach) und Reibung.
+          const K = 2.4;
+          const C = 1.5;
+          s.vx += (-K * s.x - C * s.vx) * dt;
+          s.vy += (-K * s.y - C * s.vy) * dt;
+          s.vx = Math.max(-3000, Math.min(3000, s.vx));
+          s.vy = Math.max(-3000, Math.min(3000, s.vy));
+          s.x += s.vx * dt;
+          s.y += s.vy * dt;
         }
-        c.style.transform = `translate3d(${(Math.cos(a) * rx).toFixed(1)}px, ${(Math.sin(a) * ry).toFixed(1)}px, 0)`;
+        // Abprallen an den Fensterrändern (absolute Position = Bahn + Abweichung).
+        let ax = o.x + s.x;
+        let ay = o.y + s.y;
+        if (ax > hx || ax < -hx) {
+          ax = Math.max(-hx, Math.min(hx, ax));
+          if (!(drag && drag.i === i)) s.vx *= -0.75;
+          s.x = ax - o.x;
+        }
+        if (ay > hy || ay < -hy) {
+          ay = Math.max(-hy, Math.min(hy, ay));
+          if (!(drag && drag.i === i)) s.vy *= -0.75;
+          s.y = ay - o.y;
+        }
+        c.style.transform = `translate3d(${ax.toFixed(1)}px, ${ay.toFixed(1)}px, 0)`;
       });
-      if (!still) raf = requestAnimationFrame(tick);
+      raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
+    icons.forEach((c) => {
+      c.style.cursor = "grab";
+      c.style.pointerEvents = "auto";
+    });
     return () => {
       cancelAnimationFrame(raf);
+      icons.forEach((c, i) => c.removeEventListener("pointerdown", downs[i]!));
       window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
     };
   }, []);
   return (
     <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="absolute left-1/2 top-1/2" style={{ transform: "translate(var(--ox, 0px), var(--oy, 0px))" }}>
-        {RINGS.map((ring, ri) => (
-          <div key={ring.k}>
-            {ring.icons.map((name, i) => (
-              <span key={name} data-orbit data-ring={ri} data-i={i} className="absolute will-change-transform" style={{ left: -20, top: -20 }}>
+        {RINGS.map((ring, ri) =>
+          ring.icons.map((name, i) => {
+            const a = baseAngle(ri, i);
+            return (
+              <span
+                key={name}
+                data-orbit
+                data-ring={ri}
+                data-i={i}
+                className="orbit-icon absolute touch-none select-none will-change-transform"
+                // Startposition schon im HTML: das Skript übernimmt nahtlos, die Logos stehen sofort da.
+                style={{
+                  left: -ICON / 2,
+                  top: -ICON / 2,
+                  transform: `translate3d(calc(${Math.cos(a).toFixed(3)} * max(${ring.k * 100}vw, ${250 + ri * 60}px)), calc(${Math.sin(a).toFixed(3)} * ${ring.k * 100}vh), 0)`,
+                }}
+              >
                 <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface shadow-(--shadow-float)">
                   <svg viewBox="0 0 24 24" className="size-5" fill={DISTRO_ICONS[name]!.hex}>
                     <path d={DISTRO_ICONS[name]!.path} />
                   </svg>
                 </span>
               </span>
-            ))}
-          </div>
-        ))}
+            );
+          }),
+        )}
       </div>
     </div>
   );
@@ -172,7 +286,7 @@ export default function LoginPage() {
       className="relative flex min-h-dvh flex-col items-center justify-center px-4 py-10"
       style={{
         backgroundImage:
-          "radial-gradient(60rem 36rem at 15% -10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%), radial-gradient(48rem 30rem at 100% 110%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%), radial-gradient(color-mix(in srgb, var(--text-3) 30%, transparent) 1px, transparent 1px)",
+          "radial-gradient(52rem 34rem at 100% -6%, color-mix(in srgb, color-mix(in srgb, var(--accent) 45%, #a9d0ff) 26%, transparent), transparent 70%), radial-gradient(52rem 34rem at 100% 106%, color-mix(in srgb, color-mix(in srgb, var(--accent) 45%, #a9d0ff) 22%, transparent), transparent 70%), radial-gradient(color-mix(in srgb, var(--text-3) 30%, transparent) 1px, transparent 1px)",
         backgroundSize: "auto, auto, 22px 22px",
       }}
     >
@@ -190,39 +304,23 @@ export default function LoginPage() {
           method="post"
           action="/login"
           onSubmit={(e) => void submit(e)}
-          className="relative flex flex-col gap-4 overflow-hidden rounded-xl border border-line bg-[color-mix(in_srgb,var(--surface)_82%,transparent)] p-6 shadow-(--shadow-float) backdrop-blur-md"
+          className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6 shadow-(--shadow-float)"
         >
-          {/* Leuchtkante oben, wie bei modernen Anmeldedialogen */}
-          <span aria-hidden="true" className="pointer-events-none absolute inset-x-8 top-0 h-px bg-linear-to-r from-transparent via-accent to-transparent opacity-70" />
-          <div className="mb-1 text-center">
-            <h2 className="m-0 text-lg font-semibold">Willkommen zurück</h2>
-            <p className="m-0 mt-1 text-xs text-fg3">Melde dich an, um deine Hosts und CVEs zu sehen.</p>
-          </div>
-          <label className="relative block">
-            <span className="sr-only">Benutzername</span>
-            <TextInput name="username" placeholder="Benutzername" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12! w-full rounded-2xl! border-transparent! bg-[color-mix(in_srgb,var(--text)_7%,transparent)]! pl-11 text-base! focus-visible:border-accent!" />
-            <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-fg3">
-              <circle cx="12" cy="8" r="4" />
-              <path d="M4 21c1-4 4-6 8-6s7 2 8 6" />
-            </svg>
-          </label>
+          <Field label="Benutzername">
+            <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} />
+          </Field>
           {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
           <div className="relative">
-            <label className="relative block">
-              <span className="sr-only">Passwort</span>
-              <TextInput name="password" placeholder="Passwort" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12! w-full rounded-2xl! border-transparent! bg-[color-mix(in_srgb,var(--text)_7%,transparent)]! pl-11 text-base! focus-visible:border-accent! pr-14" />
-              <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-fg3">
-                <rect x="4" y="11" width="16" height="10" rx="2" />
-                <path d="M8 11V8a4 4 0 018 0v3" />
-              </svg>
-            </label>
+            <Field label="Passwort">
+              <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="w-full pr-12" />
+            </Field>
             <Button
               variant="ghost"
               data-hit="none"
               aria-pressed={show}
               aria-label={show ? "Eingabe verbergen" : "Eingabe anzeigen"}
               onClick={() => setShow(!show)}
-              className="absolute right-2 top-1/2 h-9! min-h-0! w-10! min-w-0! -translate-y-1/2 border-0! px-0! text-fg3 hover:text-fg max-md:h-11! max-md:w-11!"
+              className="absolute bottom-0.5 right-0.5 h-7! min-h-0! w-9! min-w-0! border-0! px-0! text-fg3 hover:text-fg max-md:bottom-0 max-md:h-11! max-md:w-11!"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                 <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
@@ -236,7 +334,7 @@ export default function LoginPage() {
               {error}
             </p>
           ) : null}
-          <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-2xl!">
+          <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="w-full">
             Anmelden
           </Button>
           {passkey || oidc?.enabled ? (
@@ -251,7 +349,7 @@ export default function LoginPage() {
                   disabled={!hydrated || !webauthnSupported()}
                   onClick={() => void passkeyLogin()}
                   title={webauthnSupported() ? undefined : "Dieser Browser unterstützt keine Passkeys (oder die Seite läuft nicht über HTTPS)."}
-                  className="h-12! w-full rounded-2xl!"
+                  className="w-full"
                 >
                   Mit Passkey anmelden
                 </Button>
@@ -259,7 +357,7 @@ export default function LoginPage() {
               {oidc?.enabled ? (
               <a
                 href="/api/v1/auth/oidc/login"
-                className="inline-flex h-12 items-center justify-center rounded-2xl border border-control bg-surface px-3 font-semibold no-underline hover:border-accent max-md:min-h-11"
+                className="inline-flex min-h-9 items-center justify-center rounded-sm border border-control bg-surface px-3 font-semibold no-underline hover:border-accent max-md:min-h-11"
               >
                 Mit {oidc.name} anmelden
               </a>

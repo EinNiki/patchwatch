@@ -979,3 +979,18 @@ button[data-select] {
   }
 }
 }
+
+/* Logos der Anmeldeseite blenden kurz ein (kein hartes Aufpoppen); bei „weniger Bewegung“ ohne Animation. */
+@keyframes orbit-in {
+  from {
+    opacity: 0;
+  }
+}
+.orbit-icon > span {
+  animation: orbit-in 500ms var(--ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-icon > span {
+    animation: none;
+  }
+}
