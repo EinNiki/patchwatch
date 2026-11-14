@@ -331,12 +331,15 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         <CveCell h={h} feedOk={feedOk} />
       </td>
       <td className="cell-status lead">
-        <StatusBadge key={h.status} info={HOST_STATUS[h.status]} />
-        {h.reboot_needed && h.status !== "reboot_required" ? (
-          <div className="mt-1 inline-flex items-center gap-1 text-xs text-warn max-md:mt-0">
-            <Icon name="reboot" /> Neustart nötig
-          </div>
-        ) : null}
+        {/* Abstand zwischen Status und Neustart-Hinweis: nebeneinander mit Luft, bei wenig Platz untereinander. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <StatusBadge key={h.status} info={HOST_STATUS[h.status]} />
+          {h.reboot_needed && h.status !== "reboot_required" ? (
+            <div className="inline-flex items-center gap-1 text-xs text-warn">
+              <Icon name="reboot" /> Neustart nötig
+            </div>
+          ) : null}
+        </div>
       </td>
       <td className="mono whitespace-nowrap max-xl:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>

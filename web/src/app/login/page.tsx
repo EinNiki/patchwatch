@@ -9,6 +9,30 @@ import { Button, Field, TextInput } from "@/components/Controls";
 // true erst nach der Hydration: vorher darf nichts abgeschickt werden.
 const subscribe = () => () => {};
 
+/** Chips auf den beiden Ringen: [Text, Winkel in Grad]. Innerer Ring läuft rechtsherum, äußerer linksherum. */
+const INNER: [string, number][] = [["Ubuntu", 0], ["Debian", 72], ["CVE", 144], ["Proxmox", 216], ["Alpine", 288]];
+const OUTER: [string, number][] = [["Fedora", 20], ["NVD", 80], ["RHEL", 140], ["Arch", 200], ["openSUSE", 260], ["OSV", 320]];
+
+function Orbit({ radius, dur, items, reverse }: { radius: number; dur: number; items: [string, number][]; reverse?: boolean }) {
+  return (
+    <div aria-hidden="true" style={{ "--r": `${radius}px` } as React.CSSProperties}>
+      <span className="orbit-ring" />
+      {items.map(([label, a]) => (
+        <span
+          key={label}
+          className="orbit-item"
+          style={{ "--a": `${a}deg`, "--r": `${radius}px`, "--dur": `${dur}s`, animationDirection: reverse ? "reverse" : "normal" } as React.CSSProperties}
+        >
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-fg2 shadow-(--shadow-float)">
+            <span className="size-1.5 rounded-full bg-accent" />
+            {label}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const hydrated = useSyncExternalStore(subscribe, () => true, () => false);
@@ -35,6 +59,12 @@ export default function LoginPage() {
         password: String(form.get("password") ?? ""),
       });
       setCsrf(me.csrf_token);
+      // Nach der Anmeldung startet die Seitenleiste immer mit eingeklappten Benachrichtigungen.
+      try {
+        window.localStorage.removeItem("pw-nav:notifications");
+      } catch {
+        /* Speicher gesperrt: egal */
+      }
       router.replace("/");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) setError("Benutzername oder Passwort falsch.");
@@ -57,14 +87,15 @@ export default function LoginPage() {
         backgroundSize: "auto, auto, 22px 22px",
       }}
     >
-      <div className="w-full max-w-sm">
+      <Orbit radius={300} dur={70} items={INNER} />
+      <Orbit radius={440} dur={110} items={OUTER} reverse />
+      <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
           <svg width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-3 rounded-lg shadow-(--shadow-float)">
             <rect width="32" height="32" rx="6" fill="var(--accent)" />
             <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <h1 className="m-0 font-mono text-xl font-medium">patchwatch</h1>
-          <p className="m-0 mt-1 text-fg2">Anmeldung für Administratoren</p>
         </div>
         {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
         <form

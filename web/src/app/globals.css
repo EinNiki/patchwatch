@@ -979,3 +979,41 @@ button[data-select] {
   }
 }
 }
+
+/* Anmeldeseite: Chips kreisen auf zwei Ringen um die Karte (Distributionen und CVE-Quellen). Reine CSS-Animation, aus bei
+   „weniger Bewegung“, ausgeblendet auf schmalen Fenstern. Jeder Chip bleibt beim Kreisen aufrecht (Gegendrehung). */
+.orbit-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--r) * 2);
+  height: calc(var(--r) * 2);
+  margin: calc(var(--r) * -1) 0 0 calc(var(--r) * -1);
+  border: 1px dashed color-mix(in srgb, var(--text-3) 35%, transparent);
+  border-radius: 9999px;
+  pointer-events: none;
+}
+.orbit-item {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: rotate(var(--a)) translateX(var(--r)) rotate(calc(var(--a) * -1)) translate(-50%, -50%);
+  animation: orbit-spin var(--dur) linear infinite;
+  will-change: transform;
+}
+@keyframes orbit-spin {
+  to {
+    transform: rotate(calc(var(--a) + 360deg)) translateX(var(--r)) rotate(calc((var(--a) + 360deg) * -1)) translate(-50%, -50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-item {
+    animation: none;
+  }
+}
+@media (max-width: 767px) {
+  .orbit-ring,
+  .orbit-item {
+    display: none;
+  }
+}

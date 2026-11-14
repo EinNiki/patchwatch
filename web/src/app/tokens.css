@@ -110,7 +110,7 @@
   --dur-2: 180ms;
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
 
-  --sidebar-w: 220px;
+  --sidebar-w: 252px;
   --rail-w: 56px;
   /* Breite der Seitenleiste ab 1024 px; die Shell schaltet sie per html[data-sb="collapsed"] auf die Rail-Breite. */
   --sb-w: var(--sidebar-w);
