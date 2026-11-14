@@ -404,7 +404,7 @@ function VirtualRows({ items, rowH, height, label, render }: { items: HostCve[];
   const first = virtual ? Math.max(0, Math.floor(scroll / rowH) - 8) : 0;
   const last = virtual ? Math.min(items.length, Math.ceil((scroll + viewH) / rowH) + 8) : items.length;
   return (
-    <div ref={scroller} onScroll={(e) => setScroll(e.currentTarget.scrollTop)} tabIndex={0} role="region" aria-label={label} className="overflow-y-auto overflow-x-hidden rounded-xs border border-line bg-surface" style={{ height: height ?? `min(${items.length * rowH + 2}px, ${LIST_MAX})` }}>
+    <div ref={scroller} onScroll={(e) => setScroll(e.currentTarget.scrollTop)} tabIndex={0} role="region" aria-label={label} className="overflow-y-auto overflow-x-hidden rounded-xs border border-line bg-surface" style={{ height: height ?? `min(${items.length * rowH + 4}px, ${LIST_MAX})` }}>
       <ul className="m-0 list-none p-0" style={virtual ? { position: "relative", height: items.length * rowH } : undefined}>
         {items.slice(first, last).map((c, i) => render(c, virtual ? { position: "absolute", top: (first + i) * rowH, left: 0, right: 0 } : undefined))}
       </ul>
@@ -468,7 +468,7 @@ function CveList({ title, state, proxmox, variant, onOpen, onMore, empty, expect
       </h3>
       {narrow ? null : <ListHead variant={variant} />}
       {loading ? (
-        <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3" style={{ height: expected === null ? "8rem" : `min(${Math.max(expected, 1) * rowH + 2}px, ${LIST_MAX})` }}>
+        <div className="rounded-xs border border-line bg-surface p-3 text-xs text-fg3" style={{ height: expected === null ? "8rem" : `min(${Math.max(expected, 1) * rowH + 4}px, ${LIST_MAX})` }}>
           Lädt …
         </div>
       ) : items.length === 0 ? (
@@ -548,7 +548,7 @@ function GroupItems({ hostId, kind, fix, count, q, lvl, proxmox, onOpen }: { hos
   const items = s.data?.items ?? [];
   const rest = (s.data?.total ?? count) - items.length;
   if (!s.data) return <div className="border-t border-line p-2 text-xs text-fg3">Lädt …</div>;
-  const h = `${Math.min(Math.max(items.length, 1), 12) * rowH + 2}px`;
+  const h = `${Math.min(Math.max(items.length, 1), 12) * rowH + 4}px`;
   return (
     <div ref={setBox} className="border-t border-line p-1">
       {narrow ? null : <ListHead variant="group" />}
