@@ -249,7 +249,7 @@ Alle Werte liegen über 4.5:1 (schwächster: `text-3` hell, 4.68).
 
 Menüpunkt „Benutzer“ (Symbol `users`, zwischen Agents und Benachrichtigungen) nur mit `users.manage`; Direktaufruf ohne Recht
 zeigt eine 403-Seite (`role="alert"`, Link zur Übersicht). Die Seite hat Tabs (`role="tablist"`, Pfeiltasten, Tab-Stop nur auf
-dem aktiven Tab): *Benutzer*, *Aktivität*. OIDC liegt unter Einstellungen (Anker `#oidc`, Unternavigation Allgemein | Zeitpläne | OIDC);
+dem aktiven Tab): *Benutzer*, *Aktivität*. OIDC liegt unter Einstellungen (Anker `#oidc`; die Seite hat keine Unternavigation, alles steht untereinander);
 `/users#oidc` leitet um. Tabellen wie Agents: `tbl stack-lg`, Zeilen ≤ 56 px, keine Klickfläche auf der Zeile, Aktionen als
 `ActionCell`, Avatar-Platzhalter 20 px, Status als Chip mit Symbol und Text, mobil gestapelt mit 44-px-Zielen.
 Gesperrte Zeilenaktionen (eigenes Konto, letzter lokaler Verwalter, Konto mit stärkeren Rechten) sind `aria-disabled`, tragen den

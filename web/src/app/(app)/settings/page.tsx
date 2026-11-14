@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/lib/toastStore";
 import { useApi } from "@/lib/useApi";
@@ -202,13 +201,6 @@ function Schedules() {
   );
 }
 
-/** Unternavigation der Seite: springt zu den Abschnitten (Anker), auch per Tastatur und mit Verlauf. */
-const SUBNAV = [
-  { href: "#acct-h", label: "Allgemein" },
-  { href: "#sched-h", label: "Zeitpläne" },
-  { href: "#oidc", label: "OIDC" },
-] as const;
-
 export default function SettingsPage() {
   const { me } = useAuth();
   const canOidc = can(me.permissions, "oidc.manage");
@@ -217,14 +209,6 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title="Einstellungen" />
-
-      <nav aria-label="Bereiche der Einstellungen" className="mb-4 flex flex-wrap gap-x-1 border-b border-line">
-        {SUBNAV.map((n) => (
-          <Link key={n.href} href={n.href} className="-mb-px inline-flex min-h-8 items-center border-b-2 border-transparent px-3 text-sm font-semibold text-fg2 no-underline hover:text-fg max-md:min-h-11">
-            {n.label}
-          </Link>
-        ))}
-      </nav>
 
       <SettingsSection id="acct-h" title="Konto" description={<>Angemeldet als <Mono>{me.username}</Mono>.</>}>
         <div className="flex flex-col gap-6">

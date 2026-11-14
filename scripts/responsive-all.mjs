@@ -130,12 +130,14 @@ function inspect({ narrow, wide1024 }) {
   for (const [, list] of kids) {
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const [a, ra] = list[i], [b, rb] = list[j];
+      if (a.hasAttribute("data-hit-overlay") || b.hasAttribute("data-hit-overlay")) continue; // Überlagerung gewollt (Info im Knopf)
       const ox = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left), oy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
       if (ox > 1 && oy > 1) add(2, 1, `Knöpfe überlappen ${label(a)} / ${label(b)}`, `${ox.toFixed(1)}x${oy.toFixed(1)} px`);
     }
     // 5 gleiche Höhe in einer Zeile (gleichrangige Knöpfe desselben Elternelements, vertikal überlappend)
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const [a, ra] = list[i], [b, rb] = list[j];
+      if (a.hasAttribute("data-hit-overlay") || b.hasAttribute("data-hit-overlay")) continue;
       const oy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
       if (oy > Math.min(ra.height, rb.height) / 2 && Math.abs(ra.height - rb.height) > 0.5) add(5, 3, `Höhe ungleich ${label(a)} / ${label(b)}`, `${ra.height.toFixed(1)} vs ${rb.height.toFixed(1)} px`);
     }

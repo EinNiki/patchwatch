@@ -188,7 +188,8 @@ function FetchInfo() {
           aria-label="Erklärung zu „Daten jetzt abrufen“"
           title="„Daten jetzt abrufen“ bittet den Agent, beim nächsten Kontakt neue Daten zu senden."
           onClick={t.toggle}
-          className="inline-flex size-8 items-center justify-center rounded-full text-fg3 hover:text-fg max-md:size-11"
+          data-hit-overlay=""
+          className="absolute right-0 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-fg3 hover:text-fg max-md:size-11"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <circle cx="8" cy="8" r="6.2" />
@@ -279,11 +280,14 @@ export default function AgentsPage() {
           <>
         {canRun ? (
           <>
-            <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0}>
-              <NavIcon name="refresh" />
-              {FETCH_ALL_ACTION}
-            </Button>
-            <FetchInfo />
+            {/* Das Info-Symbol liegt rechts im Knopf (Geschwister, kein Knopf im Knopf: ungültiges HTML). */}
+            <span className="relative inline-flex">
+              <Button onClick={() => void requestAll()} disabled={busyAll || !list || list.length === 0} className="pr-10 max-md:pr-14">
+                <NavIcon name="refresh" />
+                {FETCH_ALL_ACTION}
+              </Button>
+              <FetchInfo />
+            </span>
           </>
         ) : null}
         {canAdd ? (

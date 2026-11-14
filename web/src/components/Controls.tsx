@@ -105,7 +105,7 @@ export function Switch({ label, hint, note, className = "", ...props }: Omit<Inp
       <input
         type="checkbox"
         role="switch"
-        className="relative h-6 w-10 shrink-0 appearance-none rounded-full border border-control bg-sunk transition-colors duration-(--dur-1) after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-fg3 after:transition-transform after:duration-(--dur-1) checked:border-accent checked:bg-accent checked:after:translate-x-4 checked:after:bg-bg disabled:opacity-60"
+        className="relative h-6 w-10 shrink-0 appearance-none rounded-full border border-control bg-sunk transition-colors duration-(--dur-1) after:absolute after:top-[3px] after:left-[3px] after:size-4 after:rounded-full after:bg-fg3 after:transition-transform after:duration-(--dur-1) checked:border-accent checked:bg-accent checked:after:translate-x-4 checked:after:bg-bg disabled:opacity-60"
         {...props}
       />
     </label>

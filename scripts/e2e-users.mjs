@@ -343,7 +343,7 @@ try {
   await page.waitForURL(/\/settings#oidc/);
   ok(true, "/users#oidc leitet auf /settings#oidc um");
   await page.getByRole("heading", { name: "OIDC-Anmeldung" }).waitFor();
-  ok(await page.getByRole("navigation", { name: "Bereiche der Einstellungen" }).getByRole("link", { name: "OIDC" }).isVisible(), "Unternavigation mit OIDC");
+  ok((await page.getByRole("navigation", { name: "Bereiche der Einstellungen" }).count()) === 0, "keine Unternavigation in den Einstellungen");
   ok(!(await page.getByRole("heading", { name: "Single Sign-On" }).count()), "alter doppelter OIDC-Abschnitt ist weg");
   // Der Routenansager von Next (next-route-announcer, role=alert) ist kein Fehlerbanner.
   const banners = await page.evaluate(() => [...document.querySelectorAll("[role=alert]")].filter((e) => !e.closest("next-route-announcer") && e.textContent.trim()).map((e) => e.textContent.trim().slice(0, 80)));
