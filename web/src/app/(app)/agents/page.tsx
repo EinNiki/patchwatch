@@ -341,19 +341,19 @@ export default function AgentsPage() {
         </Empty>
       ) : (
         <div className="@container/tbl max-hd:overflow-x-auto">
-          {/* Reihenfolge: Name, Hostname, Distribution, Zuletzt gemeldet, Zuletzt erreichbar, Aktionen, Agent-Version (grau, schmal).
-              Überschüssige Breite geht an die Datenspalten; die Aktionsspalte hat eine feste Breite und sitzt direkt nach „Zuletzt erreichbar“. */}
+          {/* Reihenfolge: Name, Hostname, Distribution, Zuletzt gemeldet, Zuletzt erreichbar, Agent-Version (grau, schmal), Aktionen.
+              Überschüssige Breite verteilt sich auf alle Spalten; die Aktionsspalte steht zuletzt und endet am rechten Rand. */}
           <table className="tbl stack-lg dist1024 lg:[--col-pad:10px] lg:[--tbl-min:46.5rem] hd:[--tbl-min:58rem]">
             <caption>Agents mit Zeitpunkt der letzten Daten, letzter Aktivität, Aktionen und Version</caption>
             <thead>
               <tr>
-                <th scope="col" className="w-[9%] min-w-24 hd:min-w-22"><span className="th-pad">Name</span></th>
-                <th scope="col" className="w-[10%] min-w-28 hd:min-w-26"><span className="th-pad">Hostname laut Agent</span></th>
-                <th scope="col" className="w-[12%] min-w-24 hd:min-w-30"><span className="th-pad">Distribution</span></th>
-                <th scope="col" className="w-[8%] min-w-20 hd:min-w-22"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
-                <th scope="col" className="w-[8%] min-w-20 hd:min-w-22"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
-                <th scope="col" className="w-60 min-w-40 hd:w-112 hd:min-w-60"><span className="th-pad">Aktionen</span></th>
-                <th scope="col" className="w-[5%] min-w-16 hd:min-w-16 text-fg3"><span className="th-pad">Agent-Version</span></th>
+                <th scope="col" className="w-[12%] min-w-24 hd:min-w-22"><span className="th-pad">Name</span></th>
+                <th scope="col" className="w-[14%] min-w-28 hd:min-w-26"><span className="th-pad">Hostname laut Agent</span></th>
+                <th scope="col" className="w-[18%] min-w-24 hd:min-w-30"><span className="th-pad">Distribution</span></th>
+                <th scope="col" className="w-[11%] min-w-20 hd:min-w-22"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
+                <th scope="col" className="w-[11%] min-w-20 hd:min-w-22"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
+                <th scope="col" className="w-[8%] min-w-16 hd:min-w-16 text-fg3"><span className="th-pad">Agent-Version</span></th>
+                <th scope="col" className="w-60 min-w-40 hd:w-[27rem] hd:min-w-[27rem]"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>
@@ -374,6 +374,7 @@ export default function AgentsPage() {
                       <WaitState h={h} now={now} />
                     </td>
                     <td data-label={ACTIVE_LABEL}><RelTime iso={h.last_checkin_at} /></td>
+                    <td data-label="Agent-Version" className="text-fg3">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
                     <td className="cell-actions">
                       <ActionCell
                         name={h.name}
@@ -384,7 +385,6 @@ export default function AgentsPage() {
                         ]}
                       />
                     </td>
-                    <td data-label="Agent-Version" className="text-fg3">{h.agent_version ? <Mono>{h.agent_version}</Mono> : <span className="text-fg3">–</span>}</td>
                   </tr>
                 );
               })}

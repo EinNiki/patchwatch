@@ -265,7 +265,6 @@ function HostsView() {
                     <th scope="col" className="w-[9%] min-w-22 max-wide:hidden hd:w-[4.7rem] hd:min-w-[4.7rem]">
                       <span className="th-pad">Agent</span>
                     </th>
-                    <th aria-hidden="true" className="fill hidden p-0 hd:table-cell" />
                   </tr>
                 </thead>
                 <tbody key={`${sort}|${dir}|${status}|${rebootOnly}|${updatesOnly}|${q}`}>
@@ -341,7 +340,6 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
       </td>
       <td className="mono whitespace-nowrap max-xl:hidden"><Uptime lastReportAt={h.last_report_at} seconds={h.uptime_seconds} /></td>
       <td className="mono max-wide:hidden">{h.agent_version ? `v${h.agent_version}` : "–"}</td>
-      <td aria-hidden="true" className="fill hidden p-0 hd:table-cell" />
     </tr>
   );
 }

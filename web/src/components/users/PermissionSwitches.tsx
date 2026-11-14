@@ -38,6 +38,7 @@ export function PermissionSwitches({
                   label={p.label}
                   hint={p.description}
                   note={notes.length > 0 ? notes.join(" ") : undefined}
+                  className="pr-4"
                   checked={on}
                   disabled={locked || !own}
                   onChange={(e) => onToggle(p.name, e.target.checked)}

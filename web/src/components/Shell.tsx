@@ -185,6 +185,10 @@ function NavLinks({ pathname }: { pathname: string }) {
   const [stored, setStored] = useStoredFlag("pw-nav:notifications");
   const onSub = pathname.startsWith("/notifications/");
   const expanded = typeof stored === "boolean" ? stored : onSub;
+  // Wer eine Kanalseite öffnet (auch aus der Übersicht), sieht den Kanal in der Leiste: Gruppe klappt dann auf. Sonst läge die Markierung auf der zugeklappten Zeile und träfe „Einstellungen“.
+  useEffect(() => {
+    if (onSub && stored === false) setStored(true);
+  }, [onSub, stored, setStored]);
   const channels = useApi<NotificationsResponse>("/notifications", 60_000).data?.channels;
   const hosts = useApi<Host[]>("/hosts", 60_000);
   useLiveEvents(["host_status", "report_received"], () => void hosts.reload());
@@ -211,6 +215,8 @@ function NavLinks({ pathname }: { pathname: string }) {
               <Link
                 href={n.href}
                 aria-current={exactNotifications || (active && !isGroup) ? "page" : undefined}
+                // Klick auf „Benachrichtigungen“ klappt die Kanäle auf; ein zweiter Klick auf der Übersicht klappt sie zu.
+                onClick={isGroup ? () => setStored(pathname === "/notifications" ? !expanded : true) : undefined}
                 className={`${rowBase} font-semibold ${rowState(active && !(isGroup && onSub))} ${isGroup ? "pr-9 rail:pr-3" : ""} ${isGroup && onSub ? "text-fg" : ""}`}
               >
                 <span className={ICON}>
