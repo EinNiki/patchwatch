@@ -27,7 +27,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   await page.route(/\/api\/v1\/cves\?/, (r) => { seenQuery.push(new URL(r.request().url()).search); return r.fulfill(json(200, list)); });
   await page.route(/\/api\/v1\/cves\/scope-count\?/, (r) => r.fulfill(json(200, { mine: list.length, all: list.length, affecting: list.length })));

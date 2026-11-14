@@ -22,7 +22,7 @@ async function open(w, h, scheme = "light", extra = {}) {
     await p0.goto(`${base}/login`);
     await p0.getByLabel("Benutzername").fill("admin");
     await p0.getByLabel("Passwort").fill(pw);
-    await p0.getByRole("button", { name: "Anmelden" }).click();
+    await p0.getByRole("button", { name: "Anmelden", exact: true }).click();
     await p0.waitForURL((u) => !u.pathname.startsWith("/login"));
     state = await c0.storageState();
     await c0.close();

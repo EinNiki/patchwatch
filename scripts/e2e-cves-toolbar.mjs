@@ -27,7 +27,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
 
   let rows = [cve(1), cve(2), cve(3)];

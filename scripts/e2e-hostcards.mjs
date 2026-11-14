@@ -16,7 +16,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   const hosts = await page.evaluate(() => fetch("/api/v1/hosts").then((r) => r.json()));
   // Bevorzugt ein Host mit Neustart (Textzeile „Neustart nötig“), sonst der erste.

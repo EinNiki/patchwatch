@@ -213,7 +213,7 @@ const GROUPS = {
       await page.route("**/api/v1/auth/login", (r) => r.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "unauthorized" }) }));
       await page.getByLabel("Benutzername").fill("admin");
       await page.getByLabel("Passwort").fill("falsches-passwort");
-      await page.getByRole("button", { name: "Anmelden" }).click();
+      await page.getByRole("button", { name: "Anmelden", exact: true }).click();
       await page.locator("form [role=alert]").waitFor();
     }, after: (page) => page.unroute("**/api/v1/auth/login") },
   ] },
@@ -294,7 +294,7 @@ async function login(browser) {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill(user);
   await page.getByLabel("Passwort").fill(password);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   Object.assign(ids, Object.fromEntries(await page.evaluate(async () => (await (await fetch("/api/v1/hosts")).json()).map((h) => [h.name, h.id]))));
   storageState = await ctx.storageState();

@@ -20,7 +20,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   if (process.env.PW_SCHEDULE) {
     const st = await page.evaluate(() => fetch("/api/v1/settings").then((r) => r.json()));

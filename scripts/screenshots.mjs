@@ -85,7 +85,7 @@ for (const scheme of ["light", "dark"]) {
     await shot("login");
     await page.getByLabel("Benutzername").fill(user);
     await page.getByLabel("Passwort").fill(password);
-    await page.getByRole("button", { name: "Anmelden" }).click();
+    await page.getByRole("button", { name: "Anmelden", exact: true }).click();
     await page.waitForURL((u) => !u.pathname.startsWith("/login"));
 
     const hosts = await page.evaluate(async () => (await (await fetch("/api/v1/hosts")).json()).map((h) => [h.name, h.id]));

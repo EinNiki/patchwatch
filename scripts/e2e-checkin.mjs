@@ -26,7 +26,7 @@ const page = await (await b.newContext({ viewport: { width: 1440, height: 900 } 
 await page.goto(`${web}/login`);
 await page.getByLabel("Benutzername").fill("admin");
 await page.getByLabel("Passwort").fill(pw);
-await page.getByRole("button", { name: "Anmelden" }).click();
+await page.getByRole("button", { name: "Anmelden", exact: true }).click();
 await page.waitForURL((u) => !u.pathname.startsWith("/login"));
 await page.goto(`${web}/agents`);
 await page.locator("span:visible", { hasText: /^Live$/ }).first().waitFor();

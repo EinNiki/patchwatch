@@ -92,7 +92,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill(user);
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   await page.goto(`${base}/`);
   await page.getByRole("table").first().waitFor({ timeout: 15_000 });

@@ -994,3 +994,21 @@ button[data-select] {
     animation: none;
   }
 }
+
+/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite, auch für schmale Fenster). */
+.orbit-icon {
+  transform: translate3d(
+    calc(var(--c) * max(calc(var(--k) * 100vw), var(--m))),
+    calc(var(--s) * calc(var(--k) * 100vh)),
+    0
+  );
+}
+@media (max-width: 767px) {
+  .orbit-icon {
+    transform: translate3d(
+      calc(var(--c) * min(max(calc(var(--k) * 100vw), var(--m)), calc(50vw - 26px))),
+      calc(var(--s) * min(calc(var(--k) * 100vh), calc(50vh - 26px))),
+      0
+    );
+  }
+}

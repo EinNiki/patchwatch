@@ -183,12 +183,17 @@ function Orbits() {
                 data-ring={ri}
                 data-i={i}
                 className="orbit-icon absolute touch-none select-none will-change-transform"
-                // Startposition schon im HTML: das Skript übernimmt nahtlos, die Logos stehen sofort da.
-                style={{
-                  left: -ICON / 2,
-                  top: -ICON / 2,
-                  transform: `translate3d(calc(${Math.cos(a).toFixed(3)} * max(${ring.k * 100}vw, ${250 + ri * 60}px)), calc(${Math.sin(a).toFixed(3)} * ${ring.k * 100}vh), 0)`,
-                }}
+                // Startposition schon im HTML (siehe .orbit-icon in globals.css): das Skript übernimmt nahtlos.
+                style={
+                  {
+                    left: -ICON / 2,
+                    top: -ICON / 2,
+                    "--c": Math.cos(a).toFixed(3),
+                    "--s": Math.sin(a).toFixed(3),
+                    "--k": ring.k,
+                    "--m": `${250 + ri * 60}px`,
+                  } as React.CSSProperties
+                }
               >
                 <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface shadow-(--shadow-float)">
                   <svg viewBox="0 0 24 24" className="size-5" fill={DISTRO_ICONS[name]!.hex}>
@@ -349,7 +354,8 @@ export default function LoginPage() {
                   disabled={!hydrated || !webauthnSupported()}
                   onClick={() => void passkeyLogin()}
                   title={webauthnSupported() ? undefined : "Dieser Browser unterstützt keine Passkeys (oder die Seite läuft nicht über HTTPS)."}
-                  className="w-full"
+                  // Bei großer Schrift darf der Text umbrechen statt abgeschnitten zu werden.
+                  className="h-auto! min-h-8 w-full whitespace-normal! py-1.5 leading-tight max-md:min-h-11"
                 >
                   Mit Passkey anmelden
                 </Button>

@@ -16,7 +16,7 @@ const login = await browser.newContext({ viewport: { width: 1440, height: 900 } 
   await p.goto(`${base}/login`);
   await p.getByLabel("Benutzername").fill("admin");
   await p.getByLabel("Passwort").fill(pw);
-  await p.getByRole("button", { name: "Anmelden" }).click();
+  await p.getByRole("button", { name: "Anmelden", exact: true }).click();
   await p.waitForURL((u) => !u.pathname.startsWith("/login"));
 }
 const state = await login.storageState();

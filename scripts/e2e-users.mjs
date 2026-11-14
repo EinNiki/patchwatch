@@ -28,7 +28,7 @@ async function login(ctx, user, password) {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill(user);
   await page.getByLabel("Passwort").fill(password);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   return page;
 }
@@ -134,7 +134,7 @@ try {
     await p.goto(`${base}/login`);
     await p.getByLabel("Benutzername").fill(name);
     await p.getByLabel("Passwort").fill(oneTime);
-    await p.getByRole("button", { name: "Anmelden" }).click();
+    await p.getByRole("button", { name: "Anmelden", exact: true }).click();
     await p.getByLabel("Aktuelles (Start-)Passwort").waitFor();
     await p.getByLabel("Aktuelles (Start-)Passwort").fill(oneTime);
     await p.getByLabel(/^Neues Passwort \(/).fill(NEW_PW);

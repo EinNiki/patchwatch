@@ -343,17 +343,17 @@ export default function AgentsPage() {
         <div className="@container/tbl max-hd:overflow-x-auto">
           {/* Reihenfolge: Name, Hostname, Distribution, Zuletzt gemeldet, Zuletzt erreichbar, Agent-Version (grau, schmal), Aktionen.
               Überschüssige Breite verteilt sich auf alle Spalten; die Aktionsspalte steht zuletzt und endet am rechten Rand. */}
-          <table className="tbl stack-lg dist1024 lg:[--col-pad:10px] lg:[--tbl-min:46.5rem] hd:[--tbl-min:58rem]">
+          <table className="tbl stack-lg dist1024 lg:[--col-pad:10px] lg:[--tbl-min:45rem] hd:[--tbl-min:58rem]">
             <caption>Agents mit Zeitpunkt der letzten Daten, letzter Aktivität, Aktionen und Version</caption>
             <thead>
               <tr>
                 <th scope="col" className="w-[12%] min-w-24 hd:min-w-22"><span className="th-pad">Name</span></th>
-                <th scope="col" className="w-[14%] min-w-28 hd:min-w-26"><span className="th-pad">Hostname laut Agent</span></th>
-                <th scope="col" className="w-[18%] min-w-24 hd:min-w-30"><span className="th-pad">Distribution</span></th>
+                <th scope="col" className="w-[14%] min-w-24 hd:min-w-26"><span className="th-pad">Hostname laut Agent</span></th>
+                <th scope="col" className="w-[18%] min-w-24 hd:min-w-28"><span className="th-pad">Distribution</span></th>
                 <th scope="col" className="w-[11%] min-w-20 hd:min-w-22"><span className="th-pad" title={DATA_TIP}>{DATA_LABEL}</span></th>
                 <th scope="col" className="w-[11%] min-w-20 hd:min-w-22"><span className="th-pad" title={ACTIVE_TIP}>{ACTIVE_LABEL}</span></th>
                 <th scope="col" className="w-[8%] min-w-16 hd:min-w-16 text-fg3"><span className="th-pad">Agent-Version</span></th>
-                <th scope="col" className="w-60 min-w-40 hd:w-[27rem] hd:min-w-[27rem]"><span className="th-pad">Aktionen</span></th>
+                <th scope="col" className="w-60 min-w-[9rem] hd:w-[27rem] hd:min-w-[27rem]"><span className="th-pad">Aktionen</span></th>
               </tr>
             </thead>
             <tbody>

@@ -58,7 +58,7 @@ const loginPage = await loginCtx.newPage();
 await loginPage.goto(`${base}/login`);
 await loginPage.getByLabel("Benutzername").fill(user);
 await loginPage.getByLabel("Passwort").fill(password);
-await loginPage.getByRole("button", { name: "Anmelden" }).click();
+await loginPage.getByRole("button", { name: "Anmelden", exact: true }).click();
 await loginPage.waitForURL((u) => !u.pathname.startsWith("/login"));
 const storageState = await loginCtx.storageState();
 await loginCtx.close();

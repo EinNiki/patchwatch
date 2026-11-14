@@ -15,7 +15,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   const PAGES = [["Hosts", "/", "table.tbl"], ["Agents", "/agents", "table.tbl"], ["CVE-Quellen", "/cves", "table[data-t=feeds]"]];
   for (const w of [1280, 1440, 1920, 2560]) {

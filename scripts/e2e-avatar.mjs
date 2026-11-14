@@ -28,7 +28,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   // Ausgangslage: kein eigenes Bild (Wegwerf-Datenbank).
   await page.evaluate(async () => { const me = await (await fetch("/api/v1/auth/me")).json(); await fetch("/api/v1/auth/avatar", { method: "DELETE", headers: { "x-csrf-token": me.csrf_token } }); });

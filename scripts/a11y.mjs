@@ -37,7 +37,7 @@ for (const scheme of ["light", "dark"]) {
     await scanLogin(page, `login ${vpName}/${scheme}`);
     await page.getByLabel("Benutzername").fill(process.env.PW_USER ?? "admin");
     await page.getByLabel("Passwort").fill(password);
-    await page.getByRole("button", { name: "Anmelden" }).click();
+    await page.getByRole("button", { name: "Anmelden", exact: true }).click();
     await page.waitForURL((u) => !u.pathname.startsWith("/login"));
     const ids = Object.fromEntries(await page.evaluate(async () => (await (await fetch("/api/v1/hosts")).json()).map((h) => [h.name, h.id])));
     for (const p of PAGES) {
@@ -82,7 +82,7 @@ for (const scheme of ["light", "dark"]) {
 async function scanLogin(page, label) {
   await page.getByLabel("Benutzername").waitFor();
   // Der Button ist bis zur Hydration deaktiviert; erst danach ist der Zustand stabil.
-  await page.getByRole("button", { name: "Anmelden" }).waitFor();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector("button[type=submit]")?.disabled);
   await scan(page, label);
 }

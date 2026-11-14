@@ -16,7 +16,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   const hosts = await page.evaluate(() => fetch("/api/v1/hosts").then((r) => r.json()));
   const host = hosts[0];
@@ -217,7 +217,7 @@ try {
   await tp.goto(`${base}/login`);
   await tp.getByLabel("Benutzername").fill("admin");
   await tp.getByLabel("Passwort").fill(pw);
-  await tp.getByRole("button", { name: "Anmelden" }).click();
+  await tp.getByRole("button", { name: "Anmelden", exact: true }).click();
   await tp.waitForURL((u) => !u.pathname.startsWith("/login"));
   await tp.goto(`${base}/`);
   const trow = tp.locator("table.tbl tbody tr").first();

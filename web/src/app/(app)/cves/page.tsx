@@ -469,7 +469,7 @@ function CveView() {
         ) : (
           <>
             <div className="updatable @container/tbl max-xl:overflow-x-auto" data-updating={updating ? "" : undefined} aria-busy={updating || undefined}>
-              <table className="tbl stack dist md:[--tbl-min:45.5rem] xl:[--tbl-min:52.5rem] wide:[--tbl-min:63.5rem]">
+              <table className="tbl stack dist md:[--tbl-min:44.5rem] xl:[--tbl-min:52.5rem] wide:[--tbl-min:63.5rem]">
                 <caption>CVEs mit Distributionen, betroffenen Hosts und Watchlist-Status</caption>
                 <thead>
                   <tr>
@@ -477,7 +477,7 @@ function CveView() {
                     <SortTh className="w-[10%] min-w-36" label="CVE" hint={sort === "latest" ? (dir === "desc" ? "neueste zuerst" : "älteste zuerst") : "nach Datum sortieren"} active={sort === "latest"} dir={dir} onClick={() => sortBy("latest")} />
                     <th scope="col" className="w-[24%] min-w-40"><span className="th-pad">Beschreibung</span></th>
                     <th scope="col" className="w-[15%] min-w-40"><span className="th-pad">Distributionen</span></th>
-                    <SortTh className="w-[22%] min-w-56" label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
+                    <SortTh className="w-[22%] min-w-52" label="Hosts" hint="nach Anzahl betroffener Hosts sortieren" active={sort === "hosts"} dir={dir} onClick={() => sortBy("hosts")} />
                     <th scope="col" className="w-[8%] min-w-24 max-wide:hidden"><span className="th-pad">Pakete</span></th>
                     <SortTh label="Level" className="w-[6%] min-w-20 max-wide:hidden" active={sort === "level"} dir={dir} onClick={() => sortBy("level")} />
                     <SortTh label="Aktualisiert" className="w-[12%] min-w-28 md:max-xl:hidden" active={sort === "updated"} dir={dir} onClick={() => sortBy("updated")} />

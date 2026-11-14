@@ -56,7 +56,7 @@ try {
   await lp.goto(`${base}/login`);
   await lp.getByLabel("Benutzername").fill(user);
   await lp.getByLabel("Passwort").fill(password);
-  await lp.getByRole("button", { name: "Anmelden" }).click();
+  await lp.getByRole("button", { name: "Anmelden", exact: true }).click();
   await lp.waitForURL((u) => !u.pathname.startsWith("/login"));
   const ids = Object.fromEntries(await lp.evaluate(async () => (await (await fetch("/api/v1/hosts")).json()).map((h) => [h.name, h.id])));
   const storageState = await lc.storageState();

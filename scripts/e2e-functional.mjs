@@ -103,7 +103,7 @@ async function ui() {
   await page.goto(`${WEB}/login`);
   await page.getByLabel("Benutzername").fill(USER);
   await page.getByLabel("Passwort").fill(PW);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   return page;
 }

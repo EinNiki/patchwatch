@@ -17,7 +17,7 @@ try {
   await page.goto(`${base}/login`);
   await page.getByLabel("Benutzername").fill("admin");
   await page.getByLabel("Passwort").fill(pw);
-  await page.getByRole("button", { name: "Anmelden" }).click();
+  await page.getByRole("button", { name: "Anmelden", exact: true }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   const real = await page.evaluate(() => fetch("/api/v1/hosts").then((r) => r.json()));
   const mk = (i, name, o) => ({ ...real[0], id: 9000 + i, name, hostname: name, is_proxmox: false, status: "cve_vulnerable", cve_vulnerable: 0, cve_fix_pending: 0, cve_reboot: 0, cve_unknown: 0, cve_fixed: 0, cve_source_issue: null, ...o });
