@@ -5,17 +5,20 @@ import { useRouter } from "next/navigation";
 import { api, ApiError, setCsrf } from "@/lib/api";
 import type { Me } from "@/lib/types";
 import { Button, Field, TextInput } from "@/components/Controls";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { LOGIN_BG } from "@/lib/loginBg";
+import { setLoginPhase } from "@/lib/loginTransition";
 import { DISTRO_ICONS } from "@/lib/distroIcons";
 import { getPasskey, passkeyErrorText, webauthnSupported } from "@/lib/webauthn";
 
 // true erst nach der Hydration: vorher darf nichts abgeschickt werden.
 const subscribe = () => () => {};
 
-/** Bahnen (echte Kreise): Radius relativ zur kleineren Fensterseite (k), Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
+/** Bahnen (Kreise im Bild): Anteil (k) am größtmöglichen Radius = Hälfte der kleineren Fensterseite minus Rand, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
 const RINGS: { k: number; period: number; icons: string[] }[] = [
-  { k: 0.45, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
-  { k: 0.52, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
-  { k: 0.59, period: 120, icons: ["RHEL", "openSUSE"] },
+  { k: 0.8, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
+  { k: 0.9, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
+  { k: 1, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
 const ICON = 40; // Durchmesser in px
@@ -31,8 +34,12 @@ const baseAngle = (ri: number, i: number) => (i / RINGS[ri]!.icons.length) * Mat
  * nichts erst nach dem Laden des Skripts erscheint. „Weniger Bewegung“: Logos stehen still und lassen sich nicht werfen.
  * Reine Dekoration (aria-hidden).
  */
-function Orbits() {
+function Orbits({ converge }: { converge: boolean }) {
   const box = useRef<HTMLDivElement>(null);
+  const conv = useRef(converge);
+  useEffect(() => {
+    conv.current = converge;
+  }, [converge]);
   useEffect(() => {
     const el = box.current;
     if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -44,10 +51,12 @@ function Orbits() {
     const size = { w: 0, h: 0 };
     let drag: { i: number; id: number; gx: number; gy: number; px: number; py: number } | null = null;
 
-    const radius = (ri: number) => {
-      // Handy (hochkant): Radius nach der Höhe, damit die Logos oben und unten neben der Karte laufen statt dahinter.
-      const m = size.w < 768 ? size.h : Math.min(size.w, size.h);
-      return RINGS[ri]!.k * m;
+    // Halbachsen der Bahn: Kreis im Bild; auf schmalen Fenstern (Handy) eine Ellipse über die ganze Fläche.
+    const axes = (ri: number) => {
+      const k = RINGS[ri]!.k;
+      if (size.w < 768) return { rx: k * (size.w / 2 - 26), ry: k * (size.h / 2 - 30) };
+      const r = k * (Math.min(size.w, size.h) / 2 - 30);
+      return { rx: r, ry: r };
     };
 
     const rel = (e: PointerEvent, gx: number, gy: number) => {
@@ -110,7 +119,16 @@ function Orbits() {
       icons.forEach((c, i) => {
         const s = st[i]!;
         const ri = Number(c.dataset.ring);
-        const R = radius(ri);
+        const { rx, ry } = axes(ri);
+        if (conv.current) {
+          // Anmeldung gelungen: alles zieht sich weich in die Mitte zusammen.
+          const f = 1 - Math.exp(-dt * 6);
+          s.x -= s.x * f;
+          s.y -= s.y * f;
+          s.free = true;
+          c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0)`;
+          return;
+        }
         if (drag && drag.i === i) {
           // Folgt dem Zeiger; Geschwindigkeit weich mitschreiben, damit der Wurf Schwung hat.
           s.vx += ((drag.px - s.x) / dt - s.vx) * 0.35;
@@ -122,6 +140,8 @@ function Orbits() {
           const r = Math.hypot(s.x, s.y);
           const ux = r > 1 ? s.x / r : 1;
           const uy = r > 1 ? s.y / r : 0;
+          // Sollradius der Bahn in dieser Richtung (bei Kreis = Radius, bei Ellipse der Schnittpunkt).
+          const R = 1 / Math.sqrt((ux / rx) ** 2 + (uy / ry) ** 2);
           const K = 7;
           const C = 2.2;
           s.vx += (-K * (r - R) * ux - C * s.vx) * dt;
@@ -136,12 +156,12 @@ function Orbits() {
           // Eingereiht, sobald das Logo nahe an der Bahn und langsam ist: Umlauf startet am aktuellen Winkel.
           if (Math.abs(Math.hypot(s.x, s.y) - R) < 8 && Math.hypot(s.vx, s.vy) < 90) {
             s.free = false;
-            s.theta = Math.atan2(s.y, s.x);
+            s.theta = Math.atan2(s.y / ry, s.x / rx);
           }
         } else {
           s.theta += ((Math.PI * 2) / RINGS[ri]!.period) * dt;
-          s.x = Math.cos(s.theta) * R;
-          s.y = Math.sin(s.theta) * R;
+          s.x = Math.cos(s.theta) * rx;
+          s.y = Math.sin(s.theta) * ry;
         }
         // Abprallen an den Fensterrändern (nur beim Ziehen/Fliegen; im Umlauf dürfen Logos seitlich aus dem Bild laufen).
         if (!drag && !s.free) {
@@ -219,6 +239,7 @@ export default function LoginPage() {
   const ssoDenied = useSyncExternalStore(subscribe, () => window.location.search.includes("error=oidc"), () => false);
   const error = formError ?? (ssoDenied ? "Anmeldung per Single Sign-On abgelehnt. Ist dein Konto freigegeben?" : null);
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [show, setShow] = useState(false);
   const [oidc, setOidc] = useState<{ enabled: boolean; name: string } | null>(null);
   const [passkey, setPasskey] = useState(false);
@@ -233,6 +254,23 @@ export default function LoginPage() {
     );
   }, []);
 
+  // Nach der Anmeldung: Logos und Karte ziehen sich zusammen, dann öffnet sich das Dashboard von der Mitte aus.
+  async function enter() {
+    try {
+      window.localStorage.removeItem("pw-nav:notifications");
+    } catch {
+      /* Speicher gesperrt: egal */
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      router.replace("/");
+      return;
+    }
+    setLeaving(true);
+    await new Promise((r) => setTimeout(r, 750));
+    setLoginPhase("cover");
+    router.replace("/");
+  }
+
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -244,13 +282,8 @@ export default function LoginPage() {
         password: String(form.get("password") ?? ""),
       });
       setCsrf(me.csrf_token);
-      // Nach der Anmeldung startet die Seitenleiste immer mit eingeklappten Benachrichtigungen.
-      try {
-        window.localStorage.removeItem("pw-nav:notifications");
-      } catch {
-        /* Speicher gesperrt: egal */
-      }
-      router.replace("/");
+      // Die Seitenleiste startet danach mit eingeklappten Benachrichtigungen (siehe enter).
+      await enter();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) setError("Benutzername oder Passwort falsch.");
       else if (err instanceof ApiError && err.status === 429) setError("Zu viele Anmeldeversuche. Bitte in einigen Minuten erneut versuchen.");
@@ -270,12 +303,7 @@ export default function LoginPage() {
       const credential = await getPasskey(start.options);
       const me = await api.post<Me>("/auth/passkey/login/finish", { ceremony: start.ceremony, credential }, { silent: true });
       setCsrf(me.csrf_token);
-      try {
-        window.localStorage.removeItem("pw-nav:notifications");
-      } catch {
-        /* Speicher gesperrt: egal */
-      }
-      router.replace("/");
+      await enter();
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) setError("Zu viele Versuche. Bitte in einigen Minuten erneut versuchen.");
       else if (err instanceof ApiError && err.status === 401) setError("Passkey abgelehnt. Ist für dieses Konto ein Passkey eingerichtet?");
@@ -289,22 +317,20 @@ export default function LoginPage() {
     <main
       id="main"
       tabIndex={-1}
-      // Hintergrund: weicher Farbverlauf aus dem Akzent plus feines Punktraster; beides aus den Design-Token, also hell und dunkel passend.
-      className="relative flex min-h-dvh flex-col items-center justify-center px-4 py-10"
-      style={{
-        backgroundImage:
-          "radial-gradient(52rem 34rem at 100% -6%, color-mix(in srgb, color-mix(in srgb, var(--accent) 45%, #a9d0ff) 26%, transparent), transparent 70%), radial-gradient(52rem 34rem at 100% 106%, color-mix(in srgb, color-mix(in srgb, var(--accent) 45%, #a9d0ff) 22%, transparent), transparent 70%), radial-gradient(color-mix(in srgb, var(--text-3) 30%, transparent) 1px, transparent 1px)",
-        backgroundSize: "auto, auto, 22px 22px",
-      }}
+      // Hintergrund: kräftige Akzent-Glows oben links und unten rechts plus Punktraster (aus den Design-Token, hell und dunkel passend).
+      className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10"
+      style={LOGIN_BG}
     >
-      <Orbits />
-      <div className="relative w-full max-w-md">
+      <Orbits converge={leaving} />
+      <ThemeToggle className="absolute! right-4 top-4 z-10 text-fg2" />
+      <div className={`relative w-full max-w-md transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
         <div className="mb-6 flex flex-col items-center text-center">
           <svg width="56" height="56" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-3 rounded-lg shadow-(--shadow-float)">
             <rect width="32" height="32" rx="6" fill="var(--accent)" />
             <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <h1 className="m-0 font-mono text-2xl font-medium">patchwatch</h1>
+          <p className="m-0 mt-1 text-fg2">Willkommen zurück</p>
         </div>
         {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
         <form

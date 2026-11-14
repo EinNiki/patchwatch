@@ -348,7 +348,7 @@ try {
   // Der Routenansager von Next (next-route-announcer, role=alert) ist kein Fehlerbanner.
   const banners = await page.evaluate(() => [...document.querySelectorAll("[role=alert]")].filter((e) => !e.closest("next-route-announcer") && e.textContent.trim()).map((e) => e.textContent.trim().slice(0, 80)));
   ok(banners.length === 0, `OIDC-Formular: kein Fehlerbanner im Ausgangszustand${banners.length ? ` -> ${banners.join("; ")}` : ""}`);
-  const testBtn = page.getByRole("button", { name: "Verbindung testen" });
+  const testBtn = page.getByRole("button", { name: "Verbindung testen" }).first();
   ok((await testBtn.getAttribute("aria-disabled")) === "true" && ((await testBtn.getAttribute("title")) ?? "").length > 10, "Verbindung testen gesperrt mit Grund (Tooltip)");
   ok(await page.getByText(/Speichere zuerst/).first().isVisible(), "Grund steht sichtbar neben dem Knopf");
   for (const scheme of ["light", "dark"]) {

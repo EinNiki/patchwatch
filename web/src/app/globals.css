@@ -995,16 +995,45 @@ button[data-select] {
   }
 }
 
-/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite: Kreis um die Mitte, Radius k * kleinere Fensterseite). */
+/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite): Kreis um die Mitte, Radius k * (kleinere Fensterhälfte - 30px); auf dem Handy eine Ellipse in der Fensterfläche. */
 .orbit-icon {
   transform: translate3d(
-    calc(var(--c) * var(--k) * min(100vw, 100vh)),
-    calc(var(--s) * var(--k) * min(100vw, 100vh)),
+    calc(var(--c) * var(--k) * (min(100vw, 100vh) / 2 - 30px)),
+    calc(var(--s) * var(--k) * (min(100vw, 100vh) / 2 - 30px)),
     0
   );
 }
 @media (max-width: 767px) {
   .orbit-icon {
-    transform: translate3d(calc(var(--c) * var(--k) * 100vh), calc(var(--s) * var(--k) * 100vh), 0);
+    transform: translate3d(
+      calc(var(--c) * var(--k) * (100vw / 2 - 26px)),
+      calc(var(--s) * var(--k) * (100vh / 2 - 30px)),
+      0
+    );
+  }
+}
+
+/* Übergang nach der Anmeldung: ein Loch wächst von der Mitte und gibt das Dashboard frei. */
+@property --hole {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+@keyframes login-reveal {
+  from {
+    --hole: 0%;
+  }
+  to {
+    --hole: 112%;
+  }
+}
+.login-reveal {
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
+  mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
+  animation: login-reveal 850ms var(--ease-out) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-reveal {
+    animation-duration: 1ms;
   }
 }

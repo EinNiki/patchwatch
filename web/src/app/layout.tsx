@@ -5,6 +5,7 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 import { ToastProvider } from "@/components/Toaster";
+import { LoginTransition } from "@/components/LoginTransition";
 
 export const metadata: Metadata = {
   title: { default: "patchwatch", template: "%s · patchwatch" },
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Zum Inhalt springen
         </a>
         <ToastProvider>{children}</ToastProvider>
+        <LoginTransition />
       </body>
     </html>
   );
