@@ -11,25 +11,26 @@ import { getPasskey, passkeyErrorText, webauthnSupported } from "@/lib/webauthn"
 // true erst nach der Hydration: vorher darf nichts abgeschickt werden.
 const subscribe = () => () => {};
 
-/** Bahnen: Größe relativ zum Fenster (k), Umlaufzeit in s (negativ = gegen den Uhrzeigersinn) und die Logos darauf. */
+/** Bahnen (echte Kreise): Radius relativ zur kleineren Fensterseite (k), Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
 const RINGS: { k: number; period: number; icons: string[] }[] = [
-  { k: 0.4, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
-  { k: 0.47, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
-  { k: 0.54, period: 120, icons: ["RHEL", "openSUSE"] },
+  { k: 0.45, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
+  { k: 0.52, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
+  { k: 0.59, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
 const ICON = 40; // Durchmesser in px
-const MARGIN = 26; // Mindestabstand zum Fensterrand beim Werfen
+const MARGIN = 26; // Mindestabstand zum Fensterrand
 
 /** Startwinkel eines Logos auf seiner Bahn. */
 const baseAngle = (ri: number, i: number) => (i / RINGS[ri]!.icons.length) * Math.PI * 2 + ri;
 
 /**
- * Logos kreisen (ohne sichtbare Linien) in Abstand um die Anmeldekarte. Sie lassen sich anfassen und werfen: beim
- * Loslassen behält ein Logo seinen Schwung, prallt an den Fensterrändern ab und wird von einer weichen Feder zurück
- * auf seine Bahn gezogen. Die Bahn-Mitte folgt dem Mauszeiger ein paar Pixel. Die Startpositionen stehen schon im
- * Server-HTML (CSS), damit nichts erst nach dem Laden des Skripts erscheint; „weniger Bewegung“: Logos stehen still und
- * lassen sich nicht werfen. Reine Dekoration (aria-hidden), per Tastatur nicht nötig.
+ * Logos kreisen auf unsichtbaren Kreisbahnen um die Anmeldekarte. Sie lassen sich anfassen und werfen: ein
+ * losgelassenes Logo fliegt mit seinem Schwung weiter, prallt an den Fensterrändern ab, wird von einer weichen Feder
+ * zur Kreisbahn gezogen und reiht sich dort am nächstgelegenen Punkt wieder ein (nicht an seiner alten Stelle).
+ * Die Bahn-Mitte folgt dem Mauszeiger ein paar Pixel. Die Startpositionen stehen schon im Server-HTML (CSS), damit
+ * nichts erst nach dem Laden des Skripts erscheint. „Weniger Bewegung“: Logos stehen still und lassen sich nicht werfen.
+ * Reine Dekoration (aria-hidden).
  */
 function Orbits() {
   const box = useRef<HTMLDivElement>(null);
@@ -37,57 +38,53 @@ function Orbits() {
     const el = box.current;
     if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const icons = Array.from(el.querySelectorAll<HTMLElement>("[data-orbit]"));
-    const st = icons.map(() => ({ x: 0, y: 0, vx: 0, vy: 0 })); // Abweichung von der Bahn (px) und Geschwindigkeit
+    // theta: Winkel auf der Bahn (nur im Umlauf); x/y: Position zur Mitte; free: fliegt gerade frei (geworfen/gezogen)
+    const st = icons.map((c) => ({ theta: baseAngle(Number(c.dataset.ring), Number(c.dataset.i)), x: 0, y: 0, vx: 0, vy: 0, free: false }));
     let target = { x: 0, y: 0 };
     const cur = { x: 0, y: 0 };
     const size = { w: 0, h: 0 };
-    let drag: { i: number; id: number; gx: number; gy: number; px: number; py: number; pt: number } | null = null;
-    let tilt = { x: 0, y: 0 };
+    let drag: { i: number; id: number; gx: number; gy: number; px: number; py: number } | null = null;
 
-    const orbitPos = (i: number, t0: number) => {
-      const c = icons[i]!;
-      const ri = Number(c.dataset.ring);
-      const ring = RINGS[ri]!;
-      const a = baseAngle(ri, Number(c.dataset.i)) + (t0 / 1000 / ring.period) * Math.PI * 2;
-      let rx = Math.max(size.w * ring.k, 250 + ri * 60);
-      let ry = size.h * ring.k;
-      // Schmale Fenster (Handy): Bahnen bleiben komplett im Bild.
-      if (size.w < 768) {
-        rx = Math.min(rx, size.w / 2 - MARGIN);
-        ry = Math.min(ry, size.h / 2 - MARGIN);
-      }
-      return { x: Math.cos(a) * rx, y: Math.sin(a) * ry };
+    const radius = (ri: number) => {
+      const m = Math.min(size.w, size.h);
+      const r = RINGS[ri]!.k * m;
+      // Schmale Fenster (Handy): Bahn bleibt komplett im Bild.
+      return size.w < 768 ? Math.min(r, m / 2 - MARGIN) : r;
     };
 
+    const rel = (e: PointerEvent, gx: number, gy: number) => {
+      const r = el.getBoundingClientRect();
+      return { x: e.clientX - r.left - r.width / 2 - cur.x - gx, y: e.clientY - r.top - r.height / 2 - cur.y - gy };
+    };
     const move = (e: PointerEvent) => {
       if (e.pointerType === "mouse") {
         const r = el.getBoundingClientRect();
         target = { x: ((e.clientX - r.left) / r.width - 0.5) * 36, y: ((e.clientY - r.top) / r.height - 0.5) * 36 };
       }
       if (drag && e.pointerId === drag.id) {
-        // Zeigerposition relativ zur Mitte der Fläche, ohne die Neigung.
-        const r = el.getBoundingClientRect();
-        drag.px = e.clientX - r.left - r.width / 2 - tilt.x - drag.gx;
-        drag.py = e.clientY - r.top - r.height / 2 - tilt.y - drag.gy;
+        const q = rel(e, drag.gx, drag.gy);
+        drag.px = q.x;
+        drag.py = q.y;
       }
     };
     const up = (e: PointerEvent) => {
       if (drag && e.pointerId === drag.id) {
         icons[drag.i]!.style.cursor = "grab";
-        drag = null; // die Geschwindigkeit stammt aus den letzten Bewegungen (siehe tick)
+        drag = null; // free bleibt gesetzt: das Logo fliegt mit dem zuletzt gemessenen Schwung weiter
       }
     };
     const downs = icons.map((c, i) => {
       const f = (e: PointerEvent) => {
         if (e.button > 0) return;
-        const r = el.getBoundingClientRect();
         const cr = c.getBoundingClientRect();
-        // Griffpunkt: Abstand des Zeigers zur Mitte des Logos.
         const gx = e.clientX - (cr.left + cr.width / 2);
         const gy = e.clientY - (cr.top + cr.height / 2);
-        drag = { i, id: e.pointerId, gx, gy, px: e.clientX - r.left - r.width / 2 - tilt.x - gx, py: e.clientY - r.top - r.height / 2 - tilt.y - gy, pt: performance.now() };
-        st[i]!.vx = 0;
-        st[i]!.vy = 0;
+        const q = rel(e, gx, gy);
+        drag = { i, id: e.pointerId, gx, gy, px: q.x, py: q.y };
+        const s = st[i]!;
+        s.free = true;
+        s.vx = 0;
+        s.vy = 0;
         c.style.cursor = "grabbing";
         c.setPointerCapture(e.pointerId);
         e.preventDefault();
@@ -100,60 +97,64 @@ function Orbits() {
     window.addEventListener("pointercancel", up);
 
     let raf = 0;
-    let t0 = 0;
     let last = 0;
     const tick = (t: number) => {
-      if (!t0) {
-        t0 = t;
-        last = t;
-      }
-      const dt = Math.min((t - last) / 1000, 0.04) || 0.016;
+      const dt = Math.min((t - (last || t)) / 1000, 0.04) || 0.016;
       last = t;
       size.w = el.clientWidth;
       size.h = el.clientHeight;
       cur.x += (target.x - cur.x) * 0.05;
       cur.y += (target.y - cur.y) * 0.05;
-      tilt = cur;
       el.style.setProperty("--ox", `${cur.x.toFixed(1)}px`);
       el.style.setProperty("--oy", `${cur.y.toFixed(1)}px`);
       const hx = size.w / 2 - ICON / 2 - 4;
       const hy = size.h / 2 - ICON / 2 - 4;
       icons.forEach((c, i) => {
-        const o = orbitPos(i, t - t0);
         const s = st[i]!;
+        const ri = Number(c.dataset.ring);
+        const R = radius(ri);
         if (drag && drag.i === i) {
-          // Folgt dem Zeiger; die Geschwindigkeit wird weich mitgeschrieben, damit der Wurf Schwung hat.
-          const nx = drag.px - o.x;
-          const ny = drag.py - o.y;
-          s.vx += ((nx - s.x) / dt - s.vx) * 0.35;
-          s.vy += ((ny - s.y) / dt - s.vy) * 0.35;
-          s.x = nx;
-          s.y = ny;
-        } else {
-          // Weiche Feder zurück auf die Bahn (leicht unterdämpft: schwingt kurz nach) und Reibung.
-          const K = 2.4;
-          const C = 1.5;
-          s.vx += (-K * s.x - C * s.vx) * dt;
-          s.vy += (-K * s.y - C * s.vy) * dt;
-          s.vx = Math.max(-3000, Math.min(3000, s.vx));
-          s.vy = Math.max(-3000, Math.min(3000, s.vy));
+          // Folgt dem Zeiger; Geschwindigkeit weich mitschreiben, damit der Wurf Schwung hat.
+          s.vx += ((drag.px - s.x) / dt - s.vx) * 0.35;
+          s.vy += ((drag.py - s.y) / dt - s.vy) * 0.35;
+          s.x = drag.px;
+          s.y = drag.py;
+        } else if (s.free) {
+          // Frei: Feder zur Kreisbahn (nur radial) plus Reibung; der Schwung bleibt zunächst erhalten.
+          const r = Math.hypot(s.x, s.y);
+          const ux = r > 1 ? s.x / r : 1;
+          const uy = r > 1 ? s.y / r : 0;
+          const K = 7;
+          const C = 2.2;
+          s.vx += (-K * (r - R) * ux - C * s.vx) * dt;
+          s.vy += (-K * (r - R) * uy - C * s.vy) * dt;
+          const v = Math.hypot(s.vx, s.vy);
+          if (v > 3000) {
+            s.vx *= 3000 / v;
+            s.vy *= 3000 / v;
+          }
           s.x += s.vx * dt;
           s.y += s.vy * dt;
+          // Eingereiht, sobald das Logo nahe an der Bahn und langsam ist: Umlauf startet am aktuellen Winkel.
+          if (Math.abs(Math.hypot(s.x, s.y) - R) < 8 && Math.hypot(s.vx, s.vy) < 90) {
+            s.free = false;
+            s.theta = Math.atan2(s.y, s.x);
+          }
+        } else {
+          s.theta += ((Math.PI * 2) / RINGS[ri]!.period) * dt;
+          s.x = Math.cos(s.theta) * R;
+          s.y = Math.sin(s.theta) * R;
         }
-        // Abprallen an den Fensterrändern (absolute Position = Bahn + Abweichung).
-        let ax = o.x + s.x;
-        let ay = o.y + s.y;
-        if (ax > hx || ax < -hx) {
-          ax = Math.max(-hx, Math.min(hx, ax));
+        // Abprallen an den Fensterrändern.
+        if (s.x > hx || s.x < -hx) {
+          s.x = Math.max(-hx, Math.min(hx, s.x));
           if (!(drag && drag.i === i)) s.vx *= -0.75;
-          s.x = ax - o.x;
         }
-        if (ay > hy || ay < -hy) {
-          ay = Math.max(-hy, Math.min(hy, ay));
+        if (s.y > hy || s.y < -hy) {
+          s.y = Math.max(-hy, Math.min(hy, s.y));
           if (!(drag && drag.i === i)) s.vy *= -0.75;
-          s.y = ay - o.y;
         }
-        c.style.transform = `translate3d(${ax.toFixed(1)}px, ${ay.toFixed(1)}px, 0)`;
+        c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0)`;
       });
       raf = requestAnimationFrame(tick);
     };
@@ -191,7 +192,6 @@ function Orbits() {
                     "--c": Math.cos(a).toFixed(3),
                     "--s": Math.sin(a).toFixed(3),
                     "--k": ring.k,
-                    "--m": `${250 + ri * 60}px`,
                   } as React.CSSProperties
                 }
               >
@@ -296,20 +296,20 @@ export default function LoginPage() {
       }}
     >
       <Orbits />
-      <div className="relative w-full max-w-sm">
+      <div className="relative w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
-          <svg width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-3 rounded-lg shadow-(--shadow-float)">
+          <svg width="56" height="56" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-3 rounded-lg shadow-(--shadow-float)">
             <rect width="32" height="32" rx="6" fill="var(--accent)" />
             <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <h1 className="m-0 font-mono text-xl font-medium">patchwatch</h1>
+          <h1 className="m-0 font-mono text-2xl font-medium">patchwatch</h1>
         </div>
         {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
         <form
           method="post"
           action="/login"
           onSubmit={(e) => void submit(e)}
-          className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6 shadow-(--shadow-float)"
+          className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-8 shadow-(--shadow-float) max-sm:p-6"
         >
           <Field label="Benutzername">
             <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} />

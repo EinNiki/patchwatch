@@ -995,19 +995,19 @@ button[data-select] {
   }
 }
 
-/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite, auch für schmale Fenster). */
+/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite: Kreis um die Mitte, Radius k * kleinere Fensterseite). */
 .orbit-icon {
   transform: translate3d(
-    calc(var(--c) * max(calc(var(--k) * 100vw), var(--m))),
-    calc(var(--s) * calc(var(--k) * 100vh)),
+    calc(var(--c) * var(--k) * min(100vw, 100vh)),
+    calc(var(--s) * var(--k) * min(100vw, 100vh)),
     0
   );
 }
 @media (max-width: 767px) {
   .orbit-icon {
     transform: translate3d(
-      calc(var(--c) * min(max(calc(var(--k) * 100vw), var(--m)), calc(50vw - 26px))),
-      calc(var(--s) * min(calc(var(--k) * 100vh), calc(50vh - 26px))),
+      calc(var(--c) * min(var(--k) * min(100vw, 100vh), min(100vw, 100vh) / 2 - 26px)),
+      calc(var(--s) * min(var(--k) * min(100vw, 100vh), min(100vw, 100vh) / 2 - 26px)),
       0
     );
   }
