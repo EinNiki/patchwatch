@@ -13,13 +13,13 @@ const subscribe = () => () => {};
 
 /** Ringe: Radius in px, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn) und die Logos darauf. */
 const RINGS: { r: number; period: number; icons: string[] }[] = [
-  { r: 300, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
-  { r: 385, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
-  { r: 470, period: 120, icons: ["RHEL", "openSUSE"] },
+  { r: 380, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
+  { r: 470, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
+  { r: 560, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
 /**
- * Logos kreisen auf feinen Ringen um die Anmeldekarte. Die Ringmitte folgt dem Mauszeiger ein paar Pixel (sanft
+ * Logos kreisen (ohne sichtbare Linien) in Abstand um die Anmeldekarte. Die Mitte folgt dem Mauszeiger ein paar Pixel (sanft
  * nachgezogen). Aus bei „weniger Bewegung“ (Logos stehen dann still) und auf kleinen Fenstern; reine Dekoration.
  */
 function Orbits() {
@@ -62,10 +62,6 @@ function Orbits() {
       <div className="absolute left-1/2 top-1/2" style={{ transform: "translate(var(--ox, 0px), var(--oy, 0px))" }}>
         {RINGS.map((ring, ri) => (
           <div key={ring.r}>
-            <span
-              className="absolute rounded-full border border-line"
-              style={{ width: ring.r * 2, height: ring.r * 2, left: -ring.r, top: -ring.r, opacity: 0.7 }}
-            />
             {ring.icons.map((name, i) => (
               <span key={name} data-orbit data-ring={ri} data-i={i} className="absolute will-change-transform" style={{ left: -20, top: -20 }}>
                 <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface shadow-(--shadow-float)">
@@ -182,16 +178,26 @@ export default function LoginPage() {
           method="post"
           action="/login"
           onSubmit={(e) => void submit(e)}
-          className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6 shadow-(--shadow-float)"
+          className="relative flex flex-col gap-4 overflow-hidden rounded-xl border border-line bg-[color-mix(in_srgb,var(--surface)_82%,transparent)] p-6 shadow-(--shadow-float) backdrop-blur-md"
         >
-          <Field label="Benutzername">
-            <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} />
-          </Field>
+          {/* Leuchtkante oben, wie bei modernen Anmeldedialogen */}
+          <span aria-hidden="true" className="pointer-events-none absolute inset-x-8 top-0 h-px bg-linear-to-r from-transparent via-accent to-transparent opacity-70" />
+          <div className="mb-1 text-center">
+            <h2 className="m-0 text-lg font-semibold">Willkommen zurück</h2>
+            <p className="m-0 mt-1 text-xs text-fg3">Melde dich an, um deine Hosts und CVEs zu sehen.</p>
+          </div>
+          <div className="relative">
+            <Field label="Benutzername">
+              <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="w-full pl-9" />
+            </Field>
+            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute bottom-[0.6rem] left-3 text-fg3 max-md:bottom-[0.85rem]"><circle cx="12" cy="8" r="4" /><path d="M4 21c1-4 4-6 8-6s7 2 8 6" /></svg>
+          </div>
           {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
           <div className="relative">
             <Field label="Passwort">
-              <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="w-full pr-12" />
+              <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="w-full pl-9 pr-12" />
             </Field>
+            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute bottom-[0.6rem] left-3 text-fg3 max-md:bottom-[0.85rem]"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></svg>
             <Button
               variant="ghost"
               data-hit="none"
