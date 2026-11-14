@@ -14,6 +14,8 @@ interface AuthValue {
   logout: () => Promise<void>;
   /** Neuer Cache-Schlüssel des Profilbilds nach Hochladen (Zahl) oder Entfernen (`null`). */
   setAvatar: (v: number | null) => void;
+  /** Neuer Anzeigename nach dem Speichern in den Einstellungen. */
+  setDisplayName: (v: string) => void;
 }
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -91,5 +93,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   if (me.must_change_password) {
     return <ForcedPasswordChange username={me.username} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={() => void logout()} />;
   }
-  return <Ctx.Provider value={{ me, logout, setAvatar: (v) => setMe({ ...me, avatar: v }) }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ me, logout, setAvatar: (v) => setMe({ ...me, avatar: v }), setDisplayName: (v) => setMe({ ...me, display_name: v }) }}>{children}</Ctx.Provider>;
 }

@@ -55,6 +55,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/oidc/login", get(oidc::login))
         .route("/auth/oidc/callback", get(oidc::callback))
         .route("/auth/password", post(auth::change_password))
+        .route("/auth/profile", axum::routing::put(auth::profile_put))
         .route(
             "/auth/avatar",
             get(auth::avatar_get)

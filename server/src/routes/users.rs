@@ -150,7 +150,7 @@ pub async fn list(
     })))
 }
 
-fn check_name(raw: &str) -> ApiResult<String> {
+pub(super) fn check_name(raw: &str) -> ApiResult<String> {
     let n = raw.trim();
     let len = n.chars().count();
     if len == 0 || len > MAX_NAME_CHARS {

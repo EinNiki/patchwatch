@@ -360,16 +360,16 @@ function SidebarBody({ pathname, collapse }: { pathname: string; collapse?: { co
         <div role="separator" className="mx-2 my-2 h-px bg-line" />
         <div className="flex flex-col gap-0.5">
           <div className="group/item relative">
-            <div className={`${rowBase} ${FOOT_TEXT}`} title={me.username}>
+            <div className={`${rowBase} ${FOOT_TEXT}`} title={me.display_name || me.username}>
               <span className={ICON}>
-                <Avatar name={me.username} version={me.avatar} size={20} />
+                <Avatar name={me.display_name || me.username} version={me.avatar} size={20} />
               </span>
               <p className={LABEL}>
                 <span className="sr-only">Angemeldet als </span>
-                {me.username}
+                {me.display_name || me.username}
               </p>
             </div>
-            <RailTip>{me.username}</RailTip>
+            <RailTip>{me.display_name || me.username}</RailTip>
           </div>
           <div className="group/item relative">
             <button type="button" onClick={() => void logout()} className={`${rowBase} ${FOOT_TEXT} w-full cursor-pointer text-left hover:bg-sunk hover:text-fg`}>

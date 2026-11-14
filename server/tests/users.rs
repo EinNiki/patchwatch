@@ -333,6 +333,7 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
         "/auth/oidc/callback",
         "/auth/password",
         "/auth/avatar",
+        "/auth/profile",
         "/live",
         "/healthz",
         "/readyz",
@@ -1534,4 +1535,49 @@ async fn migration_leaves_existing_accounts_on_their_role_template(pool: PgPool)
             .collect();
         assert_eq!(got, want, "{n}");
     }
+}
+
+/// Jeder Benutzer darf nur den eigenen Anzeigenamen ändern: geprüft, eindeutig, ohne Steuerzeichen, mit CSRF und Protokolleintrag.
+#[sqlx::test(migrations = "./migrations")]
+async fn own_display_name_can_be_changed_and_stays_unique(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    mk(&pool, "alice", "viewer", "active").await;
+    mk(&pool, "bob", "viewer", "active").await;
+    let a = login(&app, "alice").await;
+    let put = |name: &str| json!({ "display_name": name });
+    let uri = "/api/v1/auth/profile";
+
+    // Ohne CSRF-Token: abgelehnt.
+    let r = call(
+        &app,
+        Method::PUT,
+        uri,
+        &[("cookie", a.cookie.as_str())],
+        Some(put("Alice A.")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    let r = call(&app, Method::PUT, uri, &a.h(), Some(put("  Alice A.  "))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.raw);
+    assert_eq!(r.json["display_name"], "Alice A.");
+    let me = call(&app, Method::GET, "/api/v1/auth/me", &a.h(), None).await;
+    assert_eq!(me.json["display_name"], "Alice A.");
+    assert_eq!(me.json["username"], "alice", "der Anmeldename bleibt");
+
+    // Leer, zu lang, Steuerzeichen: 400. Schon vergebener Name (ohne Groß-/Kleinschreibung): 409.
+    for bad in ["", "   ", &"x".repeat(61), "a\nb"] {
+        let r = call(&app, Method::PUT, uri, &a.h(), Some(put(bad))).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    let r = call(&app, Method::PUT, uri, &a.h(), Some(put("BOB"))).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.raw);
+
+    // Protokolleintrag ohne den Namen als Geheimnis, aber mit Aktion.
+    let n: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = 'profile.updated'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(n, 1);
 }

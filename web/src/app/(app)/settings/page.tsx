@@ -19,6 +19,44 @@ import { can, type RolesResponse } from "@/lib/roles";
 
 const MIN_LEN = 12;
 
+/** Konto: Anzeigename ändern (vor allem bei OIDC, wo der Anbieter den Namen vorgibt). Der Anmeldename bleibt unverändert. */
+function ProfileForm() {
+  const { me, setDisplayName } = useAuth();
+  const current = me.display_name || me.username;
+  const [name, setName] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = name.trim();
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.put<{ display_name: string }>("/auth/profile", { display_name: trimmed }, { silent: true });
+      setDisplayName(r.display_name);
+      setName(r.display_name);
+      toast.success("Anzeigename gespeichert.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Anzeigename konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void submit(e)} className="flex max-w-sm flex-col gap-3">
+      <Field label="Anzeigename (1 bis 60 Zeichen)">
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} autoComplete="nickname" required maxLength={60} />
+      </Field>
+      {error ? <ErrorNote message={error} /> : null}
+      <Button type="submit" variant="primary" busy={busy} disabled={!trimmed || trimmed === current} className="self-start">
+        Namen speichern
+      </Button>
+    </form>
+  );
+}
+
 function PasswordForm() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -212,6 +250,7 @@ export default function SettingsPage() {
 
       <SettingsSection id="acct-h" title="Konto" description={<>Angemeldet als <Mono>{me.username}</Mono>.</>}>
         <div className="flex flex-col gap-6">
+          <ProfileForm />
           <AvatarForm />
           <PasswordForm />
         </div>

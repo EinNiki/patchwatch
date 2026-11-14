@@ -357,3 +357,44 @@ pub async fn avatar_delete(
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[derive(Deserialize)]
+pub struct ProfileBody {
+    display_name: String,
+}
+
+/// Eigenen Anzeigenamen ändern (z. B. bei OIDC, wo der Anbieter den Namen vorgibt). Nur das eigene Konto; der Anmeldename bleibt.
+pub async fn profile_put(
+    State(st): State<AppState>,
+    ClientIp(ip): ClientIp,
+    SelfCsrfAdmin(admin): SelfCsrfAdmin,
+    Json(body): Json<ProfileBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let name = super::users::check_name(&body.display_name)?;
+    let res = sqlx::query("UPDATE admin_users SET display_name = $2 WHERE id = $1")
+        .bind(admin.id)
+        .bind(&name)
+        .execute(&st.pool)
+        .await;
+    match res {
+        Ok(_) => {}
+        // Eindeutiger Index auf lower(display_name): der Name wird schon von einem anderen Konto verwendet.
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+            return Err(ApiError::Conflict(
+                "Dieser Anzeigename ist schon vergeben".into(),
+            ));
+        }
+        Err(e) => return Err(e.into()),
+    }
+    audit::record(
+        &st.pool,
+        Some(admin.id),
+        &admin.username,
+        "profile.updated",
+        Some(&admin.username),
+        Outcome::Ok,
+        &ip,
+    )
+    .await;
+    Ok(Json(json!({ "display_name": name })))
+}
