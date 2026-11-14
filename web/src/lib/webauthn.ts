@@ -32,6 +32,8 @@ export async function createPasskey(options: { publicKey: Record<string, unknown
   const pk = options.publicKey as unknown as { challenge: string; user: { id: string; name: string; displayName: string }; excludeCredentials?: Desc[] };
   const publicKey = {
     ...pk,
+    // Sichtbarer Schlüssel: nur so kann die Anmeldung ohne Benutzernamen funktionieren.
+    authenticatorSelection: { ...(pk as { authenticatorSelection?: object }).authenticatorSelection, residentKey: "required", requireResidentKey: true, userVerification: "required" },
     challenge: b64uToBuf(pk.challenge),
     user: { ...pk.user, id: b64uToBuf(pk.user.id) },
     excludeCredentials: (pk.excludeCredentials ?? []).map((c) => ({ ...c, id: b64uToBuf(c.id) })),

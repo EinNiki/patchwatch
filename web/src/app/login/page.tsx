@@ -5,97 +5,79 @@ import { useRouter } from "next/navigation";
 import { api, ApiError, setCsrf } from "@/lib/api";
 import type { Me } from "@/lib/types";
 import { Button, Field, TextInput } from "@/components/Controls";
+import { DISTRO_ICONS } from "@/lib/distroIcons";
 import { getPasskey, passkeyErrorText, webauthnSupported } from "@/lib/webauthn";
 
 // true erst nach der Hydration: vorher darf nichts abgeschickt werden.
 const subscribe = () => () => {};
 
-/** Schwebende Chips: [Text, x in %, y in %, Tiefe]. Die Ruhelage liegt um die Karte herum, nie darunter. */
-const FLOATERS: [string, number, number, number][] = [
-  ["Ubuntu", 14, 22, 1],
-  ["Debian", 80, 18, 0.8],
-  ["CVE", 26, 70, 1.2],
-  ["Proxmox", 86, 62, 0.9],
-  ["Alpine", 8, 52, 0.7],
-  ["Fedora", 72, 84, 1.1],
-  ["NVD", 36, 10, 0.9],
-  ["RHEL", 62, 8, 1.2],
-  ["Arch", 92, 38, 0.7],
-  ["openSUSE", 18, 90, 0.8],
-  ["OSV", 50, 93, 1],
+/** Ringe: Radius in px, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn) und die Logos darauf. */
+const RINGS: { r: number; period: number; icons: string[] }[] = [
+  { r: 300, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
+  { r: 385, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
+  { r: 470, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
 /**
- * Chips schweben frei (langsame Sinusbewegung) und folgen dem Mauszeiger sanft: jeder Chip wandert ein Stück in dessen
- * Richtung (je nach Tiefe unterschiedlich weit, mit Verzögerung), die Karte liegt darüber. Aus bei „weniger Bewegung“
- * und auf Touch-Fenstern; die Chips sind reine Dekoration (aria-hidden).
+ * Logos kreisen auf feinen Ringen um die Anmeldekarte. Die Ringmitte folgt dem Mauszeiger ein paar Pixel (sanft
+ * nachgezogen). Aus bei „weniger Bewegung“ (Logos stehen dann still) und auf kleinen Fenstern; reine Dekoration.
  */
-function Floaters() {
+function Orbits() {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current;
-    if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const chips = Array.from(el.children) as HTMLElement[];
-    const pos = chips.map(() => ({ x: 0, y: 0 }));
-    let mouse: { x: number; y: number } | null = null;
+    if (!el) return;
+    const icons = Array.from(el.querySelectorAll<HTMLElement>("[data-orbit]"));
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let target = { x: 0, y: 0 };
+    const cur = { x: 0, y: 0 };
     const move = (e: PointerEvent) => {
-      mouse = e.pointerType === "mouse" ? { x: e.clientX, y: e.clientY } : null;
+      if (e.pointerType !== "mouse") return;
+      const r = el.getBoundingClientRect();
+      target = { x: ((e.clientX - r.left) / r.width - 0.5) * 36, y: ((e.clientY - r.top) / r.height - 0.5) * 36 };
     };
-    const leave = () => {
-      mouse = null;
-    };
-    window.addEventListener("pointermove", move);
-    document.documentElement.addEventListener("pointerleave", leave);
+    if (!still) window.addEventListener("pointermove", move);
     let raf = 0;
     const tick = (t: number) => {
-      const r = el.getBoundingClientRect();
-      const sec = t / 1000;
-      chips.forEach((c, i) => {
-        const [, fx, fy, depth] = FLOATERS[i]!;
-        const bx = r.left + (fx / 100) * r.width;
-        const by = r.top + (fy / 100) * r.height;
-        // Schweben: zwei Sinuswellen mit eigener Phase je Chip.
-        const dx = Math.sin(sec * 0.45 + i * 1.7) * 16 * depth;
-        const dy = Math.cos(sec * 0.38 + i * 2.3) * 13 * depth;
-        // Anziehung: ein Teil der Strecke zum Zeiger, begrenzt, damit nichts davonfliegt.
-        let tx = 0;
-        let ty = 0;
-        if (mouse) {
-          const vx = mouse.x - bx;
-          const vy = mouse.y - by;
-          const dist = Math.hypot(vx, vy) || 1;
-          const pull = Math.min(dist * 0.22 * depth, 150);
-          tx = (vx / dist) * pull;
-          ty = (vy / dist) * pull;
-        }
-        const p = pos[i]!;
-        p.x += (tx - p.x) * 0.045;
-        p.y += (ty - p.y) * 0.045;
-        c.style.transform = `translate3d(${(dx + p.x).toFixed(1)}px, ${(dy + p.y).toFixed(1)}px, 0)`;
+      cur.x += (target.x - cur.x) * 0.05;
+      cur.y += (target.y - cur.y) * 0.05;
+      el.style.setProperty("--ox", `${cur.x.toFixed(1)}px`);
+      el.style.setProperty("--oy", `${cur.y.toFixed(1)}px`);
+      icons.forEach((c) => {
+        const ring = RINGS[Number(c.dataset.ring)]!;
+        const n = ring.icons.length;
+        const a = (Number(c.dataset.i) / n) * Math.PI * 2 + (still ? 0 : ((t / 1000) / ring.period) * Math.PI * 2) + Number(c.dataset.ring);
+        c.style.transform = `translate3d(${(Math.cos(a) * ring.r).toFixed(1)}px, ${(Math.sin(a) * ring.r).toFixed(1)}px, 0)`;
       });
-      raf = requestAnimationFrame(tick);
+      if (!still) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("pointermove", move);
-      document.documentElement.removeEventListener("pointerleave", leave);
     };
   }, []);
   return (
-    <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 max-md:hidden">
-      {FLOATERS.map(([label, x, y, depth]) => (
-        <span
-          key={label}
-          className="absolute will-change-transform"
-          style={{ left: `${x}%`, top: `${y}%`, marginLeft: "-2.5rem", opacity: 0.6 + depth * 0.3 }}
-        >
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-fg2 shadow-(--shadow-float)">
-            <span className="size-1.5 rounded-full bg-accent" />
-            {label}
-          </span>
-        </span>
-      ))}
+    <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden max-md:hidden">
+      <div className="absolute left-1/2 top-1/2" style={{ transform: "translate(var(--ox, 0px), var(--oy, 0px))" }}>
+        {RINGS.map((ring, ri) => (
+          <div key={ring.r}>
+            <span
+              className="absolute rounded-full border border-line"
+              style={{ width: ring.r * 2, height: ring.r * 2, left: -ring.r, top: -ring.r, opacity: 0.7 }}
+            />
+            {ring.icons.map((name, i) => (
+              <span key={name} data-orbit data-ring={ri} data-i={i} className="absolute will-change-transform" style={{ left: -20, top: -20 }}>
+                <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface shadow-(--shadow-float)">
+                  <svg viewBox="0 0 24 24" className="size-5" fill={DISTRO_ICONS[name]!.hex}>
+                    <path d={DISTRO_ICONS[name]!.path} />
+                  </svg>
+                </span>
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -150,13 +132,12 @@ export default function LoginPage() {
   }
 
   // Anmeldung mit Passkey: Name aus dem Feld, Gerät bestätigt (PIN, Fingerabdruck …); danach wie bei der Passwort-Anmeldung.
-  async function passkeyLogin(form: HTMLFormElement | null) {
-    const username = String(new FormData(form ?? undefined).get("username") ?? "").trim();
-    if (!username) return setError("Gib zuerst deinen Benutzernamen ein, dann „Mit Passkey anmelden“.");
+  // Ohne Namen: das Gerät zeigt seine Passkeys für diese Seite zur Auswahl.
+  async function passkeyLogin() {
     setBusy(true);
     setError(null);
     try {
-      const start = await api.post<{ ceremony: string; options: { publicKey: Record<string, unknown> } }>("/auth/passkey/login/start", { username }, { silent: true });
+      const start = await api.post<{ ceremony: string; options: { publicKey: Record<string, unknown> } }>("/auth/passkey/login/start", {}, { silent: true });
       const credential = await getPasskey(start.options);
       const me = await api.post<Me>("/auth/passkey/login/finish", { ceremony: start.ceremony, credential }, { silent: true });
       setCsrf(me.csrf_token);
@@ -168,7 +149,7 @@ export default function LoginPage() {
       router.replace("/");
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) setError("Zu viele Versuche. Bitte in einigen Minuten erneut versuchen.");
-      else if (err instanceof ApiError && err.status === 401) setError("Passkey abgelehnt. Gibt es für diesen Benutzer einen Passkey?");
+      else if (err instanceof ApiError && err.status === 401) setError("Passkey abgelehnt. Ist für dieses Konto ein Passkey eingerichtet?");
       else setError(passkeyErrorText(err));
     } finally {
       setBusy(false);
@@ -187,7 +168,7 @@ export default function LoginPage() {
         backgroundSize: "auto, auto, 22px 22px",
       }}
     >
-      <Floaters />
+      <Orbits />
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
           <svg width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-3 rounded-lg shadow-(--shadow-float)">
@@ -244,7 +225,7 @@ export default function LoginPage() {
               {passkey ? (
                 <Button
                   disabled={!hydrated || !webauthnSupported()}
-                  onClick={(e) => void passkeyLogin(e.currentTarget.form)}
+                  onClick={() => void passkeyLogin()}
                   title={webauthnSupported() ? undefined : "Dieser Browser unterstützt keine Passkeys (oder die Seite läuft nicht über HTTPS)."}
                   className="w-full"
                 >

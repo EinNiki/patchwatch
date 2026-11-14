@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 use url::Url;
 use uuid::Uuid;
 use webauthn_rs::prelude::{
-    Passkey, PasskeyAuthentication, PasskeyRegistration, PublicKeyCredential,
-    RegisterPublicKeyCredential,
+    DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyAuthentication,
+    PasskeyRegistration, PublicKeyCredential, RegisterPublicKeyCredential,
 };
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
@@ -42,6 +42,10 @@ enum Pending {
     Login {
         admin_id: i64,
         state: Box<PasskeyAuthentication>,
+    },
+    /// Anmeldung ohne Namenseingabe: das Gerät nennt das Konto selbst (sichtbarer Schlüssel).
+    Discoverable {
+        state: Box<DiscoverableAuthentication>,
     },
     /// Scheinvorgang für unbekannte Namen: schlägt in `finish` immer fehl.
     Decoy,
@@ -325,6 +329,8 @@ pub async fn set_password_login(
 
 #[derive(Deserialize)]
 pub struct LoginStart {
+    /// Leer oder fehlend: Anmeldung ohne Namen (das Gerät wählt das Konto).
+    #[serde(default)]
     username: String,
 }
 
@@ -333,8 +339,27 @@ pub async fn login_start(
     ClientIp(ip): ClientIp,
     Json(b): Json<LoginStart>,
 ) -> ApiResult<Json<Value>> {
-    if b.username.is_empty() || b.username.len() > 64 || super::has_nul(&b.username) {
+    if b.username.len() > 64 || super::has_nul(&b.username) {
         return Err(ApiError::BadRequest("ungültige Eingabe".into()));
+    }
+    if b.username.is_empty() {
+        st.limiter
+            .check(&format!("passkey-ip:{ip}"), 20, Duration::from_secs(600))
+            .map_err(|w| ApiError::TooManyRequests {
+                retry_after_secs: w.as_secs().max(1),
+            })?;
+        let (options, state) = webauthn(&st)?
+            .start_discoverable_authentication()
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("webauthn: {e}")))?;
+        let ceremony = put(Pending::Discoverable {
+            state: Box::new(state),
+        })?;
+        let mut options = serde_json::to_value(options).map_err(anyhow::Error::from)?;
+        // Der Browser soll die Auswahl sofort zeigen (nicht erst als stilles Autofill).
+        if let Some(o) = options.as_object_mut() {
+            o.remove("mediation");
+        }
+        return Ok(Json(json!({"ceremony": ceremony, "options": options})));
     }
     for key in [
         format!("passkey-ip:{ip}"),
@@ -427,12 +452,43 @@ pub async fn login_finish(
             retry_after_secs: w.as_secs().max(1),
         })?;
     let w = webauthn(&st)?;
-    let Some(Pending::Login { admin_id, state }) = take(&b.ceremony) else {
-        return Err(refused());
+    // Beide Wege liefern Konto, Ergebnis und die gespeicherte Zeile des benutzten Passkeys.
+    let (admin_id, result, row) = match take(&b.ceremony) {
+        Some(Pending::Login { admin_id, state }) => {
+            let r = w.finish_passkey_authentication(&b.credential, &state);
+            (admin_id, r, None)
+        }
+        Some(Pending::Discoverable { state }) => {
+            // Konto und Schlüssel aus Benutzerkennung und Credential-ID der Antwort bestimmen.
+            let Ok((handle, cred_id)) = w.identify_discoverable_authentication(&b.credential)
+            else {
+                return Err(refused());
+            };
+            let found: Option<(i64, i64, Value)> = sqlx::query_as(
+                "SELECT u.id, k.id, k.credential FROM passkeys k JOIN admin_users u ON u.id = k.admin_id \
+                 WHERE u.webauthn_handle::text = $1 AND k.credential_id = $2 \
+                   AND u.status = 'active' AND u.deleted_at IS NULL",
+            )
+            .bind(handle.to_string())
+            .bind(cred_id)
+            .fetch_optional(&st.pool)
+            .await?;
+            let Some((admin_id, pk_id, stored)) = found else {
+                return Err(refused());
+            };
+            let Ok(key) = serde_json::from_value::<Passkey>(stored.clone()) else {
+                return Err(refused());
+            };
+            let r = w.finish_discoverable_authentication(
+                &b.credential,
+                *state,
+                &[DiscoverableKey::from(&key)],
+            );
+            (admin_id, r, Some((pk_id, stored)))
+        }
+        _ => return Err(refused()),
     };
-    let result = w
-        .finish_passkey_authentication(&b.credential, &state)
-        .map_err(|_| refused());
+    let result = result.map_err(|_| refused());
     let result = match result {
         Ok(r) => r,
         Err(e) => {
@@ -451,13 +507,17 @@ pub async fn login_finish(
     };
     // Gespeicherten Zähler und Sicherungsstatus nachziehen (Klon-Erkennung).
     let cred_id: Vec<u8> = result.cred_id().as_ref().to_vec();
-    let row: Option<(i64, Value)> = sqlx::query_as(
-        "SELECT id, credential FROM passkeys WHERE credential_id = $1 AND admin_id = $2",
-    )
-    .bind(&cred_id)
-    .bind(admin_id)
-    .fetch_optional(&st.pool)
-    .await?;
+    let row: Option<(i64, Value)> =
+        match row {
+            Some(r) => Some(r),
+            None => sqlx::query_as(
+                "SELECT id, credential FROM passkeys WHERE credential_id = $1 AND admin_id = $2",
+            )
+            .bind(&cred_id)
+            .bind(admin_id)
+            .fetch_optional(&st.pool)
+            .await?,
+        };
     let Some((pk_id, stored)) = row else {
         return Err(refused());
     };
