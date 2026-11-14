@@ -4,18 +4,18 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, setCsrf } from "@/lib/api";
 import type { Me } from "@/lib/types";
-import { Button, Field, TextInput } from "@/components/Controls";
+import { Button, TextInput } from "@/components/Controls";
 import { DISTRO_ICONS } from "@/lib/distroIcons";
 import { getPasskey, passkeyErrorText, webauthnSupported } from "@/lib/webauthn";
 
 // true erst nach der Hydration: vorher darf nichts abgeschickt werden.
 const subscribe = () => () => {};
 
-/** Ringe: Radius in px, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn) und die Logos darauf. */
-const RINGS: { r: number; period: number; icons: string[] }[] = [
-  { r: 380, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
-  { r: 470, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
-  { r: 560, period: 120, icons: ["RHEL", "openSUSE"] },
+/** Bahnen: Größe relativ zum Fenster (k), Umlaufzeit in s (negativ = gegen den Uhrzeigersinn) und die Logos darauf. */
+const RINGS: { k: number; period: number; icons: string[] }[] = [
+  { k: 0.4, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
+  { k: 0.47, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
+  { k: 0.54, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
 /**
@@ -38,16 +38,28 @@ function Orbits() {
     };
     if (!still) window.addEventListener("pointermove", move);
     let raf = 0;
+    const size = { w: 0, h: 0 };
     const tick = (t: number) => {
+      size.w = el.clientWidth;
+      size.h = el.clientHeight;
       cur.x += (target.x - cur.x) * 0.05;
       cur.y += (target.y - cur.y) * 0.05;
       el.style.setProperty("--ox", `${cur.x.toFixed(1)}px`);
       el.style.setProperty("--oy", `${cur.y.toFixed(1)}px`);
       icons.forEach((c) => {
-        const ring = RINGS[Number(c.dataset.ring)]!;
+        const ri = Number(c.dataset.ring);
+        const ring = RINGS[ri]!;
         const n = ring.icons.length;
         const a = (Number(c.dataset.i) / n) * Math.PI * 2 + (still ? 0 : ((t / 1000) / ring.period) * Math.PI * 2) + Number(c.dataset.ring);
-        c.style.transform = `translate3d(${(Math.cos(a) * ring.r).toFixed(1)}px, ${(Math.sin(a) * ring.r).toFixed(1)}px, 0)`;
+        // Ellipse passend zum Fenster: rx/ry wachsen mit Breite/Höhe, nie enger als die Karte (Handy: Logos laufen dahinter).
+        let rx = Math.max(size.w * ring.k, 250 + ri * 60);
+        let ry = size.h * ring.k;
+        // Schmale Fenster (Handy): Logos bleiben komplett im Bild, statt seitlich hinauszufliegen.
+        if (size.w < 768) {
+          rx = Math.min(rx, size.w / 2 - 26);
+          ry = Math.min(ry, size.h / 2 - 26);
+        }
+        c.style.transform = `translate3d(${(Math.cos(a) * rx).toFixed(1)}px, ${(Math.sin(a) * ry).toFixed(1)}px, 0)`;
       });
       if (!still) raf = requestAnimationFrame(tick);
     };
@@ -58,10 +70,10 @@ function Orbits() {
     };
   }, []);
   return (
-    <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden max-md:hidden">
+    <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="absolute left-1/2 top-1/2" style={{ transform: "translate(var(--ox, 0px), var(--oy, 0px))" }}>
         {RINGS.map((ring, ri) => (
-          <div key={ring.r}>
+          <div key={ring.k}>
             {ring.icons.map((name, i) => (
               <span key={name} data-orbit data-ring={ri} data-i={i} className="absolute will-change-transform" style={{ left: -20, top: -20 }}>
                 <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface shadow-(--shadow-float)">
@@ -157,7 +169,7 @@ export default function LoginPage() {
       id="main"
       tabIndex={-1}
       // Hintergrund: weicher Farbverlauf aus dem Akzent plus feines Punktraster; beides aus den Design-Token, also hell und dunkel passend.
-      className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10"
+      className="relative flex min-h-dvh flex-col items-center justify-center px-4 py-10"
       style={{
         backgroundImage:
           "radial-gradient(60rem 36rem at 15% -10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%), radial-gradient(48rem 30rem at 100% 110%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%), radial-gradient(color-mix(in srgb, var(--text-3) 30%, transparent) 1px, transparent 1px)",
@@ -186,25 +198,31 @@ export default function LoginPage() {
             <h2 className="m-0 text-lg font-semibold">Willkommen zurück</h2>
             <p className="m-0 mt-1 text-xs text-fg3">Melde dich an, um deine Hosts und CVEs zu sehen.</p>
           </div>
-          <div className="relative">
-            <Field label="Benutzername">
-              <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="w-full pl-9" />
-            </Field>
-            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute bottom-[0.6rem] left-3 text-fg3 max-md:bottom-[0.85rem]"><circle cx="12" cy="8" r="4" /><path d="M4 21c1-4 4-6 8-6s7 2 8 6" /></svg>
-          </div>
+          <label className="relative block">
+            <span className="sr-only">Benutzername</span>
+            <TextInput name="username" placeholder="Benutzername" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12! w-full rounded-2xl! border-transparent! bg-[color-mix(in_srgb,var(--text)_7%,transparent)]! pl-11 text-base! focus-visible:border-accent!" />
+            <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-fg3">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21c1-4 4-6 8-6s7 2 8 6" />
+            </svg>
+          </label>
           {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
           <div className="relative">
-            <Field label="Passwort">
-              <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="w-full pl-9 pr-12" />
-            </Field>
-            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute bottom-[0.6rem] left-3 text-fg3 max-md:bottom-[0.85rem]"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></svg>
+            <label className="relative block">
+              <span className="sr-only">Passwort</span>
+              <TextInput name="password" placeholder="Passwort" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12! w-full rounded-2xl! border-transparent! bg-[color-mix(in_srgb,var(--text)_7%,transparent)]! pl-11 text-base! focus-visible:border-accent! pr-14" />
+              <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-fg3">
+                <rect x="4" y="11" width="16" height="10" rx="2" />
+                <path d="M8 11V8a4 4 0 018 0v3" />
+              </svg>
+            </label>
             <Button
               variant="ghost"
               data-hit="none"
               aria-pressed={show}
               aria-label={show ? "Eingabe verbergen" : "Eingabe anzeigen"}
               onClick={() => setShow(!show)}
-              className="absolute bottom-0.5 right-0.5 h-7! min-h-0! w-9! min-w-0! border-0! px-0! text-fg3 hover:text-fg max-md:bottom-0 max-md:h-11! max-md:w-11!"
+              className="absolute right-2 top-1/2 h-9! min-h-0! w-10! min-w-0! -translate-y-1/2 border-0! px-0! text-fg3 hover:text-fg max-md:h-11! max-md:w-11!"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                 <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
@@ -218,7 +236,7 @@ export default function LoginPage() {
               {error}
             </p>
           ) : null}
-          <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="w-full">
+          <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-2xl!">
             Anmelden
           </Button>
           {passkey || oidc?.enabled ? (
@@ -233,7 +251,7 @@ export default function LoginPage() {
                   disabled={!hydrated || !webauthnSupported()}
                   onClick={() => void passkeyLogin()}
                   title={webauthnSupported() ? undefined : "Dieser Browser unterstützt keine Passkeys (oder die Seite läuft nicht über HTTPS)."}
-                  className="w-full"
+                  className="h-12! w-full rounded-2xl!"
                 >
                   Mit Passkey anmelden
                 </Button>
@@ -241,7 +259,7 @@ export default function LoginPage() {
               {oidc?.enabled ? (
               <a
                 href="/api/v1/auth/oidc/login"
-                className="inline-flex min-h-9 items-center justify-center rounded-sm border border-control bg-surface px-3 font-semibold no-underline hover:border-accent max-md:min-h-11"
+                className="inline-flex h-12 items-center justify-center rounded-2xl border border-control bg-surface px-3 font-semibold no-underline hover:border-accent max-md:min-h-11"
               >
                 Mit {oidc.name} anmelden
               </a>
