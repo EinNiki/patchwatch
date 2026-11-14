@@ -42,7 +42,7 @@ function DeleteForm({ user, sensitive, onClose, onDone }: { user: UserRow; sensi
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Wie der Server: Passwort, wenn das Konto sensible Rechte hat (Benutzerverwaltung, OIDC, Aktivitätsprotokoll).
-  const needsPw = user.permissions.some((p) => sensitive.includes(p)) && me.auth_kind !== "oidc";
+  const needsPw = user.permissions.some((p) => sensitive.includes(p)) && me.auth_kind === "local";
   return (
     <form
       onSubmit={(e) => {

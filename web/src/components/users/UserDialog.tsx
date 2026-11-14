@@ -63,7 +63,7 @@ function Form({ mode, roles, footer, onClose, onDone, onReset }: { onReset?: (u:
   const selected = custom ? "custom" : templateOf(perms, roles.roles);
   const templateTitle = selected === "custom" ? "Eigene" : (roles.roles.find((r) => r.key === selected)?.title ?? "Eigene");
   const self = user?.is_self === true;
-  const oidcMe = me.auth_kind === "oidc";
+  const oidcMe = me.auth_kind === "oidc" || me.auth_kind === "ldap";
   const grantable = me.permissions ?? [];
 
   const roleChanged = mode.kind === "edit" && user !== null && baseRole !== user.role;

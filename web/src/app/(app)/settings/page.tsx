@@ -15,6 +15,8 @@ import { RelTime } from "@/components/RelTime";
 import { Mono } from "@/components/Version";
 import { AvatarForm } from "@/components/AvatarForm";
 import { OidcSettings } from "@/components/users/OidcSettings";
+import { LdapSettings } from "@/components/users/LdapSettings";
+import { PasskeysForm } from "@/components/PasskeysForm";
 import { can, type RolesResponse } from "@/lib/roles";
 
 const MIN_LEN = 12;
@@ -252,8 +254,12 @@ export default function SettingsPage() {
         <div className="flex flex-col gap-6">
           <ProfileForm />
           <AvatarForm />
-          <PasswordForm />
+          {me.auth_kind === "local" || !me.auth_kind ? <PasswordForm /> : <p className="m-0 max-w-prose text-sm text-fg2">Dein Passwort wird beim Anbieter ({me.auth_kind === "ldap" ? "LDAP" : "OIDC"}) verwaltet.</p>}
         </div>
+      </SettingsSection>
+
+      <SettingsSection id="passkey-h" title="Passkeys" description="Anmelden ohne Passwort: mit Fingerabdruck, Gesicht, PIN oder Sicherheitsschlüssel. Jeder Benutzer verwaltet seine eigenen.">
+        <PasskeysForm />
       </SettingsSection>
 
       <SettingsSection id="look-h" title="Darstellung" description="„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.">
@@ -270,6 +276,16 @@ export default function SettingsPage() {
         ) : (
           <p role="note" className="m-0 max-w-prose border-l-4 border-line bg-sunk px-3 py-2 text-fg2">
             Die OIDC-Anmeldung einzurichten setzt das Recht „OIDC-Anmeldung einrichten“ voraus. Das hast du nicht; bitte einen Benutzer mit diesem Recht darum.
+          </p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection id="ldap" title="LDAP-Anmeldung" description="Anmeldung gegen ein LDAP-Verzeichnis mit festem Muster, zusätzlich zum Passwort.">
+        {canOidc ? (
+          <LdapSettings />
+        ) : (
+          <p role="note" className="m-0 max-w-prose border-l-4 border-line bg-sunk px-3 py-2 text-fg2">
+            Die LDAP-Anmeldung einzurichten setzt dasselbe Recht wie OIDC voraus („OIDC-Anmeldung einrichten“). Das hast du nicht.
           </p>
         )}
       </SettingsSection>

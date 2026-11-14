@@ -48,7 +48,7 @@ struct UserRow {
 }
 
 const SELECT_USER: &str = "SELECT id, username, display_name, email, auth_kind, role, status, created_at, last_login_at, \
-    (avatar IS NOT NULL) AS has_avatar, (oidc_subject IS NOT NULL) AS oidc_linked, requested_role, permissions FROM admin_users";
+    (avatar IS NOT NULL) AS has_avatar, (oidc_subject IS NOT NULL OR auth_kind = 'ldap') AS oidc_linked, requested_role, permissions FROM admin_users";
 
 fn view(u: &UserRow, me: i64) -> Value {
     let mut v = serde_json::to_value(u).unwrap_or(Value::Null);
@@ -188,7 +188,7 @@ pub(super) async fn reauth(st: &AppState, me: &Admin, password: Option<&str>) ->
         .map_err(|w| ApiError::TooManyRequests {
             retry_after_secs: w.as_secs().max(1),
         })?;
-    if me.auth_kind == "oidc" {
+    if matches!(me.auth_kind.as_str(), "oidc" | "ldap") {
         if (Utc::now() - me.session_created).num_seconds() > FRESH_LOGIN_SECS {
             return Err(ApiError::Forbidden(
                 "Bitte melde dich neu an (höchstens 5 Minuten alt)",
@@ -698,7 +698,10 @@ pub async fn approve(
         ));
     }
     if !t.oidc_linked {
-        return Err(ApiError::Conflict("Das Konto ist nicht mit einer OIDC-Identität verknüpft und kann nicht freigegeben werden".into()));
+        return Err(ApiError::Conflict(
+            "Das Konto ist nicht mit OIDC oder LDAP verknüpft und kann nicht freigegeben werden"
+                .into(),
+        ));
     }
     sqlx::query(
         "UPDATE admin_users SET status = 'active', role = $2, permissions = $3 WHERE id = $1",

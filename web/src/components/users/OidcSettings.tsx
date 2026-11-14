@@ -88,7 +88,7 @@ function Form({ s, roles, reload }: { s: Settings; roles: RolesResponse | undefi
         group_claim: f.group_claim,
         group_roles: groups.filter((g) => g.group.trim()),
         new_account: f.new_account,
-        current_password: hasAdminMap && me.auth_kind !== "oidc" ? pw : undefined,
+        current_password: hasAdminMap && me.auth_kind === "local" ? pw : undefined,
       }, { silent: true });
       setPw("");
       toast.success("OIDC-Einstellungen gespeichert.");
@@ -182,7 +182,7 @@ function Form({ s, roles, reload }: { s: Settings; roles: RolesResponse | undefi
           </Button>
           <p className="mb-0 mt-1 text-xs text-fg3">Eine Hochstufung durch den Anbieter wirkt erst nach Bestätigung eines Administrators, eine Herabstufung sofort.</p>
         </div>
-        {hasAdminMap && me.auth_kind !== "oidc" ? (
+        {hasAdminMap && me.auth_kind === "local" ? (
           <Field label="Dein Passwort (nötig für neue Administrator-Zuordnungen)">
             <TextInput type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
           </Field>

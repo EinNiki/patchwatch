@@ -213,6 +213,9 @@ fn matrix() -> Vec<(Method, &'static str, Permission, bool)> {
         (Method::GET, "/api/v1/settings/oidc", OidcManage, true),
         (Method::PUT, "/api/v1/settings/oidc", OidcManage, false),
         (Method::POST, "/api/v1/settings/oidc/test", OidcManage, true),
+        (Method::GET, "/api/v1/settings/ldap", OidcManage, true),
+        (Method::PUT, "/api/v1/settings/ldap", OidcManage, false),
+        (Method::POST, "/api/v1/settings/ldap/test", OidcManage, true),
         (Method::GET, "/api/v1/roles", UsersManage, true),
         (Method::GET, "/api/v1/users", UsersManage, true),
         (Method::POST, "/api/v1/users", UsersManage, false),
@@ -334,6 +337,13 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
         "/auth/password",
         "/auth/avatar",
         "/auth/profile",
+        "/auth/passkey/login/start",
+        "/auth/passkey/login/finish",
+        "/auth/passkeys",
+        "/auth/passkeys/register/start",
+        "/auth/passkeys/register/finish",
+        "/auth/passkeys/{id}",
+        "/auth/password-login",
         "/live",
         "/healthz",
         "/readyz",
@@ -378,7 +388,7 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
 #[test]
 fn every_handler_requires_a_permission_extractor() {
     let modsrc = include_str!("../src/routes/mod.rs");
-    let files: [(&str, &str); 11] = [
+    let files: [(&str, &str); 13] = [
         ("auth", include_str!("../src/routes/auth.rs")),
         ("cves", include_str!("../src/routes/cves.rs")),
         ("feeds", include_str!("../src/routes/feeds.rs")),
@@ -390,6 +400,8 @@ fn every_handler_requires_a_permission_extractor() {
             include_str!("../src/routes/notifications.rs"),
         ),
         ("oidc", include_str!("../src/routes/oidc.rs")),
+        ("ldap", include_str!("../src/routes/ldap.rs")),
+        ("passkey", include_str!("../src/routes/passkey.rs")),
         ("settings", include_str!("../src/routes/settings.rs")),
         ("users", include_str!("../src/routes/users.rs")),
         ("agent", include_str!("../src/routes/agent.rs")),
@@ -397,6 +409,8 @@ fn every_handler_requires_a_permission_extractor() {
     // Handler ohne Benutzerrecht: öffentlich (Anmeldung), Host-Token (Agent), Gesundheit.
     let exempt = [
         "auth::login",
+        "passkey::login_start",
+        "passkey::login_finish",
         "oidc::providers",
         "oidc::login",
         "oidc::callback",

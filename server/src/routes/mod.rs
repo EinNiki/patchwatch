@@ -4,10 +4,12 @@ pub mod cves;
 mod feeds;
 mod health;
 pub mod hosts;
+mod ldap;
 mod live;
 mod matrix;
 mod notifications;
 mod oidc;
+mod passkey;
 mod report;
 pub mod settings;
 mod users;
@@ -56,6 +58,22 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/oidc/callback", get(oidc::callback))
         .route("/auth/password", post(auth::change_password))
         .route("/auth/profile", axum::routing::put(auth::profile_put))
+        .route("/auth/passkey/login/start", post(passkey::login_start))
+        .route("/auth/passkey/login/finish", post(passkey::login_finish))
+        .route("/auth/passkeys", get(passkey::list))
+        .route(
+            "/auth/passkeys/register/start",
+            post(passkey::register_start),
+        )
+        .route(
+            "/auth/passkeys/register/finish",
+            post(passkey::register_finish),
+        )
+        .route(
+            "/auth/passkeys/{id}",
+            axum::routing::delete(passkey::remove),
+        )
+        .route("/auth/password-login", put(passkey::set_password_login))
         .route(
             "/auth/avatar",
             get(auth::avatar_get)
@@ -96,6 +114,11 @@ pub fn router(state: AppState) -> Router {
             get(oidc::settings_get).put(oidc::settings_put),
         )
         .route("/settings/oidc/test", post(oidc::settings_test))
+        .route(
+            "/settings/ldap",
+            get(ldap::settings_get).put(ldap::settings_put),
+        )
+        .route("/settings/ldap/test", post(ldap::settings_test))
         .route("/live", get(live::live))
         .route("/roles", get(users::roles))
         .route("/users", get(users::list).post(users::create))

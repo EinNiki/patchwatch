@@ -59,3 +59,9 @@ Maßgeblich ist immer der **Server**; die Oberfläche blendet nur aus, sperrt mi
 - Wer `users.manage` hat, kann Konten mit **gleichen oder weniger** Rechten verwalten, aber keine stärkeren: Zwei Verwalter mit
   gleichem Rechteumfang können sich gegenseitig sperren (gewollt; der letzte lokale Verwalter bleibt geschützt).
 - Wiederherstellung bei Aussperrung: `patchwatch-server reset-admin <benutzer>` auf dem Server (siehe README, „Zugang wiederherstellen“).
+
+## Passkeys und LDAP
+
+- **Passkeys (WebAuthn):** Jeder Benutzer verwaltet eigene Passkeys unter Einstellungen. Anmeldung mit Benutzername + „Mit Passkey anmelden“. Benutzerverifizierung (PIN/Biometrie) ist Pflicht. Erforderlich: `PATCHWATCH_PUBLIC_URL` mit Hostnamen (keine IP-Adresse) und HTTPS (außer `localhost`). Wer „Anmeldung per Passwort ausschalten“ wählt, kann sich nur noch per Passkey anmelden; das geht nur mit mindestens einem Passkey, und das Löschen des letzten Passkeys schaltet das Passwort wieder ein. Unbekannte Benutzer erhalten eine gleichartige Antwort (keine Kontoerkennung).
+- **LDAP:** Festes Bind-Muster mit `{username}` (RFC-4514-maskiert), LDAPS oder StartTLS, Zertifikat wird immer geprüft, leere Passwörter werden nie gesendet. Ein lokales Konto mit gleichem Namen hat Vorrang. Neue Konten: wartend, Nur Lesen oder abgelehnt. Das Recht zum Einrichten ist `oidc.manage`.
+- Nicht getestet: Bind gegen einen echten LDAP-Server (nur Unit-Tests der Maskierung/Konfiguration).

@@ -221,9 +221,11 @@ fn label(o: &Resolved) -> &str {
 /// Öffentlich: welche Anmeldearten gibt es (für die Anmeldeseite)?
 pub async fn providers(State(st): State<AppState>) -> Json<Value> {
     let o = resolve(&st).await;
-    Json(
-        json!({ "oidc": { "enabled": o.is_some(), "name": o.as_ref().map(label).unwrap_or("Single Sign-On") } }),
-    )
+    Json(json!({
+        "oidc": { "enabled": o.is_some(), "name": o.as_ref().map(label).unwrap_or("Single Sign-On") },
+        // Passkeys gehen nur mit öffentlicher Adresse (WebAuthn bindet an den Host).
+        "passkey": st.cfg.public_url.is_some(),
+    }))
 }
 
 /// Einstellungen für die UI; das Client-Secret wird nie ausgegeben.

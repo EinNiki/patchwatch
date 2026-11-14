@@ -44,10 +44,12 @@ pub async fn login(
         return Err(ApiError::BadRequest("ungültige Eingabe".into()));
     }
     // Nur aktive lokale Konten mit Passwort können sich so anmelden; gesperrte, ausstehende, gelöschte und OIDC-Konten
-    // verhalten sich wie ein unbekannter Name (gleiche Antwort, gleiche Rechenzeit durch den Dummy-Hash).
+    // verhalten sich wie ein unbekannter Name (gleiche Antwort, gleiche Rechenzeit durch den Dummy-Hash). Wer die
+    // Anmeldung per Passwort für sich ausgeschaltet hat (nur Passkey), zählt hier ebenfalls als unbekannt.
     let user: Option<(i64, String, bool)> = sqlx::query_as(
         "SELECT id, password_hash, must_change_password FROM admin_users \
-         WHERE username = $1 AND status = 'active' AND auth_kind = 'local' AND deleted_at IS NULL AND password_hash IS NOT NULL",
+         WHERE username = $1 AND status = 'active' AND auth_kind = 'local' AND deleted_at IS NULL AND password_hash IS NOT NULL \
+           AND NOT password_login_disabled",
     )
     .bind(&body.username)
     .fetch_optional(&st.pool)
@@ -57,11 +59,16 @@ pub async fn login(
         Some((id, h, _)) => (Some(*id), h.clone()),
         None => (None, security::dummy_hash().to_owned()),
     };
-    let password = body.password;
+    let password = body.password.clone();
     let ok = tokio::task::spawn_blocking(move || security::verify_password(&hash, &password))
         .await
         .map_err(anyhow::Error::from)?;
-    let Some(admin_id) = admin_id.filter(|_| ok) else {
+    let mut admin_id = admin_id.filter(|_| ok);
+    // Kein lokaler Treffer: LDAP versuchen (falls eingerichtet). Ein lokales Konto mit diesem Namen hat immer Vorrang.
+    if admin_id.is_none() {
+        admin_id = super::ldap::try_login(&st, &body.username, &body.password, &ip).await?;
+    }
+    let Some(admin_id) = admin_id else {
         audit::record(
             &st.pool,
             None,
@@ -397,4 +404,24 @@ pub async fn profile_put(
     )
     .await;
     Ok(Json(json!({ "display_name": name })))
+}
+
+/// Neue Sitzung für ein Konto anlegen (nie eine vorhandene ID wiederverwenden). Gibt (Cookie-Wert für `Set-Cookie`, CSRF-Token) zurück.
+pub(super) async fn issue_session(st: &AppState, admin_id: i64) -> ApiResult<(String, String)> {
+    let session_id = security::new_session_id();
+    let csrf = security::new_csrf_token();
+    let ttl = st.cfg.session_ttl_hours * 3600;
+    sqlx::query(
+        "INSERT INTO sessions (id_hash, admin_id, csrf_token, expires_at) VALUES ($1, $2, $3, now() + make_interval(secs => $4))",
+    )
+    .bind(security::sha256(&session_id))
+    .bind(admin_id)
+    .bind(&csrf)
+    .bind(ttl as f64)
+    .execute(&st.pool)
+    .await?;
+    Ok((
+        security::session_cookie(&session_id, ttl, st.cfg.cookie_secure),
+        csrf,
+    ))
 }

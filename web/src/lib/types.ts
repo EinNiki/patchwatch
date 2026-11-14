@@ -334,7 +334,7 @@ export interface Me {
   role?: string;
   role_title?: string;
   permissions?: string[];
-  auth_kind?: "local" | "oidc";
+  auth_kind?: "local" | "oidc" | "ldap";
   csrf_token: string;
   /** Start-Passwort (erzeugt oder früherer Standardwert): bis zum Wechsel ist nur der Passwortwechsel möglich. */
   must_change_password?: boolean;
@@ -364,7 +364,7 @@ export interface UserRow {
   username: string;
   display_name: string;
   email: string | null;
-  auth_kind: "local" | "oidc";
+  auth_kind: "local" | "oidc" | "ldap";
   role: string;
   role_title: string | null;
   status: "active" | "locked" | "pending";
@@ -406,4 +406,13 @@ export interface OidcSettings {
   new_account: "pending" | "viewer" | "reject";
   secret_set: boolean;
   secret_storage: boolean;
+}
+
+export interface LdapSettings {
+  enabled: boolean;
+  security: "ldaps" | "starttls";
+  server: string;
+  bind_pattern: string;
+  name: string;
+  new_account: "pending" | "viewer" | "reject";
 }

@@ -124,7 +124,7 @@ export function rowGuard(u: GuardUser, all: readonly GuardUser[], mine: readonly
 }
 
 export const STATUS_LABEL: Record<string, string> = { active: "aktiv", locked: "gesperrt", pending: "wartet auf Freigabe" };
-export const KIND_LABEL: Record<string, string> = { local: "lokal", oidc: "OIDC" };
+export const KIND_LABEL: Record<string, string> = { local: "lokal", oidc: "OIDC", ldap: "LDAP" };
 
 /** Lesbare Bezeichnung einer Protokoll-Kennung; unbekannte Kennungen bleiben unverändert sichtbar. */
 const ACTION_LABEL: Record<string, string> = {
