@@ -1058,15 +1058,9 @@ button[data-select] {
   }
 }
 
-/* „Willkommen zurück“: Buchstaben heben sich beim Überfahren leicht, nacheinander (Verzögerung je Buchstabe inline), und senken sich beim Verlassen. */
+/* „Willkommen zurück“: Buchstaben tippen sich nacheinander ein (Verzögerung je Buchstabe inline). */
 .wave-ch {
   display: inline-block;
-  transition: transform 260ms var(--ease-out);
-}
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .wave:hover .wave-ch {
-    transform: translateY(-4px);
-  }
 }
 
 /* Eintritt der Anmeldekarte (nur CSS, kein Flackern vor dem Skript): Titel tippt sich Buchstabe für Buchstabe, Logo und Untertitel blenden ein,
@@ -1171,5 +1165,30 @@ button[data-select] {
 @keyframes caret-blink {
   50% {
     opacity: 0;
+  }
+}
+
+/* Anmeldekarte auf kleineren Bildschirmen (z. B. Full HD) verkleinern: wirkt auf Karte und Hinweise zusammen, Zeilenumbrüche bleiben gleich.
+   Nur ab Tablet-Breite; auf dem Handy bestimmt die Breite das Maß. */
+@media (min-width: 768px) {
+  @media (max-height: 1100px) {
+    .login-card {
+      zoom: 0.88;
+    }
+  }
+  @media (max-height: 960px) {
+    .login-card {
+      zoom: 0.8;
+    }
+  }
+  @media (max-height: 860px) {
+    .login-card {
+      zoom: 0.72;
+    }
+  }
+  @media (max-height: 760px) {
+    .login-card {
+      zoom: 0.64;
+    }
   }
 }

@@ -94,7 +94,7 @@ function Typer({ pairs, startDelay }: { pairs: [string, string][]; startDelay: n
   );
 }
 
-/** Text, dessen Buchstaben sich beim Überfahren leicht heben (CSS `.wave`). Nur Dekoration: der Titel trägt das aria-label. */
+/** Text, dessen Buchstaben sich nacheinander einblenden (CSS `.wave-ch`). Nur Dekoration: der Titel trägt das aria-label. */
 function WaveText({ text }: { text: string }) {
   let n = 0;
   return (
@@ -104,7 +104,7 @@ function WaveText({ text }: { text: string }) {
           {wi > 0 ? " " : null}
           <span className="inline-block whitespace-nowrap">
             {[...w].map((ch, ci) => (
-              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n * 18}ms`, animationDelay: `calc(var(--base, 0ms) + ${150 + n++ * 38}ms)` }}>
+              <span key={ci} className="wave-ch" style={{ animationDelay: `calc(var(--base, 0ms) + ${150 + n++ * 38}ms)` }}>
                 {ch}
               </span>
             ))}
@@ -525,6 +525,12 @@ export default function LoginPage() {
       tabIndex={-1}
       // Hintergrund: kräftige Akzent-Glows oben links und unten rechts plus Punktraster (aus den Design-Token, hell und dunkel passend).
       className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10"
+      // Markierten Text nicht wegziehen lassen (sähe wie ein Fehler aus); Eingabefelder bleiben ausgenommen.
+      onDragStart={(e) => {
+        const t = e.target as Node;
+        const el = t instanceof Element ? t : t.parentElement;
+        if (!el?.closest("input, textarea")) e.preventDefault();
+      }}
       style={{ ...LOGIN_BG, "--base": afterLogout ? "450ms" : "0ms" } as React.CSSProperties}
     >
       <Orbits converge={leaving} />
@@ -532,7 +538,7 @@ export default function LoginPage() {
       <div data-login-card className={`login-card relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
         {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
         <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
-          <div className="mb-8 flex flex-col items-center text-center">
+          <div className="mb-8 flex select-none flex-col items-center text-center">
             <svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="login-in mb-5 rounded-xl shadow-(--shadow-float)">
               <rect width="32" height="32" rx="6" fill="var(--accent)" />
               <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -612,7 +618,7 @@ export default function LoginPage() {
             ) : null}
           </form>
         </div>
-        <p className="mt-6 text-center text-sm text-fg3">
+        <p className="mt-6 select-none text-center text-sm text-fg3">
           <span className="sr-only">{hints.map((h) => h.join(" ")).join(" ")}</span>
           <span aria-hidden="true" className="block min-h-[5rem] motion-reduce:hidden">
             <Typer pairs={hints} startDelay={1700 + (afterLogout ? 450 : 0)} />
