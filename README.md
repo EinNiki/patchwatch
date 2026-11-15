@@ -25,9 +25,13 @@ Alle Bilder sind in 3840 × 2160 aufgenommen (Demo-Daten, hell und dunkel). Zum 
 
 Die Anmeldeseite, optional mit Zwei-Faktor-Code (TOTP, Wiederherstellungscodes), Passkey, OIDC oder LDAP.
 
-![Anmeldung und Dashboard](docs/media/login.gif)
+<video src="docs/media/login.webm" controls muted loop playsinline width="100%"></video>
 
-![Anmeldung mit Zwei-Faktor-Code](docs/media/login-2fa.gif)
+[Video öffnen: Anmeldung und Dashboard](docs/media/login.webm) (1920 × 1080, 60 Bilder/s)
+
+<video src="docs/media/login-2fa.webm" controls muted loop playsinline width="100%"></video>
+
+[Video öffnen: Anmeldung mit Zwei-Faktor-Code](docs/media/login-2fa.webm) (1920 × 1080, 60 Bilder/s)
 
 | | | |
 |---|---|---|
@@ -64,7 +68,9 @@ oder minisign, wird **nichts installiert**.
 
 ### Agent einrichten: Schritt für Schritt und Beispiele
 
-![Agent in der Oberfläche hinzufügen](docs/media/agent-hinzufuegen.gif)
+<video src="docs/media/agent-hinzufuegen.webm" controls muted loop playsinline width="100%"></video>
+
+[Video öffnen: Agent in der Oberfläche hinzufügen](docs/media/agent-hinzufuegen.webm) (1920 × 1080, 60 Bilder/s)
 
 1. In der Web-UI **Agents → Agent hinzufügen**, den Namen des Hosts eingeben (z. B. `web-03`).
 2. Den angezeigten **Token** kopieren. Er erscheint nur jetzt; der Server speichert nur einen Hash.
