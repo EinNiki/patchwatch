@@ -1029,17 +1029,19 @@ button[data-select] {
   }
 }
 
-/* Abmelden: ein Kreis wächst von der Abmelden-Taste (Richtung rechts oben) über den Bildschirm. */
+/* Abmelden: spiegelbildlich zur Anmeldung. Das Loch schließt sich zur Mitte hin, danach öffnet es sich auf der Anmeldeseite wieder. */
 @keyframes login-out {
   from {
-    opacity: 0;
+    --hole: 112%;
   }
   to {
-    opacity: 1;
+    --hole: 0%;
   }
 }
 .login-out {
-  animation: login-out 380ms ease-out forwards;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
+  mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
+  animation: login-out 750ms cubic-bezier(0.55, 0, 0.45, 1) forwards;
 }
 @keyframes login-fade {
   to {
@@ -1053,5 +1055,16 @@ button[data-select] {
   .login-out,
   .login-fade {
     animation-duration: 1ms;
+  }
+}
+
+/* „Willkommen zurück“: Buchstaben heben sich beim Überfahren leicht, nacheinander (Verzögerung je Buchstabe inline), und senken sich beim Verlassen. */
+.wave-ch {
+  display: inline-block;
+  transition: transform 260ms var(--ease-out);
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .wave:hover .wave-ch {
+    transform: translateY(-4px);
   }
 }

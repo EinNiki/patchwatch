@@ -40,7 +40,7 @@ export function LoginTransition() {
   }, [phase, path]);
   if (phase === "idle") return null;
   const o = getOrigin();
-  const cls = phase === "reveal" ? "login-reveal" : phase === "out" ? "login-out" : phase === "fade" ? "login-fade" : "";
+  const cls = phase === "reveal" ? "login-reveal" : phase === "out" ? "login-out" : phase === "fade" ? "login-reveal" : "";
   return (
     <div
       aria-hidden="true"

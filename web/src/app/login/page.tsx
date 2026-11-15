@@ -16,9 +16,9 @@ const subscribe = () => () => {};
 
 /** Bahnen (Kreise im Bild): Anteil (k) am größtmöglichen Radius = Hälfte der kleineren Fensterseite minus Rand, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
 const RINGS: { k: number; period: number; icons: string[] }[] = [
-  { k: 0.88, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
-  { k: 0.94, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
-  { k: 1, period: 120, icons: ["RHEL", "openSUSE"] },
+  { k: 0.88, period: 70, icons: ["Ubuntu", "Debian", "Fedora", "Linux Mint", "Kali"] },
+  { k: 0.94, period: -90, icons: ["Alpine", "Arch", "Proxmox", "NixOS", "Rocky"] },
+  { k: 1, period: 120, icons: ["RHEL", "openSUSE", "Manjaro", "Gentoo", "CentOS", "Raspberry Pi"] },
 ];
 
 const ICON = 40; // Durchmesser in px
@@ -34,6 +34,27 @@ const baseAngle = (ri: number, i: number) => (i / RINGS[ri]!.icons.length) * Mat
  * nichts erst nach dem Laden des Skripts erscheint. „Weniger Bewegung“: Logos stehen still und lassen sich nicht werfen.
  * Reine Dekoration (aria-hidden).
  */
+/** Text, dessen Buchstaben sich beim Überfahren leicht heben (CSS `.wave`). Nur Dekoration: der Titel trägt das aria-label. */
+function WaveText({ text }: { text: string }) {
+  let n = 0;
+  return (
+    <span aria-hidden="true">
+      {text.split(" ").map((w, wi) => (
+        <span key={wi}>
+          {wi > 0 ? " " : null}
+          <span className="inline-block whitespace-nowrap">
+            {[...w].map((ch, ci) => (
+              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n++ * 18}ms` }}>
+                {ch}
+              </span>
+            ))}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Orbits({ converge }: { converge: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const conv = useRef(converge);
@@ -107,6 +128,52 @@ function Orbits({ converge }: { converge: boolean }) {
     const tick = (t: number) => {
       const dt = Math.min((t - (last || t)) / 1000, 0.04) || 0.016;
       last = t;
+      // Logos stoßen einander an: ein geworfenes (oder gezogenes) Logo schießt andere aus ihrer Bahn (elastischer Stoß).
+      if (!conv.current) {
+        for (let i = 0; i < st.length; i++) {
+          for (let j = i + 1; j < st.length; j++) {
+            const a = st[i]!;
+            const b = st[j]!;
+            const da = drag?.i === i;
+            const db = drag?.i === j;
+            if (!a.free && !b.free) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist >= ICON || dist < 0.01) continue;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            // Ein Logo im Umlauf wird mit seiner Bahngeschwindigkeit aus der Bahn gelöst.
+            for (const [s2, k] of [[a, i], [b, j]] as const) {
+              if (s2.free) continue;
+              const rg = RINGS[Number(icons[k]!.dataset.ring)]!;
+              const w = (Math.PI * 2) / rg.period;
+              const ax = axes(Number(icons[k]!.dataset.ring));
+              s2.vx = -Math.sin(s2.theta) * ax.rx * w;
+              s2.vy = Math.cos(s2.theta) * ax.ry * w;
+              s2.free = true;
+            }
+            const rel = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+            if (rel > 0) {
+              const imp = rel * 1.0;
+              if (!da) {
+                a.vx -= imp * nx;
+                a.vy -= imp * ny;
+              }
+              if (!db) {
+                b.vx += imp * nx;
+                b.vy += imp * ny;
+              }
+            }
+            const ov = ICON - dist;
+            const ma = da ? 0 : db ? 1 : 0.5;
+            a.x -= nx * ov * ma;
+            a.y -= ny * ov * ma;
+            b.x += nx * ov * (1 - ma);
+            b.y += ny * ov * (1 - ma);
+          }
+        }
+      }
       size.w = el.clientWidth;
       size.h = el.clientHeight;
       cur.x += (target.x - cur.x) * 0.05;
@@ -380,7 +447,9 @@ export default function LoginPage() {
               <rect width="32" height="32" rx="6" fill="var(--accent)" />
               <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <h1 className="m-0 text-3xl font-semibold tracking-tight max-sm:text-2xl">Willkommen zurück</h1>
+            <h1 aria-label="Willkommen zurück" className="wave m-0 text-3xl font-semibold tracking-tight max-sm:text-2xl">
+              <WaveText text="Willkommen zurück" />
+            </h1>
             <p className="m-0 mt-2 text-base text-fg2">
               Melde dich bei <span className="font-mono">patchwatch</span> an.
             </p>
