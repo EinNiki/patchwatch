@@ -995,22 +995,13 @@ button[data-select] {
   }
 }
 
-/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite): Kreis um die Mitte, Radius k * (kleinere Fensterhälfte - 30px); auf dem Handy eine Ellipse in der Fensterfläche. */
+/* Startposition der Logos ohne Skript (gleiche Formel wie in der Anmeldeseite): Kreis um die Mitte, Radius k * (kleinere Fensterhälfte - 30px). */
 .orbit-icon {
   transform: translate3d(
     calc(var(--c) * var(--k) * (min(100vw, 100vh) / 2 - 30px)),
     calc(var(--s) * var(--k) * (min(100vw, 100vh) / 2 - 30px)),
     0
   );
-}
-@media (max-width: 767px) {
-  .orbit-icon {
-    transform: translate3d(
-      calc(var(--c) * var(--k) * (100vw / 2 - 26px)),
-      calc(var(--s) * var(--k) * (100vh / 2 - 30px)),
-      0
-    );
-  }
 }
 
 /* Übergang nach der Anmeldung: ein Loch wächst von der Mitte und gibt das Dashboard frei. */
@@ -1034,6 +1025,33 @@ button[data-select] {
 }
 @media (prefers-reduced-motion: reduce) {
   .login-reveal {
+    animation-duration: 1ms;
+  }
+}
+
+/* Abmelden: ein Kreis wächst von der Abmelden-Taste (Richtung rechts oben) über den Bildschirm. */
+@keyframes login-out {
+  from {
+    clip-path: circle(0px at var(--ox) var(--oy));
+  }
+  to {
+    clip-path: circle(150vmax at var(--ox) var(--oy));
+  }
+}
+.login-out {
+  animation: login-out 650ms cubic-bezier(0.5, 0, 0.2, 1) forwards;
+}
+@keyframes login-fade {
+  to {
+    opacity: 0;
+  }
+}
+.login-fade {
+  animation: login-fade 350ms ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-out,
+  .login-fade {
     animation-duration: 1ms;
   }
 }

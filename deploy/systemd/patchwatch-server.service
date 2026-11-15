@@ -1,0 +1,45 @@
+[Unit]
+Description=patchwatch Server (API, CVE-Abgleich, Benachrichtigungen)
+Documentation=https://github.com/EinNiki/patchwatch
+After=network-online.target postgresql.service
+Wants=network-online.target
+PartOf=patchwatch.target
+
+[Service]
+Type=simple
+User=patchwatch
+Group=patchwatch
+EnvironmentFile=/etc/patchwatch/patchwatch.env
+ExecStart=@PREFIX@/bin/patchwatch-server serve
+Restart=on-failure
+RestartSec=3
+# Der Server wendet die Datenbank-Migrationen beim Start selbst an; Datenbank noch nicht bereit = erneut versuchen.
+TimeoutStopSec=30
+
+# Härtung: nur Netzwerk, keine Schreibrechte außerhalb von /tmp (privat), keine Rechte, keine Geräte.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=patchwatch.target

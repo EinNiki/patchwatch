@@ -139,6 +139,28 @@ Nur der Server geändert (z. B. ein Serverfix)? Dann reichen der erste `docker b
 `docker compose up -d --no-deps --pull never server`. `docker compose pull` (oder `up` ohne `--pull never` mit fehlendem
 Image) holt wieder das GHCR-Image und überschreibt den lokal gebauten Tag.
 
+### Betrieb ohne Docker (systemd)
+
+Server und Web-Oberfläche laufen auch als normale systemd-Dienste (`patchwatch-server`, `patchwatch-web`, zusammengefasst im
+`patchwatch.target`). Voraussetzungen: systemd, Node.js 22 (nur für die Oberfläche), PostgreSQL 15+, ein Reverse-Proxy mit TLS.
+
+```bash
+cargo build --release --locked -p patchwatch-server       # als normaler Benutzer im Repository
+(cd web && npm ci && npm run build)
+sudo deploy/systemd/install.sh                             # legt Benutzer patchwatch an, installiert nach /opt/patchwatch
+sudoedit /etc/patchwatch/patchwatch.env                    # Datenbank, PATCHWATCH_PUBLIC_URL, optional Admin-Passwort
+sudo systemctl start patchwatch.target                     # Status: systemctl status patchwatch-server patchwatch-web
+```
+
+- Die Dienste laufen als Systembenutzer `patchwatch` ohne Rechte, mit Härtung (`ProtectSystem=strict`, eigene `/tmp`, Syscall-Filter);
+  `systemd-analyze security` bewertet beide mit „OK“. Server: `127.0.0.1:8080`, Oberfläche: `127.0.0.1:3000`
+  (anderen Port in `/etc/patchwatch/web.env` mit `PORT=…`). Abstürze starten sie automatisch neu, das Target startet beim Booten.
+- Reverse-Proxy: `deploy/systemd/Caddyfile.example` (Caddy aus dem Paketmanager). `/api` geht an den Server, alles andere an die Oberfläche.
+- Erstes Admin-Passwort ohne Vorgabe: `journalctl -u patchwatch-server | grep -i passwort`. Logs allgemein: `journalctl -u patchwatch-server -u patchwatch-web`.
+- Update: neu bauen und `sudo deploy/systemd/install.sh --start` (Konfiguration in `/etc/patchwatch` bleibt). Entfernen: `--uninstall`.
+- Getestet: Installation, Start, Login im Browser über Caddy, Neustart nach `SIGKILL`, sauberes Stoppen und Entfernen (Ubuntu mit systemd 259,
+  Datenbank in einem Wegwerf-Container).
+
 ### Agent-Token ändern und prüfen
 
 Der Token steht nie in einem Befehlsargument (sichtbar in `ps` und der Shell-History); `--token <wert>` wird abgelehnt.

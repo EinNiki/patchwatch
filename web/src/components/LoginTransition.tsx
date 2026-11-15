@@ -1,43 +1,58 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { LOGIN_BG } from "@/lib/loginBg";
-import { getLoginPhase, setLoginPhase, subscribeLoginPhase } from "@/lib/loginTransition";
+import { getLoginPhase, getOrigin, setLoginPhase, subscribeLoginPhase } from "@/lib/loginTransition";
 
 /**
- * Übergang nach der Anmeldung. Liegt im Wurzel-Layout und bleibt deshalb beim Seitenwechsel bestehen: erst deckt das
- * Overlay (gleicher Hintergrund wie die Anmeldeseite, also nahtlos), dann öffnet sich ein Loch von der Mitte aus und
- * gibt das Dashboard frei. Rein dekorativ; ohne „weniger Bewegung“-Wunsch.
+ * Übergänge bei An- und Abmeldung. Liegt im Wurzel-Layout und bleibt deshalb beim Seitenwechsel bestehen.
+ * Anmeldung: Overlay (gleicher Hintergrund wie die Anmeldeseite, also nahtlos) deckt, dann öffnet sich ein Loch von der
+ * Mitte aus und gibt das Dashboard frei. Abmeldung: ein Kreis wächst von der Abmelden-Taste aus über den Bildschirm,
+ * darunter lädt die Anmeldeseite, dann blendet das Overlay aus. Rein dekorativ.
  */
 export function LoginTransition() {
   const phase = useSyncExternalStore(subscribeLoginPhase, getLoginPhase, () => "idle" as const);
   const path = usePathname();
+  const router = useRouter();
   useEffect(() => {
-    if (phase === "cover" && path !== "/login") {
-      // Dashboard ist geladen: kurz warten, damit es unter dem Overlay fertig steht, dann aufmachen.
-      const t = setTimeout(() => setLoginPhase("reveal"), 450);
-      return () => clearTimeout(t);
-    }
     if (phase === "cover") {
-      // Sicherung: Wechsel kam nicht zustande.
-      const t = setTimeout(() => setLoginPhase("idle"), 8000);
+      if (path !== "/login") {
+        // Dashboard ist geladen: kurz warten, damit es unter dem Overlay fertig steht, dann aufmachen.
+        const t = setTimeout(() => setLoginPhase("reveal"), 450);
+        return () => clearTimeout(t);
+      }
+      const t = setTimeout(() => setLoginPhase("idle"), 8000); // Sicherung: Wechsel kam nicht zustande
       return () => clearTimeout(t);
     }
-    if (phase === "reveal") {
+    if (phase === "reveal" || phase === "fade") {
       const t = setTimeout(() => setLoginPhase("idle"), 1200);
+      return () => clearTimeout(t);
+    }
+    if (phase === "away") {
+      if (path === "/login") {
+        const t = setTimeout(() => setLoginPhase("fade"), 250);
+        return () => clearTimeout(t);
+      }
+      const t = setTimeout(() => setLoginPhase("idle"), 8000);
       return () => clearTimeout(t);
     }
   }, [phase, path]);
   if (phase === "idle") return null;
+  const o = getOrigin();
+  const cls = phase === "reveal" ? "login-reveal" : phase === "out" ? "login-out" : phase === "fade" ? "login-fade" : "";
   return (
     <div
       aria-hidden="true"
-      style={LOGIN_BG}
-      className={`fixed inset-0 z-[100] ${phase === "reveal" ? "login-reveal" : ""}`}
-      onAnimationEnd={() => phase === "reveal" && setLoginPhase("idle")}
-    >
-      <span className="absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent shadow-[0_0_40px_14px_color-mix(in_srgb,var(--accent)_55%,transparent)]" />
-    </div>
+      style={{ ...LOGIN_BG, ...(phase === "out" ? ({ "--ox": `${o.x}px`, "--oy": `${o.y}px` } as React.CSSProperties) : null) }}
+      className={`fixed inset-0 z-[100] ${cls}`}
+      onAnimationEnd={() => {
+        if (phase === "reveal" || phase === "fade") setLoginPhase("idle");
+        if (phase === "out") {
+          setLoginPhase("away");
+          router.replace("/login");
+        }
+      }}
+    />
   );
 }

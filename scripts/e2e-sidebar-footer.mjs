@@ -70,7 +70,7 @@ try {
   }
 
   async function check(label, w, scheme, { collapsed = false, name = null, avatar = false } = {}) {
-    me = name || avatar ? { ...(name ? { username: name } : {}), avatar: avatar ? 123 : null } : null;
+    me = name || avatar ? { ...(name ? { username: name, display_name: name } : {}), avatar: avatar ? 123 : null } : null;
     const root = await open(w, scheme, collapsed);
     const m = await page.evaluate(MEASURE, root);
     const rows = ["feed", "live", "user", "logout"];

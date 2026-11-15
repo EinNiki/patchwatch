@@ -1,0 +1,52 @@
+[Unit]
+Description=patchwatch Web-Oberfläche (Next.js)
+Documentation=https://github.com/EinNiki/patchwatch
+After=network-online.target patchwatch-server.service
+Wants=patchwatch-server.service
+PartOf=patchwatch.target
+
+[Service]
+Type=simple
+User=patchwatch
+Group=patchwatch
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+# Optional: Adresse/Port überschreiben (siehe patchwatch.env.example); die Datei darf fehlen.
+EnvironmentFile=-/etc/patchwatch/web.env
+WorkingDirectory=@PREFIX@/web
+ExecStart=@NODE@ @PREFIX@/web/server.js
+Restart=on-failure
+RestartSec=3
+# Node.js beendet sich bei SIGTERM mit 143: Stoppen ist kein Fehler.
+SuccessExitStatus=143
+# Zwischenspeicher von Next.js (.next/cache zeigt hierhin), sonst ist das System schreibgeschützt.
+CacheDirectory=patchwatch-web
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# MemoryDenyWriteExecute bleibt aus: Node.js (V8) braucht ausführbaren Speicher für den JIT-Compiler.
+
+[Install]
+WantedBy=patchwatch.target

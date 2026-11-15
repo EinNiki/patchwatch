@@ -16,8 +16,8 @@ const subscribe = () => () => {};
 
 /** Bahnen (Kreise im Bild): Anteil (k) am größtmöglichen Radius = Hälfte der kleineren Fensterseite minus Rand, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
 const RINGS: { k: number; period: number; icons: string[] }[] = [
-  { k: 0.8, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
-  { k: 0.9, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
+  { k: 0.88, period: 70, icons: ["Ubuntu", "Debian", "Fedora"] },
+  { k: 0.94, period: -90, icons: ["Alpine", "Arch", "Proxmox"] },
   { k: 1, period: 120, icons: ["RHEL", "openSUSE"] },
 ];
 
@@ -51,11 +51,9 @@ function Orbits({ converge }: { converge: boolean }) {
     const size = { w: 0, h: 0 };
     let drag: { i: number; id: number; gx: number; gy: number; px: number; py: number } | null = null;
 
-    // Halbachsen der Bahn: Kreis im Bild; auf schmalen Fenstern (Handy) eine Ellipse über die ganze Fläche.
+    // Halbachsen der Bahn (Kreis im Bild). Auf dem Handy sind die Logos ausgeblendet.
     const axes = (ri: number) => {
-      const k = RINGS[ri]!.k;
-      if (size.w < 768) return { rx: k * (size.w / 2 - 26), ry: k * (size.h / 2 - 30) };
-      const r = k * (Math.min(size.w, size.h) / 2 - 30);
+      const r = RINGS[ri]!.k * (Math.min(size.w, size.h) / 2 - 30);
       return { rx: r, ry: r };
     };
 
@@ -105,6 +103,7 @@ function Orbits({ converge }: { converge: boolean }) {
 
     let raf = 0;
     let last = 0;
+    let convStart = 0;
     const tick = (t: number) => {
       const dt = Math.min((t - (last || t)) / 1000, 0.04) || 0.016;
       last = t;
@@ -122,11 +121,15 @@ function Orbits({ converge }: { converge: boolean }) {
         const { rx, ry } = axes(ri);
         if (conv.current) {
           // Anmeldung gelungen: alles zieht sich weich in die Mitte zusammen.
+          if (!convStart) convStart = t;
+          const p = Math.min(1, (t - convStart) / 700);
           const f = 1 - Math.exp(-dt * 6);
           s.x -= s.x * f;
           s.y -= s.y * f;
           s.free = true;
-          c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0)`;
+          // Auf dem Weg zur Mitte schrumpfen und verblassen: am Ende bleibt nichts zurück.
+          c.style.opacity = String(1 - p * p);
+          c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0) scale(${(1 - 0.85 * p).toFixed(3)})`;
           return;
         }
         if (drag && drag.i === i) {
@@ -194,7 +197,7 @@ function Orbits({ converge }: { converge: boolean }) {
     };
   }, []);
   return (
-    <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div ref={box} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden max-md:hidden">
       <div className="absolute left-1/2 top-1/2" style={{ transform: "translate(var(--ox, 0px), var(--oy, 0px))" }}>
         {RINGS.map((ring, ri) =>
           ring.icons.map((name, i) => {
@@ -323,85 +326,92 @@ export default function LoginPage() {
     >
       <Orbits converge={leaving} />
       <ThemeToggle className="absolute! right-4 top-4 z-10 text-fg2" />
-      <div className={`relative w-full max-w-md transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
-        <div className="mb-6 flex flex-col items-center text-center">
-          <svg width="56" height="56" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-3 rounded-lg shadow-(--shadow-float)">
-            <rect width="32" height="32" rx="6" fill="var(--accent)" />
-            <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <h1 className="m-0 font-mono text-2xl font-medium">patchwatch</h1>
-          <p className="m-0 mt-1 text-fg2">Willkommen zurück</p>
-        </div>
-        {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
-        <form
-          method="post"
-          action="/login"
-          onSubmit={(e) => void submit(e)}
-          className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-8 shadow-(--shadow-float) max-sm:p-6"
-        >
-          <Field label="Benutzername">
-            <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} />
-          </Field>
-          {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
-          <div className="relative">
-            <Field label="Passwort">
-              <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="w-full pr-12" />
-            </Field>
-            <Button
-              variant="ghost"
-              data-hit="none"
-              aria-pressed={show}
-              aria-label={show ? "Eingabe verbergen" : "Eingabe anzeigen"}
-              onClick={() => setShow(!show)}
-              className="absolute bottom-0.5 right-0.5 h-7! min-h-0! w-9! min-w-0! border-0! px-0! text-fg3 hover:text-fg max-md:bottom-0 max-md:h-11! max-md:w-11!"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
-                <circle cx="12" cy="12" r="3" />
-                {show ? <path d="M4 4l16 16" /> : null}
-              </svg>
-            </Button>
-          </div>
-          {error ? (
-            <p role="alert" className="m-0 rounded-sm border-l-4 border-crit bg-crit-soft px-3 py-2 text-crit">
-              {error}
+      <div className={`relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
+        {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
+        <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
+          <div className="mb-8 flex flex-col items-center text-center">
+            <svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-5 rounded-xl shadow-(--shadow-float)">
+              <rect width="32" height="32" rx="6" fill="var(--accent)" />
+              <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <h1 className="m-0 text-3xl font-semibold tracking-tight max-sm:text-2xl">Willkommen zurück</h1>
+            <p className="m-0 mt-2 text-base text-fg2">
+              Melde dich bei <span className="font-mono">patchwatch</span> an.
             </p>
-          ) : null}
-          <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="w-full">
-            Anmelden
-          </Button>
-          {passkey || oidc?.enabled ? (
-            <>
-              <div className="flex items-center gap-3 text-xs text-fg3" role="separator">
-                <span className="h-px flex-1 bg-line" />
-                oder
-                <span className="h-px flex-1 bg-line" />
-              </div>
-              {passkey ? (
-                <Button
-                  disabled={!hydrated || !webauthnSupported()}
-                  onClick={() => void passkeyLogin()}
-                  title={webauthnSupported() ? undefined : "Dieser Browser unterstützt keine Passkeys (oder die Seite läuft nicht über HTTPS)."}
-                  // Bei großer Schrift darf der Text umbrechen statt abgeschnitten zu werden.
-                  className="h-auto! min-h-8 w-full whitespace-normal! py-1.5 leading-tight max-md:min-h-11"
-                >
-                  Mit Passkey anmelden
-                </Button>
-              ) : null}
-              {oidc?.enabled ? (
-              <a
-                href="/api/v1/auth/oidc/login"
-                className="inline-flex min-h-9 items-center justify-center rounded-sm border border-control bg-surface px-3 font-semibold no-underline hover:border-accent max-md:min-h-11"
+          </div>
+          {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
+          <form
+            method="post"
+            action="/login"
+            onSubmit={(e) => void submit(e)}
+            className="flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm"
+          >
+            <Field label="Benutzername">
+              <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12 rounded-xl! px-4 text-base!" />
+            </Field>
+            {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
+            <div className="relative">
+              <Field label="Passwort">
+                <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12 w-full rounded-xl! px-4 pr-14 text-base!" />
+              </Field>
+              <Button
+                variant="ghost"
+                data-hit="none"
+                aria-pressed={show}
+                aria-label={show ? "Eingabe verbergen" : "Eingabe anzeigen"}
+                onClick={() => setShow(!show)}
+                className="absolute bottom-0.5 right-0.5 h-11! min-h-0! w-11! min-w-0! border-0! px-0! text-fg3 hover:text-fg"
               >
-                Mit {oidc.name} anmelden
-              </a>
-              ) : null}
-            </>
-          ) : null}
-        </form>
-        <p className="mt-4 text-center text-xs text-fg3">Die Verbindung sollte über HTTPS laufen.
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+                  <circle cx="12" cy="12" r="3" />
+                  {show ? <path d="M4 4l16 16" /> : null}
+                </svg>
+              </Button>
+            </div>
+            {error ? (
+              <p role="alert" className="m-0 rounded-lg border-l-4 border-crit bg-crit-soft px-4 py-3 text-crit">
+                {error}
+              </p>
+            ) : null}
+            <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-xl! text-base!">
+              Anmelden
+            </Button>
+            {passkey || oidc?.enabled ? (
+              <>
+                <div className="flex items-center gap-4 text-sm text-fg3" role="separator">
+                  <span className="h-px flex-1 bg-line" />
+                  oder
+                  <span className="h-px flex-1 bg-line" />
+                </div>
+                {passkey ? (
+                  <Button
+                    disabled={!hydrated || !webauthnSupported()}
+                    onClick={() => void passkeyLogin()}
+                    title={webauthnSupported() ? undefined : "Dieser Browser unterstützt keine Passkeys (oder die Seite läuft nicht über HTTPS)."}
+                    // Bei großer Schrift darf der Text umbrechen statt abgeschnitten zu werden.
+                    className="h-auto! min-h-12 w-full rounded-xl! whitespace-normal! py-2 text-base! leading-tight"
+                  >
+                    Mit Passkey anmelden
+                  </Button>
+                ) : null}
+                {oidc?.enabled ? (
+                  <a
+                    href="/api/v1/auth/oidc/login"
+                    className="inline-flex min-h-12 items-center justify-center rounded-xl border border-control bg-surface px-4 py-2 text-center text-base font-semibold no-underline hover:border-accent"
+                  >
+                    Mit {oidc.name} anmelden
+                  </a>
+                ) : null}
+              </>
+            ) : null}
+          </form>
+        </div>
+        <p className="mt-6 text-center text-sm text-fg3">
+          Die Verbindung sollte über HTTPS laufen.
           <br />
-          Mehrere Fehlversuche sperren die Anmeldung kurz.</p>
+          Mehrere Fehlversuche sperren die Anmeldung kurz.
+        </p>
       </div>
     </main>
   );

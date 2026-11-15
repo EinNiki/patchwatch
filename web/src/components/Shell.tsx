@@ -372,7 +372,13 @@ function SidebarBody({ pathname, collapse }: { pathname: string; collapse?: { co
             <RailTip>{me.display_name || me.username}</RailTip>
           </div>
           <div className="group/item relative">
-            <button type="button" onClick={() => void logout()} className={`${rowBase} ${FOOT_TEXT} w-full cursor-pointer text-left hover:bg-sunk hover:text-fg`}>
+            <button
+              type="button"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                void logout({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+              }} className={`${rowBase} ${FOOT_TEXT} w-full cursor-pointer text-left hover:bg-sunk hover:text-fg`}
+            >
               <span className={ICON}>
                 <NavIcon name="logout" />
               </span>

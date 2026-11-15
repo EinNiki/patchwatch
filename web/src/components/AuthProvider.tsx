@@ -1,5 +1,6 @@
 "use client";
 
+import { startLogoutTransition } from "@/lib/loginTransition";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setCsrf } from "@/lib/api";
@@ -11,7 +12,8 @@ import { sessionFailure } from "@/lib/session";
 
 interface AuthValue {
   me: Me;
-  logout: () => Promise<void>;
+  /** at: Mittelpunkt der Abmelden-Taste (Fensterkoordinaten) für den Übergang; ohne Angabe direkt zur Anmeldeseite. */
+  logout: (at?: { x: number; y: number }) => Promise<void>;
   /** Neuer Cache-Schlüssel des Profilbilds nach Hochladen (Zahl) oder Entfernen (`null`). */
   setAvatar: (v: number | null) => void;
   /** Neuer Anzeigename nach dem Speichern in den Einstellungen. */
@@ -78,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   if (failure) return <ErrorScreen page title="Anmeldung kann gerade nicht geprüft werden" message={failure} onRetry={retry} />;
   if (!me) return null;
 
-  const logout = async () => {
+  const logout = async (at?: { x: number; y: number }) => {
     // Schon vor der Abmeldung leeren und die Sitzungsnummer erhöhen: Anfragen, die jetzt noch laufen, füllen den Cache nicht mehr.
     clearApiCache();
     try {
@@ -86,7 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setCsrf(null);
       clearApiCache();
-      router.replace("/login");
+      if (at && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) startLogoutTransition(at);
+      else router.replace("/login");
     }
   };
   // Start-Passwort: nur der Passwortwechsel ist erlaubt (der Server sperrt alles andere mit 403).

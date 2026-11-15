@@ -1,0 +1,19 @@
+# Reverse-Proxy mit TLS für den systemd-Betrieb (Caddy aus dem Paketmanager). Nach /etc/caddy/Caddyfile kopieren.
+# /api geht an den Server (127.0.0.1:8080), alles andere an die Web-Oberfläche (127.0.0.1:3000).
+# Für Tests ohne TLS: Adresse ":8088" statt des Hostnamens (und PATCHWATCH_COOKIE_SECURE=false setzen).
+patchwatch.example.org {
+	encode zstd gzip
+	# Nur über VPN erreichbar? Dann "tls internal" aktivieren (eigene CA).
+	# tls internal
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

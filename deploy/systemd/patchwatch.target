@@ -1,0 +1,6 @@
+[Unit]
+Description=patchwatch (Server und Web-Oberfläche)
+Wants=patchwatch-server.service patchwatch-web.service
+
+[Install]
+WantedBy=multi-user.target
