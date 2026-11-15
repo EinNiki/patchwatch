@@ -29,7 +29,7 @@ Für Ubuntu, Debian und Proxmox VE. Ein kleiner Agent pro Host, ein Server, eine
 1. **Server starten** (Docker, PostgreSQL inklusive). Beim ersten Start steht das einmalige Admin-Passwort im Log.
 
    ```sh
-   cp .env.example .env            # POSTGRES_PASSWORD setzen (openssl rand -hex 24)
+   cp .env.example .env            # Felder mit "EINTRAGEN" ausfüllen (Passwort, Schlüssel, Adresse)
    docker compose up -d
    docker compose logs server
    ```
@@ -247,15 +247,19 @@ Fehlermeldungen (ohne Token) landen im journald: `journalctl -u patchwatch-agent
 Rust (axum, tokio, sqlx) mit PostgreSQL. Migrationen laufen beim Start (`server/migrations`).
 
 ```sh
-cp .env.example .env            # POSTGRES_PASSWORD setzen (openssl rand -hex 24)
+cp .env.example .env            # Felder mit "EINTRAGEN" ausfüllen (Passwort, Schlüssel, Adresse)
 docker compose up -d
 docker compose logs server      # beim ersten Start: einmaliges Start-Passwort für "admin"
 ```
 
+Die Compose-Datei startet Postgres, Server (Port 8080) und Web-Oberfläche (Port 3000), liest alle Einstellungen aus der
+`.env` und enthält keinen Reverse-Proxy: Du brauchst einen eigenen, der `/api/*` an Port 8080 und den Rest an Port 3000
+schickt (Beispiel unten unter [Betrieb mit TLS](#betrieb-mit-tls)).
+
 > **Netzwerk: patchwatch gehört nur ins Heimnetz oder hinter ein VPN.** Es ist ein Verwaltungswerkzeug mit
-> Admin-Oberfläche und kein öffentlicher Dienst. Der mitgelieferte Caddy lauscht standardmäßig auf allen
-> Schnittstellen (80/443); mit `PATCHWATCH_BIND=<LAN- oder VPN-Adresse>` in der `.env` wird er auf eine
-> Adresse begrenzt. Nicht ohne weiteren Schutz (VPN, IP-Filter, Zugangsschutz am Proxy) ins Internet stellen.
+> Admin-Oberfläche und kein öffentlicher Dienst. Die Ports 8080 und 3000 sind in der Compose-Datei auf allen
+> Schnittstellen offen; mit einer Adresse davor (`"192.168.1.10:8080:8080"`) werden sie auf eine LAN- oder
+> VPN-Adresse begrenzt. Nicht ohne weiteren Schutz (VPN, IP-Filter, Zugangsschutz am Proxy) ins Internet stellen.
 
 **Erster Start und Admin-Passwort:** Es gibt kein festes Standardpasswort. Existiert noch kein Admin, legt der
 Server `admin` an: entweder mit `PATCHWATCH_ADMIN_PASSWORD` (mind. 12 Zeichen, der frühere Standardwert wird
@@ -708,75 +712,32 @@ Mit axe-core gegen Hell, Dunkel und Mobil geprüft: keine Verstöße.
 
 ### Betrieb mit TLS
 
-`docker compose up -d` startet Postgres, Server, Web und den Caddy-Proxy (`/api` → Server, alles andere → Web;
-`PATCHWATCH_DOMAIN` in `.env` setzen, sonst `localhost`). Hinter einem eigenen Proxy startet
-`docker compose up -d postgres server web`: `/api/*` an `127.0.0.1:8080`, der Rest an `127.0.0.1:3000`, und dem Server
-`PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
+`docker compose up -d` startet Postgres, Server und Web-Oberfläche. Ein Reverse-Proxy gehört nicht dazu: Er leitet
+`/api/*` an den Server (Port 8080) und alles andere an die Web-Oberfläche (Port 3000) und setzt `X-Forwarded-For`.
+In der `.env` müssen `PATCHWATCH_PUBLIC_URL` (die Adresse im Browser), `PATCHWATCH_TRUST_PROXY=true` und bei HTTPS
+`PATCHWATCH_COOKIE_SECURE=true` stehen. Nur bei Betrieb per `http://IP` ohne HTTPS gilt `PATCHWATCH_COOKIE_SECURE=false`;
+Passkeys und OIDC brauchen HTTPS und eine Domain.
 
 <details>
-<summary><b>Beispiel: eigener Reverse-Proxy (nur Postgres, Server und Web)</b></summary>
+<summary><b>Beispiel: Caddy als Reverse-Proxy</b></summary>
 
-Gekürzte `docker-compose.yml` ohne den mitgelieferten Caddy. Alle Werte sind Platzhalter; echte Geheimnisse gehören
-nur in die `.env` (nicht ins Repository, nicht in Chats oder Tickets).
+Mit Caddy aus dem Paketmanager (`/etc/caddy/Caddyfile`); Server und Oberfläche laufen auf demselben Host:
 
-```yaml
-services:
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: patchwatch
-      POSTGRES_DB: patchwatch
-    env_file: [.env]                       # liefert POSTGRES_PASSWORD
-    volumes: [pgdata:/var/lib/postgresql/data]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U patchwatch -d patchwatch"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-    security_opt: ["no-new-privileges:true"]
-
-  server:
-    image: ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest}
-    restart: unless-stopped
-    depends_on:
-      postgres: { condition: service_healthy }
-    environment:
-      PATCHWATCH_DATABASE_URL: postgres://patchwatch:${POSTGRES_PASSWORD}@postgres:5432/patchwatch
-      PATCHWATCH_TRUST_PROXY: "true"       # Client-IP aus X-Forwarded-For (nur hinter eigenem Proxy)
-      PATCHWATCH_PUBLIC_URL: https://patchwatch.example.org
-      PATCHWATCH_SECRET_KEY: ${PATCHWATCH_SECRET_KEY}   # openssl rand -base64 32
-      PATCHWATCH_ADMIN_PASSWORD: ${PATCHWATCH_ADMIN_PASSWORD:-}
-      PATCHWATCH_TIMEZONE: Europe/Berlin
-    ports: ["192.168.1.10:8099:8080"]      # nur LAN-/VPN-Adresse, nicht 0.0.0.0
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-
-  web:
-    image: ghcr.io/einniki/patchwatch-web:${PATCHWATCH_VERSION:-latest}
-    restart: unless-stopped
-    depends_on: [server]
-    ports: ["192.168.1.10:3000:3000"]
-    read_only: true
-    tmpfs: [/tmp, /app/.next/cache]
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-
-volumes:
-  pgdata:
+```
+patchwatch.example.org {
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}
 ```
 
-```sh
-# .env (Beispielwerte, selbst erzeugen: openssl rand -hex 24 / openssl rand -base64 32)
-POSTGRES_PASSWORD=<zufälliger-hex-wert>
-PATCHWATCH_SECRET_KEY=<base64-wert-mit-32-byte>
-PATCHWATCH_ADMIN_PASSWORD=<mindestens-12-zeichen>
-```
-
-Der Proxy leitet `/api/*` an den Server (hier Port 8099) und alles andere an die Web-UI (Port 3000) und setzt
-`X-Forwarded-For`. Der Server veröffentlicht seine Ports nur auf der LAN-Adresse; `PATCHWATCH_SECRET_KEY` getrennt von der
-Datenbank sichern, sonst sind gespeicherte Geheimnisse (z. B. Kanal-Token, 2FA) nicht lesbar.
+Eine Vorlage mit Sicherheits-Headern liegt in `deploy/systemd/Caddyfile.example`. Ein Proxy in einem anderen Container
+oder auf einem anderen Host nimmt statt `127.0.0.1` die Adresse des Docker-Hosts.
+`PATCHWATCH_SECRET_KEY` getrennt von der Datenbank sichern, sonst sind gespeicherte Geheimnisse (z. B. Kanal-Token,
+2FA) nicht lesbar.
 
 </details>
 

@@ -1,6 +1,9 @@
-# Betrieb hinter einem TLS-Reverse-Proxy (siehe README). Der Server veröffentlicht den Port
-# nur auf localhost; Postgres ist nicht von außen erreichbar. Kein Redis: Queue und Events
-# laufen über Postgres (SKIP LOCKED, LISTEN/NOTIFY).
+# patchwatch: Postgres, Server und Web-Oberfläche. Alle Einstellungen stehen in der Datei .env
+# (Vorlage: .env.example). Es wird nichts lokal gebaut, die Images kommen aus ghcr.io.
+#
+# Ein Reverse-Proxy ist nicht enthalten: Er muss /api/* an Port 8080 (Server) und alles andere
+# an Port 3000 (Web-Oberfläche) weiterleiten. Beispiel: README, Abschnitt "Betrieb mit TLS".
+# Update: Tag bei "image:" ändern, dann `docker compose pull && docker compose up -d`.
 services:
   postgres:
     image: postgres:17-alpine
@@ -8,9 +11,11 @@ services:
     environment:
       POSTGRES_USER: patchwatch
       POSTGRES_DB: patchwatch
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+    env_file:
+      - .env
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # ANPASSEN: Ordner auf deinem Host, in dem die Datenbank liegt (wird beim ersten Start angelegt).
+      - /home/docker/patchwach/pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U patchwatch -d patchwatch"]
       interval: 10s
@@ -19,79 +24,32 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   server:
-    image: ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest}
+    # ANPASSEN: gewünschte Version (Tags: https://github.com/EinNiki/patchwatch/releases)
+    image: ghcr.io/einniki/patchwatch-server:0.2.2
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      PATCHWATCH_DATABASE_URL: postgres://patchwatch:${POSTGRES_PASSWORD}@postgres:5432/patchwatch
-      # Hinter dem Reverse-Proxy: Client-IP aus X-Forwarded-For für die Rate-Limits.
-      PATCHWATCH_TRUST_PROXY: "true"
-      PATCHWATCH_TIMEZONE: ${PATCHWATCH_TIMEZONE:-Europe/Berlin}
-      PATCHWATCH_DAILY_SUMMARY_TIME: ${PATCHWATCH_DAILY_SUMMARY_TIME:-08:00}
-      PATCHWATCH_CVE_SOURCES: ${PATCHWATCH_CVE_SOURCES:-ubuntu,debian}
-      PATCHWATCH_CVE_INTERVAL_MINUTES: ${PATCHWATCH_CVE_INTERVAL_MINUTES:-60}
-      # Ubuntu: höchstens so viele Seiten (je 20 CVEs) pro Lauf; ein größerer Rückstand wird über mehrere Läufe abgebaut.
-      PATCHWATCH_CVE_UBUNTU_MAX_PAGES: ${PATCHWATCH_CVE_UBUNTU_MAX_PAGES:-100}
-      # Ubuntu-Erstabruf: Horizont in Tagen (0 = ganze Liste).
-      PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS: ${PATCHWATCH_CVE_UBUNTU_HORIZON_DAYS:-365}
-      PATCHWATCH_NTFY_URL: ${PATCHWATCH_NTFY_URL:-}
-      PATCHWATCH_NTFY_TOPIC: ${PATCHWATCH_NTFY_TOPIC:-}
-      PATCHWATCH_NTFY_TOKEN: ${PATCHWATCH_NTFY_TOKEN:-}
-      # Erster Start: Benutzer "admin" mit diesem Passwort (mind. 12 Zeichen), nur solange noch kein Admin existiert.
-      # Leer = der Server erzeugt ein Zufallspasswort und gibt es einmal im Log aus (docker compose logs server);
-      # beim ersten Login muss es geändert werden. Es gibt keinen festen Standardwert.
-      PATCHWATCH_ADMIN_PASSWORD: ${PATCHWATCH_ADMIN_PASSWORD:-}
-      PATCHWATCH_SECRET_KEY: ${PATCHWATCH_SECRET_KEY:-}
-      PATCHWATCH_NOTIFY_ALLOWED_HOSTS: ${PATCHWATCH_NOTIFY_ALLOWED_HOSTS:-}
-      PATCHWATCH_ALLOWED_ORIGINS: ${PATCHWATCH_ALLOWED_ORIGINS:-}
-      # Optional: Anmeldung per OpenID Connect (siehe .env.example)
-      PATCHWATCH_OIDC_ISSUER: ${PATCHWATCH_OIDC_ISSUER:-}
-      PATCHWATCH_OIDC_CLIENT_ID: ${PATCHWATCH_OIDC_CLIENT_ID:-}
-      PATCHWATCH_OIDC_CLIENT_SECRET: ${PATCHWATCH_OIDC_CLIENT_SECRET:-}
-      PATCHWATCH_OIDC_REDIRECT_URL: ${PATCHWATCH_OIDC_REDIRECT_URL:-}
-      PATCHWATCH_OIDC_NAME: ${PATCHWATCH_OIDC_NAME:-}
-      PATCHWATCH_OIDC_ALLOWED_EMAILS: ${PATCHWATCH_OIDC_ALLOWED_EMAILS:-}
-      PATCHWATCH_OIDC_ALLOWED_DOMAINS: ${PATCHWATCH_OIDC_ALLOWED_DOMAINS:-}
+    env_file:
+      - .env
     ports:
-      - "127.0.0.1:8080:8080"
+      # Host-Port:Container-Port. Ohne IP davor ist der Port auf allen Netzwerkkarten offen
+      # (nur im Heimnetz oder hinter einer Firewall). Nur LAN: "192.168.1.10:8080:8080".
+      - "8080:8080"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
   web:
-    image: ghcr.io/einniki/patchwatch-web:${PATCHWATCH_VERSION:-latest}
+    # ANPASSEN: dieselbe Version wie beim Server
+    image: ghcr.io/einniki/patchwatch-web:0.2.2
     restart: unless-stopped
     depends_on:
       - server
     ports:
-      - "127.0.0.1:3000:3000"
+      # Wie beim Server: Host-Port:Container-Port
+      - "3000:3000"
     read_only: true
     tmpfs: [/tmp, /app/.next/cache]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-
-  # TLS-Reverse-Proxy: leitet /api an den Server, alles andere an die Web-UI (die UI hat kein eigenes /api).
-  # Läuft schon ein eigener Proxy, nur die Dienste starten: docker compose up -d postgres server web
-  proxy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on: [server, web]
-    environment:
-      PATCHWATCH_DOMAIN: ${PATCHWATCH_DOMAIN:-localhost}
-    # PATCHWATCH_BIND begrenzt die Veröffentlichung auf eine Adresse (z. B. die LAN- oder VPN-Adresse des Hosts).
-    # Standard 0.0.0.0 = alle Schnittstellen, wie bisher.
-    ports:
-      - "${PATCHWATCH_BIND:-0.0.0.0}:${PATCHWATCH_HTTP_PORT:-80}:80"
-      - "${PATCHWATCH_BIND:-0.0.0.0}:${PATCHWATCH_HTTPS_PORT:-443}:443"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-    cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE]
-    security_opt: ["no-new-privileges:true"]
-
-volumes:
-  pgdata:
-  caddy_data:
