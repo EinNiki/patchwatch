@@ -132,6 +132,8 @@ pub async fn bootstrap_admin(pool: &PgPool, env_password: Option<&str>) -> Resul
     }
     // Nur anlegen, nie überschreiben: startet ein zweiter Prozess gleichzeitig, gewinnt genau einer, der andere
     // meldet "schon vorhanden" (sonst zeigten beide ein Start-Passwort, gültig wäre nur das zuletzt geschriebene).
+    // Bewusst ohne Konfliktziel: auch der Unique-Index auf dem Anzeigenamen (admin_display_name_unique) kann bei
+    // gleichzeitigem Start auslösen und darf keinen Fehler, sondern nur "schon vorhanden" ergeben.
     let (pw, outcome) = match env_password.filter(|p| !p.is_empty()) {
         Some(pw) => (pw.to_owned(), Bootstrap::FromEnv),
         None => {
@@ -143,7 +145,7 @@ pub async fn bootstrap_admin(pool: &PgPool, env_password: Option<&str>) -> Resul
     let hash = validated_hash("admin", &pw)?;
     let inserted = sqlx::query(
         "INSERT INTO admin_users (username, password_hash, must_change_password) VALUES ('admin', $1, $2) \
-         ON CONFLICT (username) DO NOTHING",
+         ON CONFLICT DO NOTHING",
     )
     .bind(hash)
     .bind(must_change)
