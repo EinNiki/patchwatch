@@ -9,6 +9,34 @@ Leichtgewichtiges Monitoring für Kernel- und Patch-Stand mehrerer Linux-Server
 Status: im Aufbau. Aufbau: `agent/`, `server/`, `web/`, gemeinsame Crates in `crates/`.
 Einrichtung des GitHub-Repos: [docs/github-setup.md](docs/github-setup.md).
 
+## Überblick
+
+Alle Bilder sind in 3840 × 2160 aufgenommen (Demo-Daten, hell und dunkel). Zum Vergrößern anklicken.
+
+| | |
+|---|---|
+| [![Hosts](docs/media/hosts-light.png)](docs/media/hosts-light.png)<br>**Hosts:** Status, Kernel, offene Updates und CVEs auf einen Blick | [![Hosts, dunkel](docs/media/hosts-dark.png)](docs/media/hosts-dark.png)<br>Dasselbe im dunklen Farbschema |
+| [![Ubuntu-Host](docs/media/host-ubuntu-light.png)](docs/media/host-ubuntu-light.png)<br>**Ubuntu** (web-01): laufender und neuester Kernel, CVE-Bewertung | [![Debian-Host](docs/media/host-debian-light.png)](docs/media/host-debian-light.png)<br>**Debian** (db-01) |
+| [![Proxmox-Host](docs/media/host-proxmox-light.png)](docs/media/host-proxmox-light.png)<br>**Proxmox VE** (pve-01): Proxmox-Kernel ohne belastbare CVE-Quelle wird als „manuell prüfen“ gekennzeichnet | [![CVE-Detail](docs/media/cve-detail-light.png)](docs/media/cve-detail-light.png)<br>**CVE-Detail** mit betroffenen Hosts |
+| [![CVEs](docs/media/cves-light.png)](docs/media/cves-light.png)<br>**CVEs** mit Filtern | [![Agents](docs/media/agents-light.png)](docs/media/agents-light.png)<br>**Agents** verwalten |
+| [![Benachrichtigungen](docs/media/notifications-light.png)](docs/media/notifications-light.png)<br>**Benachrichtigungen** | [![Benutzer](docs/media/users-light.png)](docs/media/users-light.png)<br>**Benutzer und Rechte** |
+
+### Anmeldung
+
+Die Anmeldeseite, optional mit Zwei-Faktor-Code (TOTP, Wiederherstellungscodes), Passkey, OIDC oder LDAP.
+
+![Anmeldung und Dashboard](docs/media/login.gif)
+
+![Anmeldung mit Zwei-Faktor-Code](docs/media/login-2fa.gif)
+
+| | | |
+|---|---|---|
+| [![Anmeldung](docs/media/login-light.png)](docs/media/login-light.png) | [![Anmeldung, dunkel](docs/media/login-dark.png)](docs/media/login-dark.png) | [![Zwei-Faktor-Code](docs/media/login-2fa.png)](docs/media/login-2fa.png) |
+
+In den Einstellungen richtest du die Zwei-Faktor-Anmeldung ein, siehst alle aktiven Anmeldungen (Gerät, IP, Anmeldeart), meldest einzelne oder alle Geräte ab und stellst die Gültigkeit einer Anmeldung in Stunden ein.
+
+[![Einstellungen: Zwei-Faktor und aktive Anmeldungen](docs/media/settings-security.png)](docs/media/settings-security.png)
+
 ## Agent
 
 Statisches musl-Binary (~2 MB), läuft einmal pro Aufruf (systemd-Timer, täglich 12:00
@@ -33,6 +61,66 @@ vergleicht ihn mit dem Eintrag in der `.sha256`-Datei für genau diesen Dateinam
 Abbruch; kein `sha256sum -c`). Zusätzlich muss die minisign-Signatur (`.minisig`) zu dem im Skript eingetragenen
 öffentlichen Schlüssel passen. Dafür wird das Paket `minisign` benötigt (`apt install minisign`). Fehlt der Schlüssel
 oder minisign, wird **nichts installiert**.
+
+### Agent einrichten: Schritt für Schritt und Beispiele
+
+![Agent in der Oberfläche hinzufügen](docs/media/agent-hinzufuegen.gif)
+
+1. In der Web-UI **Agents → Agent hinzufügen**, den Namen des Hosts eingeben (z. B. `web-03`).
+2. Den angezeigten **Token** kopieren. Er erscheint nur jetzt; der Server speichert nur einen Hash.
+3. Den angezeigten **Installationsbefehl** auf dem Host ausführen (Server-URL ist schon eingetragen). Der Installer fragt den Token ab, die Eingabe wird nicht angezeigt.
+4. Prüfen: `patchwatch-agent status`, danach erscheint der Host nach spätestens einer Datenmeldung in der Liste.
+
+[![Agent hinzufügen](docs/media/agents-add.png)](docs/media/agents-add.png)
+[![Token und Installationsbefehl](docs/media/agents-token.png)](docs/media/agents-token.png)
+
+Der Befehl ist auf allen unterstützten Systemen derselbe. Voraussetzung sind `curl` und `minisign` (Signaturprüfung, siehe unten) sowie Root-Rechte.
+
+**Debian 13 (trixie)**, als root angemeldet (kein `sudo` nötig):
+
+```sh
+apt update && apt install -y curl minisign
+curl -fsSL -o install.sh https://github.com/EinNiki/patchwatch/releases/latest/download/install.sh
+sh install.sh --server-url https://patchwatch.example.org      # Token wird abgefragt
+patchwatch-agent status
+```
+
+**Ubuntu 24.04 LTS**, normaler Benutzer mit `sudo`:
+
+```sh
+sudo apt update && sudo apt install -y curl minisign
+curl -fsSL -o install.sh https://github.com/EinNiki/patchwatch/releases/latest/download/install.sh
+sudo sh install.sh --server-url https://patchwatch.example.org
+sudo patchwatch-agent status
+```
+
+**Proxmox VE 9** (auf dem PVE-Host selbst, nicht in den Gästen). Der Proxmox-Kernel hat keine belastbare CVE-Quelle; patchwatch zeigt die Version von Proxmox VE und markiert solche CVEs als „manuell prüfen“:
+
+```sh
+apt update && apt install -y curl minisign
+curl -fsSL -o install.sh https://github.com/EinNiki/patchwatch/releases/latest/download/install.sh
+sh install.sh --server-url https://patchwatch.example.org
+```
+
+**Viele Server automatisch** (Token liegt in einer Datei, keine Eingabe nötig; Datei danach löschen):
+
+```sh
+install -m 600 /dev/null /root/pw.token && printf '%s\n' 'pw_…' > /root/pw.token
+sh install.sh --server-url https://patchwatch.example.org --token-file /root/pw.token --auto-update
+shred -u /root/pw.token
+```
+
+Nach der Installation liegt die Konfiguration in `/etc/patchwatch/agent.toml` (Beispiel unten) und der Token in `/etc/patchwatch/token`:
+
+```toml
+# /etc/patchwatch/agent.toml
+server_url = "https://patchwatch.example.org"
+include_packages = false          # Paketliste mitsenden (für die CVE-Matrix über alle Pakete)
+checkin_enabled = true            # "Daten jetzt abrufen" aus der Web-UI erreicht den Agent binnen Sekunden
+checkin_wait_secs = 40
+```
+
+Ohne Veröffentlichung eines signierten Releases (siehe „Release-Signatur einrichten“) bricht der Installer absichtlich ab. Die Beispiele zeigen den vorgesehenen Ablauf; auf echten Debian-, Ubuntu- und Proxmox-Systemen habe ich sie hier nicht ausgeführt.
 
 ### Release-Signatur einrichten (einmalig, Voraussetzung)
 
