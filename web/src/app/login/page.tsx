@@ -48,46 +48,48 @@ function Tw({ text, at, block }: { text: string; at: number; block?: boolean }) 
 }
 
 /**
- * Hinweise unter der Karte: ein Satz wird getippt, steht kurz, wird wieder gelöscht, dann folgt der nächste.
- * Die Sätze stehen vollständig (unsichtbar) für Screenreader im Text; bei „weniger Bewegung“ zeigt die Seite die ersten zwei statisch.
+ * Hinweise unter der Karte: zwei Zeilen (oben klein, unten größer) werden getippt, stehen kurz, werden gelöscht, dann folgt das nächste Paar.
+ * Die Sätze stehen vollständig (unsichtbar) für Screenreader im Text; bei „weniger Bewegung“ zeigt die Seite das erste Paar statisch.
  */
-function Typer({ texts, startDelay }: { texts: string[]; startDelay: number }) {
-  const [shown, setShown] = useState("");
+function Typer({ pairs, startDelay }: { pairs: [string, string][]; startDelay: number }) {
+  const [view, setView] = useState({ a: "", b: "" });
   useEffect(() => {
     let i = 0;
-    let n = 0;
+    let pos = 0; // Zeichen insgesamt (erst obere, dann untere Zeile)
     let typing = true;
     let t: ReturnType<typeof setTimeout>;
     const step = () => {
-      const full = texts[i % texts.length]!;
-      if (typing) {
-        n += 1;
-        setShown(full.slice(0, n));
-        if (n >= full.length) {
-          typing = false;
-          t = setTimeout(step, 2400); // fertig getippt: kurz stehen lassen
-          return;
-        }
-        t = setTimeout(step, 38);
+      const [a, b] = pairs[i % pairs.length]!;
+      const total = a.length + b.length;
+      pos += typing ? 1 : -1;
+      setView({ a: a.slice(0, Math.min(pos, a.length)), b: pos > a.length ? b.slice(0, pos - a.length) : "" });
+      if (typing && pos >= total) {
+        typing = false;
+        t = setTimeout(step, 2800); // fertig getippt: stehen lassen
+      } else if (!typing && pos <= 0) {
+        typing = true;
+        i += 1;
+        t = setTimeout(step, 500);
+      } else if (typing && pos === a.length) {
+        t = setTimeout(step, 280); // kurze Atempause zwischen den Zeilen
       } else {
-        n -= 1;
-        setShown(full.slice(0, Math.max(n, 0)));
-        if (n <= 0) {
-          typing = true;
-          i += 1;
-          t = setTimeout(step, 450);
-          return;
-        }
-        t = setTimeout(step, 18);
+        t = setTimeout(step, typing ? 32 : 14);
       }
     };
     t = setTimeout(step, startDelay);
     return () => clearTimeout(t);
-  }, [texts, startDelay]);
+  }, [pairs, startDelay]);
+  const onB = view.b.length > 0;
   return (
     <>
-      {shown}
-      <span className="type-caret" />
+      <span className="block min-h-4 text-xs leading-4">
+        {view.a}
+        {onB ? null : <span className="type-caret" />}
+      </span>
+      <span className="mt-1 block min-h-7 text-lg leading-7 text-fg2">
+        {view.b}
+        {onB ? <span className="type-caret" /> : null}
+      </span>
     </>
   );
 }
@@ -425,12 +427,25 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [oidc, setOidc] = useState<{ enabled: boolean; name: string } | null>(null);
   const [passkey, setPasskey] = useState(false);
-  const hints = useMemo(
+  const hints = useMemo<[string, string][]>(
     () => [
-      "Die Verbindung sollte über HTTPS laufen.",
-      "Mehrere Fehlversuche sperren die Anmeldung kurz.",
-      ...(passkey ? ["Mit einem Passkey meldest du dich ohne Passwort an."] : []),
-      "Kein Konto? Das legt ein Administrator für dich an.",
+      ["Die Verbindung sollte über HTTPS laufen.", "Mehrere Fehlversuche sperren die Anmeldung kurz."],
+      ["Es läuft nur, bis es nicht mehr läuft.", "Patch rechtzeitig."],
+      ["Kein Update ist auch ein Update.", "Es heißt nur Risiko."],
+      ["Hast du es schon", "aus- und wieder eingeschaltet?"],
+      ["sudo make me a coffee.", "Fertig. Mit Milch?"],
+      ["Ein guter Admin ist faul:", "Er automatisiert."],
+      ["Zero-Day klingt cool.", "Ist es nicht."],
+      ["Rot ist nur eine Farbe.", "Bis es CVE heißt."],
+      ["Auf meinem Server läuft es.", "Auf deinem auch. Noch."],
+      ["Backups sind wie Fallschirme:", "Man merkt es zu spät."],
+      ["Freitag, 17 Uhr:", "Bitte keine Updates einspielen."],
+      ["Update now,", "cry later. Oder umgekehrt."],
+      ["Es gibt keine Cloud,", "nur den Server von jemand anderem."],
+      ["Dein Kernel hat Geburtstag.", "Gib ihm ein Update."],
+      ["Uptime ist schön.", "Gepatchte Uptime ist schöner."],
+      ["Ein Neustart löst nicht alles,", "aber vieles."],
+      ...(passkey ? ([["Mit einem Passkey meldest du dich", "ohne Passwort an."]] as [string, string][]) : []),
     ],
     [passkey],
   );
@@ -598,17 +613,13 @@ export default function LoginPage() {
           </form>
         </div>
         <p className="mt-6 text-center text-sm text-fg3">
-          <span className="sr-only">{hints.join(" ")}</span>
-          <span aria-hidden="true" className="block min-h-10 motion-reduce:hidden">
-            <Typer texts={hints} startDelay={1700 + (afterLogout ? 450 : 0)} />
+          <span className="sr-only">{hints.map((h) => h.join(" ")).join(" ")}</span>
+          <span aria-hidden="true" className="block min-h-[5rem] motion-reduce:hidden">
+            <Typer pairs={hints} startDelay={1700 + (afterLogout ? 450 : 0)} />
           </span>
           <span aria-hidden="true" className="hidden motion-reduce:block">
-            {hints.slice(0, 2).map((h) => (
-              <span key={h} className="block">
-                {h}
-              </span>
-            ))}
-          </span>
+            <span className="block text-xs">{hints[0]![0]}</span>
+            <span className="mt-1 block text-lg text-fg2">{hints[0]![1]}</span>          </span>
         </p>
       </div>
     </main>
