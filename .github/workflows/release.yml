@@ -70,13 +70,29 @@ jobs:
             echo "::error::Geheimnis MINISIGN_SECRET_KEY fehlt - Release-Signatur nicht eingerichtet (README)"
             exit 1
           fi
-          sudo apt-get install -y minisign
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
           keyfile="$(mktemp)"
           trap 'rm -f "$keyfile"' EXIT
-          (umask 077; printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile")
-          # Schlüssel ohne Passwort (minisign -G -W); Ausgabe unterdrückt, damit nichts im Log landet.
+          # Schlüsseldatei schreiben. Wurde nur die zweite Zeile (Base64) als Geheimnis eingetragen, fehlt die
+          # Kommentarzeile: sie wird ergänzt, damit minisign die Datei lesen kann.
+          (umask 077
+           if [ "$(printf '%s\n' "$MINISIGN_SECRET_KEY" | grep -c .)" -eq 1 ]; then
+             printf 'untrusted comment: minisign encrypted secret key\n%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+           else
+             printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+           fi)
+          # Schlüssel ohne Passwort (minisign -G -W). Fehlermeldungen von minisign bleiben sichtbar (sie enthalten
+          # keinen Schlüsselinhalt); nur die Standardausgabe wird unterdrückt.
           minisign -S -s "$keyfile" -m dist/patchwatch-agent-${{ matrix.arch }}-linux \
-            -x dist/patchwatch-agent-${{ matrix.arch }}-linux.minisig -t "patchwatch ${{ github.ref_name }}" >/dev/null
+            -x dist/patchwatch-agent-${{ matrix.arch }}-linux.minisig -t "patchwatch ${{ github.ref_name }}" </dev/null >/dev/null \
+            || { echo "::error::Signieren fehlgeschlagen: MINISIGN_SECRET_KEY muss der komplette Inhalt von patchwatch.key sein (beide Zeilen, ohne Passwort erzeugt mit minisign -G -W)"; exit 1; }
+      # Gegenprobe: die Signatur muss zum öffentlichen Schlüssel in install.sh passen, sonst würden Hosts sie ablehnen.
+      - name: Signatur mit öffentlichem Schlüssel prüfen
+        run: |
+          pub="$(sed -n 's/^PW_PUBKEY="\(.*\)"$/\1/p' agent/dist/install.sh)"
+          minisign -V -P "$pub" -m dist/patchwatch-agent-${{ matrix.arch }}-linux \
+            -x dist/patchwatch-agent-${{ matrix.arch }}-linux.minisig \
+            || { echo "::error::Geheimer Schlüssel (Geheimnis) und PW_PUBKEY in install.sh gehören nicht zusammen"; exit 1; }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agent-${{ matrix.arch }}
