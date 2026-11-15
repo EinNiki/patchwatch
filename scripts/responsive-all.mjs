@@ -214,7 +214,7 @@ const GROUPS = {
       await page.getByLabel("Benutzername").fill("admin");
       await page.getByLabel("Passwort").fill("falsches-passwort");
       await page.getByRole("button", { name: "Anmelden", exact: true }).click();
-      await page.locator("form [role=alert]").waitFor();
+      await page.locator("[role=alert].login-toast").waitFor();
     }, after: (page) => page.unroute("**/api/v1/auth/login") },
   ] },
   hosts: { states: [{ name: "Hosts", path: "/" }] },

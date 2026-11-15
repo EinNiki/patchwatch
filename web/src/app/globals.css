@@ -1192,3 +1192,16 @@ button[data-select] {
     }
   }
 }
+
+/* Fehlermeldung der Anmeldeseite: gleitet von oben rechts herein. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .login-toast {
+    animation: toast-in 240ms var(--ease-out);
+  }
+}

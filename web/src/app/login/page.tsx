@@ -535,6 +535,26 @@ export default function LoginPage() {
     >
       <Orbits converge={leaving} />
       <ThemeToggle className="absolute! right-4 top-4 z-10 text-fg2" />
+      {/* Fehlermeldung oben rechts neben dem Umschalter, mit Schließen-Kreuz (verschwindet auch bei der nächsten Anmeldung). */}
+      {error ? (
+        <div
+          role="alert"
+          className="login-toast absolute left-4 right-16 top-4 z-10 flex items-center gap-2 rounded-xl border border-line border-l-4 border-l-crit bg-surface py-0 pl-4 pr-1 text-sm text-fg shadow-(--shadow-float) sm:left-auto sm:max-w-sm"
+        >
+          <span className="flex-1 leading-snug">{error}</span>
+          <Button
+            variant="ghost"
+            data-hit="none"
+            aria-label="Meldung schließen"
+            onClick={() => setError(null)}
+            className="h-11! min-h-0! w-11! min-w-0! shrink-0 border-0! px-0! text-fg3 hover:text-fg"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true" focusable="false">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </Button>
+        </div>
+      ) : null}
       <div data-login-card className={`login-card relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
         {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
         <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
@@ -558,12 +578,12 @@ export default function LoginPage() {
             className="login-form flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm"
           >
             <Field label={<Tw text="Benutzername" at={380} />}>
-              <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12 rounded-xl! px-4 text-base!" />
+              <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12 rounded-xl! border-line! px-4 text-base!" />
             </Field>
             {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
             <div className="relative">
               <Field label={<Tw text="Passwort" at={470} />}>
-                <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12 w-full rounded-xl! px-4 pr-14 text-base!" />
+                <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12 w-full rounded-xl! border-line! px-4 pr-14 text-base!" />
               </Field>
               <Button
                 variant="ghost"
@@ -580,11 +600,6 @@ export default function LoginPage() {
                 </svg>
               </Button>
             </div>
-            {error ? (
-              <p role="alert" className="m-0 rounded-lg border-l-4 border-crit bg-crit-soft px-4 py-3 text-crit">
-                {error}
-              </p>
-            ) : null}
             <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-xl! text-base!">
               <Tw text="Anmelden" at={560} />
             </Button>
