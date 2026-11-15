@@ -8,8 +8,29 @@ permissions:
   contents: read
 
 jobs:
+  # Ohne Signaturschlüssel gibt es keine Agent-Artefakte (ungeprüfte Dateien werden nie veröffentlicht). Statt eines
+  # roten Laufs meldet dieser Job eine Warnung und überspringt Agent und GitHub Release. Die Docker-Images laufen immer.
+  signing-key:
+    name: Signaturschlüssel prüfen
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -n "$MINISIGN_SECRET_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MINISIGN_SECRET_KEY fehlt: Agent-Binaries und GitHub Release werden übersprungen (README, Release-Signatur einrichten)"
+          fi
+
   agent:
     name: agent (${{ matrix.target }})
+    needs: signing-key
+    if: needs.signing-key.outputs.present == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -63,7 +84,8 @@ jobs:
 
   github-release:
     name: GitHub Release
-    needs: agent
+    needs: [signing-key, agent]
+    if: needs.signing-key.outputs.present == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

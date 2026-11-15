@@ -196,7 +196,7 @@ oder Transparenzlog (cosign „keyless“ bräuchte Sigstore zur Prüfzeit und e
 ist in Debian und Ubuntu enthalten.
 
 Bis das erledigt ist, **scheitern Installation und Update des Agents absichtlich** (Platzhalter `PW_PUBKEY`), und der
-Release-Workflow bricht ab. Der Schlüssel wurde nicht erzeugt; der private Teil darf nie in das Repository.
+Release-Workflow überspringt Agent-Binaries und GitHub Release mit einer Warnung (die Docker-Images werden trotzdem gebaut). Der Schlüssel wurde nicht erzeugt; der private Teil darf nie in das Repository.
 
 1. Schlüsselpaar auf einem vertrauenswürdigen Rechner erzeugen (ohne Passwort, damit die CI ihn nutzen kann):
    `minisign -G -W -p patchwatch.pub -s patchwatch.key`
