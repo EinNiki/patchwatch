@@ -31,7 +31,7 @@ export function LoginTransition() {
     }
     if (phase === "away") {
       if (path === "/login") {
-        const t = setTimeout(() => setLoginPhase("fade"), 250);
+        const t = setTimeout(() => setLoginPhase("fade"), 120);
         return () => clearTimeout(t);
       }
       const t = setTimeout(() => setLoginPhase("idle"), 8000);

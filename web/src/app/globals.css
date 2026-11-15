@@ -1032,14 +1032,14 @@ button[data-select] {
 /* Abmelden: ein Kreis wächst von der Abmelden-Taste (Richtung rechts oben) über den Bildschirm. */
 @keyframes login-out {
   from {
-    clip-path: circle(0px at var(--ox) var(--oy));
+    opacity: 0;
   }
   to {
-    clip-path: circle(150vmax at var(--ox) var(--oy));
+    opacity: 1;
   }
 }
 .login-out {
-  animation: login-out 650ms cubic-bezier(0.5, 0, 0.2, 1) forwards;
+  animation: login-out 380ms ease-out forwards;
 }
 @keyframes login-fade {
   to {

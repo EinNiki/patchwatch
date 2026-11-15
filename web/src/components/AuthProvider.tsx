@@ -88,7 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setCsrf(null);
       clearApiCache();
-      if (at && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) startLogoutTransition(at);
+      if (at && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        router.prefetch("/login"); // Anmeldeseite vorladen, damit nach dem Überblenden nichts wartet
+        startLogoutTransition(at);
+      }
       else router.replace("/login");
     }
   };

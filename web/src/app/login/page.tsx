@@ -113,6 +113,23 @@ function Orbits({ converge }: { converge: boolean }) {
       cur.y += (target.y - cur.y) * 0.05;
       el.style.setProperty("--ox", `${cur.x.toFixed(1)}px`);
       el.style.setProperty("--oy", `${cur.y.toFixed(1)}px`);
+      // Kartenrechteck relativ zum Ursprung der Logos (einmal je Bild).
+      const cardEl = document.querySelector("[data-login-card]");
+      let box2: { l: number; r: number; t: number; b: number } | null = null;
+      if (cardEl) {
+        const er = el.getBoundingClientRect();
+        const cr = cardEl.getBoundingClientRect();
+        const ox = er.left + er.width / 2 + cur.x;
+        const oy = er.top + er.height / 2 + cur.y;
+        box2 = { l: cr.left - ox, r: cr.right - ox, t: cr.top - oy, b: cr.bottom - oy };
+      }
+      // Hinter der Karte blenden Logos weich aus statt abrupt abgeschnitten zu werden.
+      const fade = (c: HTMLElement, x: number, y: number) => {
+        if (!box2) return;
+        const dx = Math.max(box2.l - x, 0, x - box2.r);
+        const dy = Math.max(box2.t - y, 0, y - box2.b);
+        c.style.opacity = String(Math.min(1, Math.hypot(dx, dy) / (ICON * 0.8)));
+      };
       const hx = size.w / 2 - ICON / 2 - 4;
       const hy = size.h / 2 - ICON / 2 - 4;
       icons.forEach((c, i) => {
@@ -169,6 +186,7 @@ function Orbits({ converge }: { converge: boolean }) {
         // Abprallen an den Fensterrändern (nur beim Ziehen/Fliegen; im Umlauf dürfen Logos seitlich aus dem Bild laufen).
         if (!drag && !s.free) {
           c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0)`;
+          fade(c, s.x, s.y);
           return;
         }
         if (s.x > hx || s.x < -hx) {
@@ -179,7 +197,35 @@ function Orbits({ converge }: { converge: boolean }) {
           s.y = Math.max(-hy, Math.min(hy, s.y));
           if (!(drag && drag.i === i)) s.vy *= -0.75;
         }
+        // Die Anmeldekarte ist ein Hindernis: geworfene oder gezogene Logos prallen ab und fliegen nicht hindurch.
+        if (box2) {
+          const pad = ICON / 2 + 6;
+          const l = box2.l - pad;
+          const r = box2.r + pad;
+          const tp = box2.t - pad;
+          const b = box2.b + pad;
+          if (s.x > l && s.x < r && s.y > tp && s.y < b) {
+            // Kürzester Weg aus dem Rechteck heraus.
+            const d = [s.x - l, r - s.x, s.y - tp, b - s.y];
+            const m = Math.min(...d);
+            const mine = !(drag && drag.i === i);
+            if (m === d[0]) {
+              s.x = l;
+              if (mine) s.vx = -Math.abs(s.vx) * 0.75;
+            } else if (m === d[1]) {
+              s.x = r;
+              if (mine) s.vx = Math.abs(s.vx) * 0.75;
+            } else if (m === d[2]) {
+              s.y = tp;
+              if (mine) s.vy = -Math.abs(s.vy) * 0.75;
+            } else {
+              s.y = b;
+              if (mine) s.vy = Math.abs(s.vy) * 0.75;
+            }
+          }
+        }
         c.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0)`;
+        fade(c, s.x, s.y);
       });
       raf = requestAnimationFrame(tick);
     };
@@ -326,7 +372,7 @@ export default function LoginPage() {
     >
       <Orbits converge={leaving} />
       <ThemeToggle className="absolute! right-4 top-4 z-10 text-fg2" />
-      <div className={`relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
+      <div data-login-card className={`relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
         {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
         <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
           <div className="mb-8 flex flex-col items-center text-center">
