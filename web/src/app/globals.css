@@ -1157,3 +1157,19 @@ button[data-select] {
     animation-delay: calc(var(--base, 0ms) + 750ms);
   }
 }
+
+/* Blinkender Strich hinter dem getippten Hinweis unter der Anmeldekarte. */
+.type-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: currentColor;
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}

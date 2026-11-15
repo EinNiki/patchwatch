@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, setCsrf } from "@/lib/api";
 import type { Me } from "@/lib/types";
@@ -44,6 +44,51 @@ function Tw({ text, at, block }: { text: string; at: number; block?: boolean }) 
     >
       {text}
     </span>
+  );
+}
+
+/**
+ * Hinweise unter der Karte: ein Satz wird getippt, steht kurz, wird wieder gelöscht, dann folgt der nächste.
+ * Die Sätze stehen vollständig (unsichtbar) für Screenreader im Text; bei „weniger Bewegung“ zeigt die Seite die ersten zwei statisch.
+ */
+function Typer({ texts, startDelay }: { texts: string[]; startDelay: number }) {
+  const [shown, setShown] = useState("");
+  useEffect(() => {
+    let i = 0;
+    let n = 0;
+    let typing = true;
+    let t: ReturnType<typeof setTimeout>;
+    const step = () => {
+      const full = texts[i % texts.length]!;
+      if (typing) {
+        n += 1;
+        setShown(full.slice(0, n));
+        if (n >= full.length) {
+          typing = false;
+          t = setTimeout(step, 2400); // fertig getippt: kurz stehen lassen
+          return;
+        }
+        t = setTimeout(step, 38);
+      } else {
+        n -= 1;
+        setShown(full.slice(0, Math.max(n, 0)));
+        if (n <= 0) {
+          typing = true;
+          i += 1;
+          t = setTimeout(step, 450);
+          return;
+        }
+        t = setTimeout(step, 18);
+      }
+    };
+    t = setTimeout(step, startDelay);
+    return () => clearTimeout(t);
+  }, [texts, startDelay]);
+  return (
+    <>
+      {shown}
+      <span className="type-caret" />
+    </>
   );
 }
 
@@ -380,6 +425,15 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [oidc, setOidc] = useState<{ enabled: boolean; name: string } | null>(null);
   const [passkey, setPasskey] = useState(false);
+  const hints = useMemo(
+    () => [
+      "Die Verbindung sollte über HTTPS laufen.",
+      "Mehrere Fehlversuche sperren die Anmeldung kurz.",
+      ...(passkey ? ["Mit einem Passkey meldest du dich ohne Passwort an."] : []),
+      "Kein Konto? Das legt ein Administrator für dich an.",
+    ],
+    [passkey],
+  );
 
   useEffect(() => {
     api.get<{ oidc: { enabled: boolean; name: string }; passkey?: boolean }>("/auth/providers").then(
@@ -544,8 +598,17 @@ export default function LoginPage() {
           </form>
         </div>
         <p className="mt-6 text-center text-sm text-fg3">
-          <Tw text="Die Verbindung sollte über HTTPS laufen." at={920} block />
-          <Tw text="Mehrere Fehlversuche sperren die Anmeldung kurz." at={1150} block />
+          <span className="sr-only">{hints.join(" ")}</span>
+          <span aria-hidden="true" className="block min-h-10 motion-reduce:hidden">
+            <Typer texts={hints} startDelay={1700 + (afterLogout ? 450 : 0)} />
+          </span>
+          <span aria-hidden="true" className="hidden motion-reduce:block">
+            {hints.slice(0, 2).map((h) => (
+              <span key={h} className="block">
+                {h}
+              </span>
+            ))}
+          </span>
         </p>
       </div>
     </main>
