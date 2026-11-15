@@ -5,19 +5,53 @@ name: Images
 on:
   push:
     branches: [dev, main]
-    paths: ["server/**", "web/**", "crates/**", "Cargo.*", ".github/workflows/images.yml"]
+    paths: ["server/**", "web/**", "crates/**", "agent/**", "Cargo.*", ".github/workflows/images.yml"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Welche Images müssen neu gebaut werden? Nur die, deren Quellen sich seit dem letzten Push geändert haben (der Rust-Build dauert Minuten).
+  changes:
+    name: Änderungen
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      images: ${{ steps.c.outputs.images }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: c
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -eu
+          images='["server","web"]'
+          if [ "$EVENT" = push ] && [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+            if ! echo "$files" | grep -q '^\.github/workflows/images\.yml$'; then
+              list=""
+              if echo "$files" | grep -Eq '^(server/|crates/|agent/|Cargo\.)'; then list='"server"'; fi
+              if echo "$files" | grep -q '^web/'; then list="${list:+$list,}\"web\""; fi
+              images="[$list]"
+            fi
+          fi
+          echo "Zu bauen: $images"
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+
   images:
     name: Docker (${{ matrix.image }})
+    needs: changes
+    if: needs.changes.outputs.images != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        image: [server, web]
+        image: ${{ fromJSON(needs.changes.outputs.images) }}
     permissions:
       contents: read
       packages: write
@@ -46,3 +80,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

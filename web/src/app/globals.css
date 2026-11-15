@@ -1097,6 +1097,14 @@ button[data-select] {
     clip-path: inset(-8px -8px -8px -8px);
   }
 }
+@keyframes card-open {
+  from {
+    clip-path: inset(-48px 100% -48px -48px);
+  }
+  to {
+    clip-path: inset(-48px -48px -48px -48px);
+  }
+}
 @keyframes tw-in {
   from {
     clip-path: inset(-4px 100% -4px -2px);
@@ -1120,28 +1128,32 @@ button[data-select] {
     animation-timing-function: steps(var(--n), end);
     animation-fill-mode: backwards;
   }
+  /* Die ganze Karte öffnet sich von links nach rechts, im Takt mit dem Text. */
+  .login-card {
+    animation: card-open 950ms cubic-bezier(0.4, 0, 0.2, 1) var(--base, 0ms) backwards;
+  }
   .login-in {
-    animation: login-in 600ms var(--ease-out) var(--base, 0ms) backwards;
+    animation: login-in 420ms var(--ease-out) var(--base, 0ms) backwards;
   }
   .login-form > * {
-    animation: field-out 600ms var(--ease-out) backwards;
+    animation: field-out 420ms var(--ease-out) backwards;
   }
   .login-form > :nth-child(1) {
-    animation-delay: calc(var(--base, 0ms) + 900ms);
+    animation-delay: calc(var(--base, 0ms) + 300ms);
   }
   .login-form > :nth-child(2) {
-    animation-delay: calc(var(--base, 0ms) + 1050ms);
+    animation-delay: calc(var(--base, 0ms) + 390ms);
   }
   .login-form > :nth-child(3) {
-    animation-delay: calc(var(--base, 0ms) + 1200ms);
+    animation-delay: calc(var(--base, 0ms) + 480ms);
   }
   .login-form > :nth-child(4) {
-    animation-delay: calc(var(--base, 0ms) + 1350ms);
+    animation-delay: calc(var(--base, 0ms) + 570ms);
   }
   .login-form > :nth-child(5) {
-    animation-delay: calc(var(--base, 0ms) + 1500ms);
+    animation-delay: calc(var(--base, 0ms) + 660ms);
   }
   .login-form > :nth-child(n + 6) {
-    animation-delay: calc(var(--base, 0ms) + 1650ms);
+    animation-delay: calc(var(--base, 0ms) + 750ms);
   }
 }

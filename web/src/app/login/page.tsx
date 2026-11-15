@@ -40,7 +40,7 @@ function Tw({ text, at, block }: { text: string; at: number; block?: boolean }) 
   return (
     <span
       className={`tw${block ? " block" : ""}`}
-      style={{ "--n": n, animationDuration: `${n * 55}ms`, animationDelay: `calc(var(--base, 0ms) + ${at}ms)` } as React.CSSProperties}
+      style={{ "--n": n, animationDuration: `${n * 28}ms`, animationDelay: `calc(var(--base, 0ms) + ${at}ms)` } as React.CSSProperties}
     >
       {text}
     </span>
@@ -57,7 +57,7 @@ function WaveText({ text }: { text: string }) {
           {wi > 0 ? " " : null}
           <span className="inline-block whitespace-nowrap">
             {[...w].map((ch, ci) => (
-              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n * 18}ms`, animationDelay: `calc(var(--base, 0ms) + ${300 + n++ * 70}ms)` }}>
+              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n * 18}ms`, animationDelay: `calc(var(--base, 0ms) + ${150 + n++ * 38}ms)` }}>
                 {ch}
               </span>
             ))}
@@ -456,11 +456,11 @@ export default function LoginPage() {
       tabIndex={-1}
       // Hintergrund: kräftige Akzent-Glows oben links und unten rechts plus Punktraster (aus den Design-Token, hell und dunkel passend).
       className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10"
-      style={{ ...LOGIN_BG, "--base": afterLogout ? "900ms" : "0ms" } as React.CSSProperties}
+      style={{ ...LOGIN_BG, "--base": afterLogout ? "450ms" : "0ms" } as React.CSSProperties}
     >
       <Orbits converge={leaving} />
       <ThemeToggle className="absolute! right-4 top-4 z-10 text-fg2" />
-      <div data-login-card className={`relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
+      <div data-login-card className={`login-card relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
         {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
         <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
           <div className="mb-8 flex flex-col items-center text-center">
@@ -472,7 +472,7 @@ export default function LoginPage() {
               <WaveText text="Willkommen zurück" />
             </h1>
             <p className="m-0 mt-2 text-base text-fg2">
-              <Tw text="Melde dich bei" at={1500} /> <span className="font-mono"><Tw text="patchwatch" at={1900} /></span> <Tw text="an." at={2200} />
+              <Tw text="Melde dich bei" at={450} /> <span className="font-mono"><Tw text="patchwatch" at={870} /></span> <Tw text="an." at={1170} />
             </p>
           </div>
           {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
@@ -482,12 +482,12 @@ export default function LoginPage() {
             onSubmit={(e) => void submit(e)}
             className="login-form flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm"
           >
-            <Field label={<Tw text="Benutzername" at={1200} />}>
+            <Field label={<Tw text="Benutzername" at={380} />}>
               <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12 rounded-xl! px-4 text-base!" />
             </Field>
             {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
             <div className="relative">
-              <Field label={<Tw text="Passwort" at={1350} />}>
+              <Field label={<Tw text="Passwort" at={470} />}>
                 <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12 w-full rounded-xl! px-4 pr-14 text-base!" />
               </Field>
               <Button
@@ -511,13 +511,13 @@ export default function LoginPage() {
               </p>
             ) : null}
             <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-xl! text-base!">
-              <Tw text="Anmelden" at={1500} />
+              <Tw text="Anmelden" at={560} />
             </Button>
             {passkey || oidc?.enabled ? (
               <>
                 <div className="flex items-center gap-4 text-sm text-fg3" role="separator">
                   <span className="h-px flex-1 bg-line" />
-                  <Tw text="oder" at={1650} />
+                  <Tw text="oder" at={650} />
                   <span className="h-px flex-1 bg-line" />
                 </div>
                 {passkey ? (
@@ -528,7 +528,7 @@ export default function LoginPage() {
                     // Bei großer Schrift darf der Text umbrechen statt abgeschnitten zu werden.
                     className="h-auto! min-h-12 w-full rounded-xl! whitespace-normal! py-2 text-base! leading-tight"
                   >
-                    <Tw text="Mit Passkey anmelden" at={1800} />
+                    <Tw text="Mit Passkey anmelden" at={740} />
                   </Button>
                 ) : null}
                 {oidc?.enabled ? (
@@ -536,7 +536,7 @@ export default function LoginPage() {
                     href="/api/v1/auth/oidc/login"
                     className="inline-flex min-h-12 items-center justify-center rounded-xl border border-control bg-surface px-4 py-2 text-center text-base font-semibold no-underline hover:border-accent"
                   >
-                    <Tw text={`Mit ${oidc.name} anmelden`} at={1950} />
+                    <Tw text={`Mit ${oidc.name} anmelden`} at={830} />
                   </a>
                 ) : null}
               </>
@@ -544,8 +544,8 @@ export default function LoginPage() {
           </form>
         </div>
         <p className="mt-6 text-center text-sm text-fg3">
-          <Tw text="Die Verbindung sollte über HTTPS laufen." at={2100} block />
-          <Tw text="Mehrere Fehlversuche sperren die Anmeldung kurz." at={2400} block />
+          <Tw text="Die Verbindung sollte über HTTPS laufen." at={920} block />
+          <Tw text="Mehrere Fehlversuche sperren die Anmeldung kurz." at={1150} block />
         </p>
       </div>
     </main>
