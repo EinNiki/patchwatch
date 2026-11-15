@@ -16,9 +16,10 @@ const subscribe = () => () => {};
 
 /** Bahnen (Kreise im Bild): Anteil (k) am größtmöglichen Radius = Hälfte der kleineren Fensterseite minus Rand, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
 const RINGS: { k: number; period: number; icons: string[] }[] = [
-  { k: 0.88, period: 70, icons: ["Ubuntu", "Debian", "Fedora", "Linux Mint", "Kali"] },
-  { k: 0.94, period: -90, icons: ["Alpine", "Arch", "Proxmox", "NixOS", "Rocky"] },
-  { k: 1, period: 120, icons: ["RHEL", "openSUSE", "Manjaro", "Gentoo", "CentOS", "Raspberry Pi"] },
+  { k: 0.64, period: 60, icons: ["Ubuntu", "Fedora", "Linux Mint"] },
+  { k: 0.8, period: -80, icons: ["Debian", "Alpine", "Arch", "NixOS"] },
+  { k: 0.92, period: 100, icons: ["Kali", "Proxmox", "Rocky", "openSUSE", "Manjaro"] },
+  { k: 1, period: -125, icons: ["RHEL", "Gentoo", "CentOS", "Raspberry Pi"] },
 ];
 
 const ICON = 40; // Durchmesser in px
@@ -66,7 +67,7 @@ function Orbits({ converge }: { converge: boolean }) {
     if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const icons = Array.from(el.querySelectorAll<HTMLElement>("[data-orbit]"));
     // theta: Winkel auf der Bahn (nur im Umlauf); x/y: Position zur Mitte; free: fliegt gerade frei (geworfen/gezogen)
-    const st = icons.map((c) => ({ theta: baseAngle(Number(c.dataset.ring), Number(c.dataset.i)), x: 0, y: 0, vx: 0, vy: 0, free: false }));
+    const st = icons.map((c) => ({ theta: baseAngle(Number(c.dataset.ring), Number(c.dataset.i)), x: 0, y: 0, vx: 0, vy: 0, free: false, ox: 0, oy: 0 }));
     let target = { x: 0, y: 0 };
     const cur = { x: 0, y: 0 };
     const size = { w: 0, h: 0 };
@@ -244,11 +245,17 @@ function Orbits({ converge }: { converge: boolean }) {
           if (Math.abs(Math.hypot(s.x, s.y) - R) < 8 && Math.hypot(s.vx, s.vy) < 90) {
             s.free = false;
             s.theta = Math.atan2(s.y / ry, s.x / rx);
+            // Kein Sprung auf die Bahn: der Abstand zur Bahn wird als Versatz mitgenommen und weich abgebaut.
+            s.ox = s.x - Math.cos(s.theta) * rx;
+            s.oy = s.y - Math.sin(s.theta) * ry;
           }
         } else {
           s.theta += ((Math.PI * 2) / RINGS[ri]!.period) * dt;
-          s.x = Math.cos(s.theta) * rx;
-          s.y = Math.sin(s.theta) * ry;
+          const dec = Math.exp(-dt * 5);
+          s.ox *= dec;
+          s.oy *= dec;
+          s.x = Math.cos(s.theta) * rx + s.ox;
+          s.y = Math.sin(s.theta) * ry + s.oy;
         }
         // Abprallen an den Fensterrändern (nur beim Ziehen/Fliegen; im Umlauf dürfen Logos seitlich aus dem Bild laufen).
         if (!drag && !s.free) {
