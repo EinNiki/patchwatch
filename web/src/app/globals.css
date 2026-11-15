@@ -1021,7 +1021,7 @@ button[data-select] {
 .login-reveal {
   -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
   mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
-  animation: login-reveal 850ms var(--ease-out) forwards;
+  animation: login-reveal 1100ms var(--ease-out) forwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .login-reveal {
@@ -1041,7 +1041,7 @@ button[data-select] {
 .login-out {
   -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
   mask-image: radial-gradient(circle at 50% 50%, transparent var(--hole), #000 calc(var(--hole) + 6%));
-  animation: login-out 750ms cubic-bezier(0.55, 0, 0.45, 1) forwards;
+  animation: login-out 1100ms cubic-bezier(0.55, 0, 0.45, 1) forwards;
 }
 @keyframes login-fade {
   to {
@@ -1097,35 +1097,51 @@ button[data-select] {
     clip-path: inset(-8px -8px -8px -8px);
   }
 }
+@keyframes tw-in {
+  from {
+    clip-path: inset(-4px 100% -4px -2px);
+  }
+  to {
+    clip-path: inset(-4px -4px -4px -2px);
+  }
+}
+.tw {
+  display: inline-block;
+}
+.tw.block {
+  display: block;
+}
 @media (prefers-reduced-motion: no-preference) {
   .wave-ch {
-    animation: type-in 90ms ease-out backwards;
+    animation: type-in 120ms ease-out backwards;
+  }
+  .tw {
+    animation-name: tw-in;
+    animation-timing-function: steps(var(--n), end);
+    animation-fill-mode: backwards;
   }
   .login-in {
-    animation: login-in 400ms var(--ease-out) backwards;
-  }
-  .login-late {
-    animation: login-late 400ms ease-out 650ms backwards;
+    animation: login-in 600ms var(--ease-out) var(--base, 0ms) backwards;
   }
   .login-form > * {
-    animation: field-out 360ms var(--ease-out) backwards;
+    animation: field-out 600ms var(--ease-out) backwards;
   }
   .login-form > :nth-child(1) {
-    animation-delay: 380ms;
+    animation-delay: calc(var(--base, 0ms) + 900ms);
   }
   .login-form > :nth-child(2) {
-    animation-delay: 440ms;
+    animation-delay: calc(var(--base, 0ms) + 1050ms);
   }
   .login-form > :nth-child(3) {
-    animation-delay: 500ms;
+    animation-delay: calc(var(--base, 0ms) + 1200ms);
   }
   .login-form > :nth-child(4) {
-    animation-delay: 560ms;
+    animation-delay: calc(var(--base, 0ms) + 1350ms);
   }
   .login-form > :nth-child(5) {
-    animation-delay: 620ms;
+    animation-delay: calc(var(--base, 0ms) + 1500ms);
   }
   .login-form > :nth-child(n + 6) {
-    animation-delay: 680ms;
+    animation-delay: calc(var(--base, 0ms) + 1650ms);
   }
 }

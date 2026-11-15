@@ -26,7 +26,7 @@ export function LoginTransition() {
       return () => clearTimeout(t);
     }
     if (phase === "reveal" || phase === "fade") {
-      const t = setTimeout(() => setLoginPhase("idle"), 1200);
+      const t = setTimeout(() => setLoginPhase("idle"), 2000);
       return () => clearTimeout(t);
     }
     if (phase === "away") {

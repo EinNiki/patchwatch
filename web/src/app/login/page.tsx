@@ -7,7 +7,7 @@ import type { Me } from "@/lib/types";
 import { Button, Field, TextInput } from "@/components/Controls";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LOGIN_BG } from "@/lib/loginBg";
-import { setLoginPhase } from "@/lib/loginTransition";
+import { getLoginPhase, setLoginPhase } from "@/lib/loginTransition";
 import { DISTRO_ICONS } from "@/lib/distroIcons";
 import { getPasskey, passkeyErrorText, webauthnSupported } from "@/lib/webauthn";
 
@@ -16,10 +16,9 @@ const subscribe = () => () => {};
 
 /** Bahnen (Kreise im Bild): Anteil (k) am größtmöglichen Radius = Hälfte der kleineren Fensterseite minus Rand, Umlaufzeit in s (negativ = gegen den Uhrzeigersinn). */
 const RINGS: { k: number; period: number; icons: string[] }[] = [
-  { k: 0.64, period: 60, icons: ["Ubuntu", "Fedora", "Linux Mint"] },
-  { k: 0.8, period: -80, icons: ["Debian", "Alpine", "Arch", "NixOS"] },
-  { k: 0.92, period: 100, icons: ["Kali", "Proxmox", "Rocky", "openSUSE", "Manjaro"] },
-  { k: 1, period: -125, icons: ["RHEL", "Gentoo", "CentOS", "Raspberry Pi"] },
+  { k: 0.7, period: 60, icons: ["Ubuntu", "Fedora", "Linux Mint"] },
+  { k: 0.85, period: -80, icons: ["Debian", "Arch", "Proxmox", "NixOS"] },
+  { k: 1, period: 105, icons: ["RHEL", "Kali", "openSUSE", "Manjaro", "Raspberry Pi"] },
 ];
 
 const ICON = 40; // Durchmesser in px
@@ -35,6 +34,19 @@ const baseAngle = (ri: number, i: number) => (i / RINGS[ri]!.icons.length) * Mat
  * nichts erst nach dem Laden des Skripts erscheint. „Weniger Bewegung“: Logos stehen still und lassen sich nicht werfen.
  * Reine Dekoration (aria-hidden).
  */
+/** Schreibmaschine für einen Text: er bleibt als Ganzes im DOM (Screenreader lesen ihn normal) und wird nur schrittweise aufgedeckt (CSS `.tw`). */
+function Tw({ text, at, block }: { text: string; at: number; block?: boolean }) {
+  const n = [...text].length;
+  return (
+    <span
+      className={`tw${block ? " block" : ""}`}
+      style={{ "--n": n, animationDuration: `${n * 55}ms`, animationDelay: `calc(var(--base, 0ms) + ${at}ms)` } as React.CSSProperties}
+    >
+      {text}
+    </span>
+  );
+}
+
 /** Text, dessen Buchstaben sich beim Überfahren leicht heben (CSS `.wave`). Nur Dekoration: der Titel trägt das aria-label. */
 function WaveText({ text }: { text: string }) {
   let n = 0;
@@ -45,7 +57,7 @@ function WaveText({ text }: { text: string }) {
           {wi > 0 ? " " : null}
           <span className="inline-block whitespace-nowrap">
             {[...w].map((ch, ci) => (
-              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n * 18}ms`, animationDelay: `${150 + n++ * 42}ms` }}>
+              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n * 18}ms`, animationDelay: `calc(var(--base, 0ms) + ${300 + n++ * 70}ms)` }}>
                 {ch}
               </span>
             ))}
@@ -196,7 +208,7 @@ function Orbits({ converge }: { converge: boolean }) {
         if (!box2) return;
         const dx = Math.max(box2.l - x, 0, x - box2.r);
         const dy = Math.max(box2.t - y, 0, y - box2.b);
-        c.style.opacity = String(Math.min(1, Math.hypot(dx, dy) / (ICON * 0.8)));
+        c.style.opacity = String(Math.max(0, Math.min(1, (Math.hypot(dx, dy) - ICON / 2) / 16)));
       };
       const hx = size.w / 2 - ICON / 2 - 4;
       const hy = size.h / 2 - ICON / 2 - 4;
@@ -363,6 +375,8 @@ export default function LoginPage() {
   const error = formError ?? (ssoDenied ? "Anmeldung per Single Sign-On abgelehnt. Ist dein Konto freigegeben?" : null);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // Nach dem Abmelden liegt noch das Überblenden über der Seite: die Schrift wartet, bis sie sichtbar wird.
+  const afterLogout = getLoginPhase() === "away" || getLoginPhase() === "fade";
   const [show, setShow] = useState(false);
   const [oidc, setOidc] = useState<{ enabled: boolean; name: string } | null>(null);
   const [passkey, setPasskey] = useState(false);
@@ -442,7 +456,7 @@ export default function LoginPage() {
       tabIndex={-1}
       // Hintergrund: kräftige Akzent-Glows oben links und unten rechts plus Punktraster (aus den Design-Token, hell und dunkel passend).
       className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10"
-      style={LOGIN_BG}
+      style={{ ...LOGIN_BG, "--base": afterLogout ? "900ms" : "0ms" } as React.CSSProperties}
     >
       <Orbits converge={leaving} />
       <ThemeToggle className="absolute! right-4 top-4 z-10 text-fg2" />
@@ -457,8 +471,8 @@ export default function LoginPage() {
             <h1 aria-label="Willkommen zurück" className="wave m-0 text-3xl font-semibold tracking-tight max-sm:text-2xl">
               <WaveText text="Willkommen zurück" />
             </h1>
-            <p className="login-late m-0 mt-2 text-base text-fg2">
-              Melde dich bei <span className="font-mono">patchwatch</span> an.
+            <p className="m-0 mt-2 text-base text-fg2">
+              <Tw text="Melde dich bei" at={1500} /> <span className="font-mono"><Tw text="patchwatch" at={1900} /></span> <Tw text="an." at={2200} />
             </p>
           </div>
           {/* method="post": Selbst wenn JavaScript fehlt, landen Zugangsdaten nie in der URL. */}
@@ -468,12 +482,12 @@ export default function LoginPage() {
             onSubmit={(e) => void submit(e)}
             className="login-form flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm"
           >
-            <Field label="Benutzername">
+            <Field label={<Tw text="Benutzername" at={1200} />}>
               <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12 rounded-xl! px-4 text-base!" />
             </Field>
             {/* Der Umschalter liegt außerhalb des <label>, damit der Name des Feldes „Passwort“ bleibt. */}
             <div className="relative">
-              <Field label="Passwort">
+              <Field label={<Tw text="Passwort" at={1350} />}>
                 <TextInput name="password" type={show ? "text" : "password"} autoComplete="current-password" required maxLength={256} className="h-12 w-full rounded-xl! px-4 pr-14 text-base!" />
               </Field>
               <Button
@@ -497,13 +511,13 @@ export default function LoginPage() {
               </p>
             ) : null}
             <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-xl! text-base!">
-              Anmelden
+              <Tw text="Anmelden" at={1500} />
             </Button>
             {passkey || oidc?.enabled ? (
               <>
                 <div className="flex items-center gap-4 text-sm text-fg3" role="separator">
                   <span className="h-px flex-1 bg-line" />
-                  oder
+                  <Tw text="oder" at={1650} />
                   <span className="h-px flex-1 bg-line" />
                 </div>
                 {passkey ? (
@@ -514,7 +528,7 @@ export default function LoginPage() {
                     // Bei großer Schrift darf der Text umbrechen statt abgeschnitten zu werden.
                     className="h-auto! min-h-12 w-full rounded-xl! whitespace-normal! py-2 text-base! leading-tight"
                   >
-                    Mit Passkey anmelden
+                    <Tw text="Mit Passkey anmelden" at={1800} />
                   </Button>
                 ) : null}
                 {oidc?.enabled ? (
@@ -522,7 +536,7 @@ export default function LoginPage() {
                     href="/api/v1/auth/oidc/login"
                     className="inline-flex min-h-12 items-center justify-center rounded-xl border border-control bg-surface px-4 py-2 text-center text-base font-semibold no-underline hover:border-accent"
                   >
-                    Mit {oidc.name} anmelden
+                    <Tw text={`Mit ${oidc.name} anmelden`} at={1950} />
                   </a>
                 ) : null}
               </>
@@ -530,9 +544,8 @@ export default function LoginPage() {
           </form>
         </div>
         <p className="mt-6 text-center text-sm text-fg3">
-          Die Verbindung sollte über HTTPS laufen.
-          <br />
-          Mehrere Fehlversuche sperren die Anmeldung kurz.
+          <Tw text="Die Verbindung sollte über HTTPS laufen." at={2100} block />
+          <Tw text="Mehrere Fehlversuche sperren die Anmeldung kurz." at={2400} block />
         </p>
       </div>
     </main>

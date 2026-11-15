@@ -112,7 +112,7 @@ export function Switch({ label, hint, note, className = "", ...props }: Omit<Inp
   );
 }
 
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <label className="flex max-w-full flex-col gap-1 text-xs font-semibold text-fg2">
       {label}
