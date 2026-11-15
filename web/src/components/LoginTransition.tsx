@@ -3,7 +3,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { LOGIN_BG } from "@/lib/loginBg";
-import { getLoginPhase, getOrigin, setLoginPhase, subscribeLoginPhase } from "@/lib/loginTransition";
+import { clearApiCache } from "@/lib/apiCache";
+import { getLoginPhase, getOrigin, setLoginPhase, subscribeLoginPhase, whenLogoutDone } from "@/lib/loginTransition";
 
 /**
  * Übergänge bei An- und Abmeldung. Liegt im Wurzel-Layout und bleibt deshalb beim Seitenwechsel bestehen.
@@ -49,8 +50,11 @@ export function LoginTransition() {
       onAnimationEnd={() => {
         if (phase === "reveal" || phase === "fade") setLoginPhase("idle");
         if (phase === "out") {
-          setLoginPhase("away");
-          router.replace("/login");
+          whenLogoutDone(() => {
+            clearApiCache();
+            setLoginPhase("away");
+            router.replace("/login");
+          });
         }
       }}
     />

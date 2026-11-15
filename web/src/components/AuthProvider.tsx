@@ -1,6 +1,6 @@
 "use client";
 
-import { startLogoutTransition } from "@/lib/loginTransition";
+import { markLogoutDone, startLogoutTransition } from "@/lib/loginTransition";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setCsrf } from "@/lib/api";
@@ -81,18 +81,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   const logout = async (at?: { x: number; y: number }) => {
-    // Schon vor der Abmeldung leeren und die Sitzungsnummer erhöhen: Anfragen, die jetzt noch laufen, füllen den Cache nicht mehr.
-    clearApiCache();
+    const animate = Boolean(at) && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (animate && at) {
+      // Übergang sofort starten (nicht erst nach der Antwort des Servers); der Cache bleibt bis zum Seitenwechsel stehen,
+      // damit das Dashboard nicht kurz als leeres Gerüst aufblitzt.
+      router.prefetch("/login");
+      startLogoutTransition(at);
+    } else {
+      // Schon vor der Abmeldung leeren und die Sitzungsnummer erhöhen: Anfragen, die jetzt noch laufen, füllen den Cache nicht mehr.
+      clearApiCache();
+    }
     try {
       await api.post("/auth/logout");
     } finally {
       setCsrf(null);
-      clearApiCache();
-      if (at && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        router.prefetch("/login"); // Anmeldeseite vorladen, damit nach dem Überblenden nichts wartet
-        startLogoutTransition(at);
+      if (animate) markLogoutDone();
+      else {
+        clearApiCache();
+        router.replace("/login");
       }
-      else router.replace("/login");
     }
   };
   // Start-Passwort: nur der Passwortwechsel ist erlaubt (der Server sperrt alles andere mit 403).

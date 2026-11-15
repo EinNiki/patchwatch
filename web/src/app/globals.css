@@ -1099,7 +1099,7 @@ button[data-select] {
 }
 @keyframes card-open {
   from {
-    clip-path: inset(-48px 100% -48px -48px);
+    clip-path: inset(-48px 100% -48px 0);
   }
   to {
     clip-path: inset(-48px -48px -48px -48px);
