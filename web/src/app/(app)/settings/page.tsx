@@ -17,6 +17,8 @@ import { AvatarForm } from "@/components/AvatarForm";
 import { OidcSettings } from "@/components/users/OidcSettings";
 import { LdapSettings } from "@/components/users/LdapSettings";
 import { PasskeysForm } from "@/components/PasskeysForm";
+import { TwoFactorForm } from "@/components/TwoFactorForm";
+import { SessionsForm } from "@/components/SessionsForm";
 import { can, type RolesResponse } from "@/lib/roles";
 
 const MIN_LEN = 12;
@@ -143,6 +145,7 @@ function Schedules() {
       }
       if (Object.keys(feed_bulk_intervals).length) body.feed_bulk_intervals = feed_bulk_intervals;
       if (edit.stale !== undefined) body.stale_after_hours = int("Meldet sich nicht", edit.stale, d.stale_after_min_hours, d.stale_after_max_hours);
+      if (edit.session !== undefined) body.session_ttl_hours = int("Anmeldedauer", edit.session, d.session_ttl_min_hours, d.session_ttl_max_hours);
       if (edit.retention !== undefined) body.report_retention_days = int("Aufbewahrung", edit.retention, d.report_retention_min_days, d.report_retention_max_days);
       if (["mode", "every", "at", "tz"].some((k) => edit[k] !== undefined)) {
         if (mode === "interval") body.report_schedule = { mode, every_hours: int("Abruf-Intervall", val("every", rs.mode === "interval" ? rs.every_hours : 24), d.report_every_hours_min, d.report_every_hours_max) };
@@ -227,9 +230,12 @@ function Schedules() {
           <Field label="Verlauf der Datenmeldungen aufbewahren (Tage)">
             <TextInput type="number" inputMode="numeric" min={d.report_retention_min_days} max={d.report_retention_max_days} value={val("retention", d.report_retention_days)} onChange={set("retention")} className={num} />
           </Field>
+          <Field label="Anmeldung gültig (Stunden)">
+            <TextInput type="number" inputMode="numeric" min={d.session_ttl_min_hours} max={d.session_ttl_max_hours} value={val("session", d.session_ttl_hours)} onChange={set("session")} className={num} />
+          </Field>
         </div>
         <p className="text-xs text-fg3">
-          „Meldet sich nicht“: {d.stale_after_min_hours} bis {d.stale_after_max_hours} Stunden, Standard {d.stale_after_default_hours} (<Mono>PATCHWATCH_STALE_AFTER_HOURS</Mono>). Aufbewahrung: {d.report_retention_min_days} bis {d.report_retention_max_days} Tage, Standard {d.report_retention_default_days}. Ältere Datenmeldungen löscht der tägliche Aufräum-Job.
+          Anmeldedauer: {d.session_ttl_min_hours} bis {d.session_ttl_max_hours} Stunden, Standard {d.session_ttl_default_hours}; gilt für neue Anmeldungen. „Meldet sich nicht“: {d.stale_after_min_hours} bis {d.stale_after_max_hours} Stunden, Standard {d.stale_after_default_hours} (<Mono>PATCHWATCH_STALE_AFTER_HOURS</Mono>). Aufbewahrung: {d.report_retention_min_days} bis {d.report_retention_max_days} Tage, Standard {d.report_retention_default_days}. Ältere Datenmeldungen löscht der tägliche Aufräum-Job.
         </p>
       </fieldset>
 
@@ -260,6 +266,14 @@ export default function SettingsPage() {
 
       <SettingsSection id="passkey-h" title="Passkeys" description="Anmelden ohne Passwort: mit Fingerabdruck, Gesicht, PIN oder Sicherheitsschlüssel. Jeder Benutzer verwaltet seine eigenen.">
         <PasskeysForm />
+      </SettingsSection>
+
+      <SettingsSection id="2fa-h" title="Zwei-Faktor-Anmeldung" description="Zusätzlicher Code aus einer Authenticator-App bei der Anmeldung mit Passwort.">
+        <TwoFactorForm />
+      </SettingsSection>
+
+      <SettingsSection id="sess-h" title="Aktive Anmeldungen" description="Geräte, auf denen dein Konto gerade angemeldet ist.">
+        <SessionsForm />
       </SettingsSection>
 
       <SettingsSection id="look-h" title="Darstellung" description="„System“ folgt der Einstellung deines Geräts. Die Auswahl wird nur in diesem Browser gemerkt.">

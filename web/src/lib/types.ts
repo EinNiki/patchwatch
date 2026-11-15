@@ -213,6 +213,10 @@ export type ReportSchedule =
 
 export interface Settings {
   report_retention_days: number;
+  session_ttl_hours: number;
+  session_ttl_default_hours: number;
+  session_ttl_min_hours: number;
+  session_ttl_max_hours: number;
   report_retention_default_days: number;
   report_retention_min_days: number;
   report_retention_max_days: number;
@@ -335,6 +339,7 @@ export interface Me {
   role_title?: string;
   permissions?: string[];
   auth_kind?: "local" | "oidc" | "ldap";
+  totp_enabled?: boolean;
   csrf_token: string;
   /** Start-Passwort (erzeugt oder früherer Standardwert): bis zum Wechsel ist nur der Passwortwechsel möglich. */
   must_change_password?: boolean;

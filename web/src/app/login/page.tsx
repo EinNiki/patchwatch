@@ -422,6 +422,10 @@ export default function LoginPage() {
   const error = formError ?? (ssoDenied ? "Anmeldung per Single Sign-On abgelehnt. Ist dein Konto freigegeben?" : null);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // Zweiter Schritt: Token vom Server; `swapping` blendet die aktuelle Karte aus, bevor die neue erscheint.
+  const [mfa, setMfa] = useState<string | null>(null);
+  const [swapping, setSwapping] = useState(false);
+  const [recovery, setRecovery] = useState(false);
   // Nach dem Abmelden liegt noch das Überblenden über der Seite: die Schrift wartet, bis sie sichtbar wird.
   const afterLogout = getLoginPhase() === "away" || getLoginPhase() === "fade";
   const [show, setShow] = useState(false);
@@ -477,16 +481,54 @@ export default function LoginPage() {
     router.replace("/");
   }
 
+  // Karte ausblenden, kurz warten, dann den Zustand wechseln: die neue Karte öffnet mit denselben Animationen.
+  async function swapCard(change: () => void) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      change();
+      return;
+    }
+    setSwapping(true);
+    await new Promise((r) => setTimeout(r, 500));
+    change();
+    setSwapping(false);
+  }
+
+  async function submitMfa(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const code = String(new FormData(e.currentTarget).get("code") ?? "").trim();
+    setBusy(true);
+    setError(null);
+    try {
+      const me = await api.post<Me>("/auth/login/mfa", { mfa_token: mfa, code }, { silent: true });
+      setCsrf(me.csrf_token);
+      await enter();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) setError("Code ungültig oder abgelaufen. Bei zu vielen Fehlversuchen bitte neu anmelden.");
+      else if (err instanceof ApiError && err.status === 429) setError("Zu viele Versuche. Bitte in einigen Minuten erneut versuchen.");
+      else setError("Server nicht erreichbar. Läuft die API?");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     setBusy(true);
     setError(null);
     try {
-      const me = await api.post<Me>("/auth/login", {
+      const me = await api.post<Me & { mfa_required?: boolean; mfa_token?: string }>("/auth/login", {
         username: String(form.get("username") ?? ""),
         password: String(form.get("password") ?? ""),
       });
+      if (me.mfa_required && me.mfa_token) {
+        const token = me.mfa_token;
+        await swapCard(() => {
+          setRecovery(false);
+          setMfa(token);
+        });
+        return;
+      }
       setCsrf(me.csrf_token);
       // Die Seitenleiste startet danach mit eingeklappten Benachrichtigungen (siehe enter).
       await enter();
@@ -539,8 +581,10 @@ export default function LoginPage() {
       {error ? (
         <div
           role="alert"
-          className="login-toast absolute left-4 right-16 top-4 z-10 flex items-center gap-2 rounded-xl border border-line border-l-4 border-l-crit bg-surface py-0 pl-4 pr-1 text-sm text-fg shadow-(--shadow-float) sm:left-auto sm:max-w-sm"
+          className="login-toast absolute left-4 right-16 top-4 z-10 flex items-center gap-2 rounded-xl border border-line bg-surface py-0 pl-3 pr-1 text-sm text-fg shadow-(--shadow-float) sm:left-auto sm:max-w-sm"
         >
+          {/* Roter Kreis wie die Zähler in der Seitenleiste. */}
+          <span aria-hidden="true" className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-crit text-[12px] font-semibold leading-none text-surface">!</span>
           <span className="flex-1 leading-snug">{error}</span>
           <Button
             variant="ghost"
@@ -555,9 +599,55 @@ export default function LoginPage() {
           </Button>
         </div>
       ) : null}
-      <div data-login-card className={`login-card relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving ? "scale-90 opacity-0" : ""}`}>
+      <div key={mfa ? "mfa" : "login"} data-login-card className={`login-card relative w-full max-w-[30rem] transition-[opacity,transform] duration-500 ease-in ${leaving || swapping ? "scale-90 opacity-0" : ""}`}>
         {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
         <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
+          {mfa ? (
+            <>
+          <div className="mb-8 flex select-none flex-col items-center text-center">
+            <svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="login-in mb-5 rounded-xl shadow-(--shadow-float)">
+              <rect width="32" height="32" rx="6" fill="var(--accent)" />
+              <path d="M16 7l8 3v6c0 5-3.4 8.3-8 9.5C11.4 24.3 8 21 8 16v-6l8-3z" fill="none" stroke="var(--bg)" strokeWidth="2.4" strokeLinejoin="round" />
+            </svg>
+            <h1 aria-label="Zwei-Faktor-Code" className="wave m-0 text-3xl font-semibold tracking-tight max-sm:text-2xl">
+              <WaveText text="Zwei-Faktor-Code" />
+            </h1>
+            <p className="m-0 mt-2 text-base text-fg2">
+              <Tw text={recovery ? "Gib einen deiner Wiederherstellungscodes ein." : "Gib den Code aus deiner Authenticator-App ein."} at={450} />
+            </p>
+          </div>
+          <form method="post" action="/login" onSubmit={(e) => void submitMfa(e)} className="login-form flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm">
+            <Field label={<Tw text={recovery ? "Wiederherstellungscode" : "6-stelliger Code"} at={380} />}>
+              <TextInput
+                key={recovery ? "r" : "c"}
+                name="code"
+                autoFocus
+                required
+                autoComplete="one-time-code"
+                inputMode={recovery ? "text" : "numeric"}
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={recovery ? 16 : 6}
+                pattern={recovery ? undefined : "[0-9]{6}"}
+                placeholder={recovery ? "xxxxx-xxxxx" : "123456"}
+                className="h-12 rounded-xl! border-line! px-4 text-center font-mono text-lg! tracking-widest"
+              />
+            </Field>
+            <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-xl! text-base!">
+              <Tw text="Bestätigen" at={560} />
+            </Button>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <Button variant="ghost" onClick={() => setRecovery(!recovery)} className="h-auto! min-h-11 whitespace-normal!">
+                <Tw text={recovery ? "Authenticator-Code verwenden" : "Wiederherstellungscode verwenden"} at={650} />
+              </Button>
+              <Button variant="ghost" onClick={() => void swapCard(() => { setError(null); setMfa(null); })} className="min-h-11">
+                <Tw text="Zurück" at={740} />
+              </Button>
+            </div>
+          </form>
+            </>
+          ) : (
+            <>
           <div className="mb-8 flex select-none flex-col items-center text-center">
             <svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="login-in mb-5 rounded-xl shadow-(--shadow-float)">
               <rect width="32" height="32" rx="6" fill="var(--accent)" />
@@ -632,6 +722,8 @@ export default function LoginPage() {
               </>
             ) : null}
           </form>
+            </>
+          )}
         </div>
         <p className="mt-6 select-none text-center text-sm text-fg3">
           <span className="sr-only">{hints.map((h) => h.join(" ")).join(" ")}</span>
