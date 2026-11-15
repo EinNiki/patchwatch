@@ -85,5 +85,8 @@ export function passkeyErrorText(e: unknown): string {
   if (n === "NotAllowedError" || (e instanceof Error && e.message === "Abgebrochen")) return "Abgebrochen oder abgelaufen. Bitte erneut versuchen.";
   if (n === "InvalidStateError") return "Dieses Gerät hat hier schon einen Passkey.";
   if (n === "SecurityError") return "Passkeys brauchen die Adresse aus PATCHWATCH_PUBLIC_URL (HTTPS oder localhost).";
-  return "Der Passkey konnte nicht verwendet werden.";
+  if (n === "NotSupportedError") return "Dieser Browser oder dieses Gerät kann hier keinen Passkey anlegen (kein Passkey-Anbieter, Sicherheitsschlüssel oder Handy gefunden). Passkey-Anbieter im Browser einrichten oder einen Sicherheitsschlüssel anstecken.";
+  // Name des Fehlers anhängen, damit sich die Ursache ohne Entwicklerwerkzeuge nennen lässt.
+  const detail = e instanceof Error && e.name ? ` (${e.name})` : "";
+  return `Der Passkey konnte nicht verwendet werden.${detail}`;
 }
