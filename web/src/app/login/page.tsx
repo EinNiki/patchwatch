@@ -421,6 +421,8 @@ export default function LoginPage() {
   const ssoDenied = useSyncExternalStore(subscribe, () => window.location.search.includes("error=oidc"), () => false);
   const error = formError ?? (ssoDenied ? "Anmeldung per Single Sign-On abgelehnt. Ist dein Konto freigegeben?" : null);
   const [busy, setBusy] = useState(false);
+  // Meldung blendet nach ein paar Sekunden nach oben aus (`closing` merkt sich, für welchen Text).
+  const [closing, setClosing] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   // Zweiter Schritt: Token vom Server; `swapping` blendet die aktuelle Karte aus, bevor die neue erscheint.
   const [mfa, setMfa] = useState<string | null>(null);
@@ -453,6 +455,19 @@ export default function LoginPage() {
     ],
     [passkey],
   );
+
+  useEffect(() => {
+    if (!error) return;
+    const t1 = setTimeout(() => setClosing(error), 5000);
+    const t2 = setTimeout(() => {
+      setError(null);
+      setClosing(null);
+    }, 5400);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [error]);
 
   useEffect(() => {
     api.get<{ oidc: { enabled: boolean; name: string }; passkey?: boolean }>("/auth/providers").then(
@@ -581,6 +596,7 @@ export default function LoginPage() {
       {error ? (
         <div
           role="alert"
+          data-closing={closing === error ? "" : undefined}
           className="login-toast absolute left-4 right-16 top-4 z-10 flex items-center gap-2 rounded-xl border border-line bg-surface py-0 pl-3 pr-1 text-sm text-fg shadow-(--shadow-float) sm:left-auto sm:max-w-sm"
         >
           {/* Roter Kreis wie die Zähler in der Seitenleiste. */}
@@ -636,11 +652,11 @@ export default function LoginPage() {
             <Button type="submit" variant="primary" busy={busy} disabled={!hydrated} className="h-12! w-full rounded-xl! text-base!">
               <Tw text="Bestätigen" at={560} />
             </Button>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <Button variant="ghost" onClick={() => setRecovery(!recovery)} className="h-auto! min-h-11 whitespace-normal!">
+            <div className="flex flex-col gap-3">
+              <Button onClick={() => setRecovery(!recovery)} className="h-auto! min-h-12 w-full rounded-xl! whitespace-normal! border-accent! py-2 text-base! leading-tight text-accent!">
                 <Tw text={recovery ? "Authenticator-Code verwenden" : "Wiederherstellungscode verwenden"} at={650} />
               </Button>
-              <Button variant="ghost" onClick={() => void swapCard(() => { setError(null); setMfa(null); })} className="min-h-11">
+              <Button onClick={() => void swapCard(() => { setError(null); setMfa(null); })} className="h-12! w-full rounded-xl! border-line! text-base! text-fg2!">
                 <Tw text="Zurück" at={740} />
               </Button>
             </div>

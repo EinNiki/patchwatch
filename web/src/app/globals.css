@@ -1197,11 +1197,23 @@ button[data-select] {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-140%) scale(0.96);
+  }
+  60% {
+    transform: translateY(6%) scale(1.01);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-140%);
   }
 }
 @media (prefers-reduced-motion: no-preference) {
   .login-toast {
-    animation: toast-in 240ms var(--ease-out);
+    animation: toast-in 420ms var(--ease-out);
+  }
+  .login-toast[data-closing] {
+    animation: toast-out 350ms ease-in forwards;
   }
 }
