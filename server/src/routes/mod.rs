@@ -7,6 +7,7 @@ pub mod hosts;
 mod ldap;
 mod live;
 mod matrix;
+mod mfa;
 mod notifications;
 mod oidc;
 mod passkey;
@@ -51,7 +52,15 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/agent/checkin", post(agent::checkin))
         .route("/auth/login", post(auth::login))
+        .route("/auth/login/mfa", post(mfa::login_mfa))
         .route("/auth/logout", post(auth::logout))
+        .route("/auth/2fa", get(mfa::status))
+        .route("/auth/2fa/setup", post(mfa::setup))
+        .route("/auth/2fa/enable", post(mfa::enable))
+        .route("/auth/2fa/disable", post(mfa::disable))
+        .route("/auth/sessions", get(mfa::sessions))
+        .route("/auth/sessions/revoke-all", post(mfa::revoke_all))
+        .route("/auth/sessions/{id}", axum::routing::delete(mfa::revoke))
         .route("/auth/me", get(auth::me))
         .route("/auth/providers", get(oidc::providers))
         .route("/auth/oidc/login", get(oidc::login))
@@ -130,6 +139,7 @@ pub fn router(state: AppState) -> Router {
         .route("/users/{id}/unlock", post(users::unlock))
         .route("/users/{id}/approve", post(users::approve))
         .route("/users/{id}/reset-password", post(users::reset_password))
+        .route("/users/{id}/reset-2fa", post(mfa::admin_reset))
         .route("/audit", get(users::audit_list))
         .route("/feeds", get(feeds::list).post(feeds::create))
         .route("/feeds/refresh", post(feeds::refresh))

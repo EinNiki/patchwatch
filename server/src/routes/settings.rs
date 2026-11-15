@@ -56,6 +56,10 @@ pub async fn get(
     let sched = schedule::report_schedule(&st.pool).await;
     let last_run = schedule::reports_last_run(&st.pool).await;
     Ok(Json(json!({
+        "session_ttl_hours": super::auth::session_ttl_hours(&st).await,
+        "session_ttl_default_hours": st.cfg.session_ttl_hours,
+        "session_ttl_min_hours": super::auth::SESSION_TTL_RANGE.start(),
+        "session_ttl_max_hours": super::auth::SESSION_TTL_RANGE.end(),
         "report_retention_days": retention_days(&st.pool, st.cfg.report_retention_days).await,
         "report_retention_default_days": st.cfg.report_retention_days,
         "report_retention_min_days": RETENTION_RANGE.start(),
@@ -78,6 +82,8 @@ pub async fn get(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Body {
+    /// Wie lange eine Anmeldung gilt (Stunden); wirkt für neue Anmeldungen.
+    session_ttl_hours: Option<i64>,
     report_retention_days: Option<i64>,
     stale_after_hours: Option<i64>,
     /// Quelle -> Minuten.
@@ -104,6 +110,15 @@ pub async fn put(
     }
     if let Some(h) = body.stale_after_hours {
         schedule::validate_stale_hours(h).map_err(ApiError::BadRequest)?;
+    }
+    if let Some(h) = body.session_ttl_hours {
+        if !super::auth::SESSION_TTL_RANGE.contains(&h) {
+            return Err(ApiError::BadRequest(format!(
+                "Anmeldedauer: {} bis {} Stunden",
+                super::auth::SESSION_TTL_RANGE.start(),
+                super::auth::SESSION_TTL_RANGE.end()
+            )));
+        }
     }
     if let Some(map) = &body.feed_intervals {
         for (source, minutes) in map {
@@ -149,6 +164,9 @@ pub async fn put(
     }
 
     let mut tx = st.pool.begin().await?;
+    if let Some(h) = body.session_ttl_hours {
+        schedule::set(&mut *tx, super::auth::SESSION_TTL_KEY, &json!(h)).await?;
+    }
     if let Some(d) = body.report_retention_days {
         schedule::set(&mut *tx, RETENTION_KEY, &json!(d)).await?;
     }

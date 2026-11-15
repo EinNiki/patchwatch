@@ -444,6 +444,7 @@ pub struct LoginFinish {
 pub async fn login_finish(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
+    headers: axum::http::HeaderMap,
     Json(b): Json<LoginFinish>,
 ) -> ApiResult<Response> {
     st.limiter
@@ -558,7 +559,14 @@ pub async fn login_finish(
         &ip,
     )
     .await;
-    let (cookie, csrf) = super::auth::issue_session(&st, admin_id).await?;
+    let (cookie, csrf) = super::auth::create_session(
+        &st,
+        admin_id,
+        &ip,
+        super::auth::clean_agent(&headers).as_deref(),
+        "passkey",
+    )
+    .await?;
     let mut resp = Json(
         json!({"username": username, "csrf_token": csrf, "must_change_password": must_change}),
     )

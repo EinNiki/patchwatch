@@ -77,6 +77,11 @@ async fn load_admin(parts: &Parts, state: &AppState) -> Result<Admin, ApiError> 
     .bind(&hash)
     .fetch_optional(&state.pool)
     .await?;
+    // Zuletzt aktiv (für die Sitzungsübersicht), höchstens einmal pro Minute geschrieben.
+    sqlx::query("UPDATE sessions SET last_seen_at = now() WHERE id_hash = $1 AND last_seen_at < now() - interval '1 minute'")
+        .bind(&hash)
+        .execute(&state.pool)
+        .await?;
     let (id, username, role, csrf_token, session_created, auth_kind, must_change_password, stored) =
         row.ok_or(ApiError::Unauthorized)?;
     // Unbekannte Rolle (kann die Prüfregel der Datenbank nicht liefern) gilt als nicht angemeldet.

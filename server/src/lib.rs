@@ -18,6 +18,7 @@ pub mod schedule;
 pub mod security;
 pub mod state;
 pub mod status;
+pub mod totp;
 pub mod worker;
 
 pub use routes::router;

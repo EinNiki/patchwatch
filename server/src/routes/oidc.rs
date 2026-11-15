@@ -928,15 +928,14 @@ pub async fn callback(
         Outcome2::Denied(why) => return Ok(fail(&st, &ip, why, "oidc").await),
     };
     // Neue Sitzungs-ID nach jeder Anmeldung (nie eine vorhandene wiederverwenden).
-    let session_id = security::new_session_id();
-    let ttl = st.cfg.session_ttl_hours * 3600;
-    sqlx::query("INSERT INTO sessions (id_hash, admin_id, csrf_token, expires_at) VALUES ($1, $2, $3, now() + make_interval(secs => $4))")
-        .bind(security::sha256(&session_id))
-        .bind(admin_id)
-        .bind(security::new_csrf_token())
-        .bind(ttl as f64)
-        .execute(&st.pool)
-        .await?;
+    let (session_cookie, _csrf) = super::auth::create_session(
+        &st,
+        admin_id,
+        &ip,
+        super::auth::clean_agent(&headers).as_deref(),
+        "oidc",
+    )
+    .await?;
     sqlx::query("UPDATE admin_users SET last_login_at = now() WHERE id = $1")
         .bind(admin_id)
         .execute(&st.pool)
@@ -959,10 +958,7 @@ pub async fn callback(
             .unwrap_or("/"),
     )
     .into_response();
-    for c in [
-        security::session_cookie(&session_id, ttl, st.cfg.cookie_secure),
-        state_cookie(&st, "", 0),
-    ] {
+    for c in [session_cookie, state_cookie(&st, "", 0)] {
         resp.headers_mut().append(
             header::SET_COOKIE,
             HeaderValue::from_str(&c).map_err(anyhow::Error::from)?,

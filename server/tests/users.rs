@@ -240,6 +240,12 @@ fn matrix() -> Vec<(Method, &'static str, Permission, bool)> {
             UsersManage,
             true,
         ),
+        (
+            Method::POST,
+            "/api/v1/users/999999/reset-2fa",
+            UsersManage,
+            true,
+        ),
         (Method::GET, "/api/v1/audit", AuditRead, true),
     ]
 }
@@ -329,6 +335,8 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
         "/report",
         "/agent/checkin",
         "/auth/login",
+        "/auth/2fa",
+        "/auth/sessions",
         "/auth/logout",
         "/auth/me",
         "/auth/providers",
@@ -388,7 +396,7 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
 #[test]
 fn every_handler_requires_a_permission_extractor() {
     let modsrc = include_str!("../src/routes/mod.rs");
-    let files: [(&str, &str); 13] = [
+    let files: [(&str, &str); 14] = [
         ("auth", include_str!("../src/routes/auth.rs")),
         ("cves", include_str!("../src/routes/cves.rs")),
         ("feeds", include_str!("../src/routes/feeds.rs")),
@@ -402,6 +410,7 @@ fn every_handler_requires_a_permission_extractor() {
         ("oidc", include_str!("../src/routes/oidc.rs")),
         ("ldap", include_str!("../src/routes/ldap.rs")),
         ("passkey", include_str!("../src/routes/passkey.rs")),
+        ("mfa", include_str!("../src/routes/mfa.rs")),
         ("settings", include_str!("../src/routes/settings.rs")),
         ("users", include_str!("../src/routes/users.rs")),
         ("agent", include_str!("../src/routes/agent.rs")),
@@ -409,6 +418,7 @@ fn every_handler_requires_a_permission_extractor() {
     // Handler ohne Benutzerrecht: öffentlich (Anmeldung), Host-Token (Agent), Gesundheit.
     let exempt = [
         "auth::login",
+        "mfa::login_mfa",
         "passkey::login_start",
         "passkey::login_finish",
         "oidc::providers",

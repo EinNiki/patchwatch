@@ -21,6 +21,7 @@ pub struct Login {
 pub async fn login(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
+    headers: axum::http::HeaderMap,
     Json(body): Json<Login>,
 ) -> ApiResult<Response> {
     if body.username.len() > 64 || body.password.len() > 256 || body.username.is_empty() {
@@ -54,7 +55,6 @@ pub async fn login(
     .bind(&body.username)
     .fetch_optional(&st.pool)
     .await?;
-    let must_change = user.as_ref().is_some_and(|u| u.2);
     let (admin_id, hash) = match &user {
         Some((id, h, _)) => (Some(*id), h.clone()),
         None => (None, security::dummy_hash().to_owned()),
@@ -65,8 +65,10 @@ pub async fn login(
         .map_err(anyhow::Error::from)?;
     let mut admin_id = admin_id.filter(|_| ok);
     // Kein lokaler Treffer: LDAP versuchen (falls eingerichtet). Ein lokales Konto mit diesem Namen hat immer Vorrang.
+    let mut via_ldap = false;
     if admin_id.is_none() {
         admin_id = super::ldap::try_login(&st, &body.username, &body.password, &ip).await?;
+        via_ldap = admin_id.is_some();
     }
     let Some(admin_id) = admin_id else {
         audit::record(
@@ -81,46 +83,13 @@ pub async fn login(
         .await;
         return Err(ApiError::Unauthorized);
     };
-    sqlx::query("UPDATE admin_users SET last_login_at = now() WHERE id = $1")
-        .bind(admin_id)
-        .execute(&st.pool)
-        .await?;
-    audit::record(
-        &st.pool,
-        Some(admin_id),
-        &body.username,
-        "login",
-        None,
-        Outcome::Ok,
-        &ip,
-    )
-    .await;
-
-    let session_id = security::new_session_id();
-    let csrf = security::new_csrf_token();
-    let ttl = st.cfg.session_ttl_hours * 3600;
-    sqlx::query(
-        "INSERT INTO sessions (id_hash, admin_id, csrf_token, expires_at) VALUES ($1, $2, $3, now() + make_interval(secs => $4))",
-    )
-    .bind(security::sha256(&session_id))
-    .bind(admin_id)
-    .bind(&csrf)
-    .bind(ttl as f64)
-    .execute(&st.pool)
-    .await?;
-
-    let cookie = security::session_cookie(&session_id, ttl, st.cfg.cookie_secure);
-    let mut resp = Json(json!({
-        "username": body.username,
-        "csrf_token": csrf,
-        "must_change_password": must_change,
-    }))
-    .into_response();
-    resp.headers_mut().insert(
-        header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(anyhow::Error::from)?,
-    );
-    Ok(resp)
+    let method = if via_ldap { "ldap" } else { "password" };
+    // Zwei-Faktor aktiv: noch keine Sitzung, erst der zweite Schritt (Code) legt sie an.
+    if super::mfa::enabled(&st, admin_id).await? {
+        let token = super::mfa::start_pending(admin_id, method)?;
+        return Ok(Json(json!({ "mfa_required": true, "mfa_token": token })).into_response());
+    }
+    super::mfa::finish_login(&st, admin_id, &ip, &headers, method).await
 }
 
 pub async fn logout(
@@ -256,6 +225,7 @@ pub async fn me(
         "csrf_token": admin.csrf_token,
         "must_change_password": admin.must_change_password,
         "avatar": avatar,
+        "totp_enabled": super::mfa::enabled(&st, admin.id).await?,
     })))
 }
 
@@ -406,18 +376,53 @@ pub async fn profile_put(
     Ok(Json(json!({ "display_name": name })))
 }
 
-/// Neue Sitzung für ein Konto anlegen (nie eine vorhandene ID wiederverwenden). Gibt (Cookie-Wert für `Set-Cookie`, CSRF-Token) zurück.
-pub(super) async fn issue_session(st: &AppState, admin_id: i64) -> ApiResult<(String, String)> {
+/// Gültigkeit einer Anmeldung in Stunden: Wert aus den Einstellungen (UI), sonst die Konfiguration.
+pub async fn session_ttl_hours(st: &AppState) -> i64 {
+    sqlx::query_scalar::<_, serde_json::Value>("SELECT value FROM settings WHERE key = $1")
+        .bind(SESSION_TTL_KEY)
+        .fetch_optional(&st.pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.as_i64())
+        .filter(|h| SESSION_TTL_RANGE.contains(h))
+        .unwrap_or(st.cfg.session_ttl_hours)
+}
+
+pub const SESSION_TTL_KEY: &str = "session_ttl_hours";
+/// 1 Stunde bis 90 Tage.
+pub const SESSION_TTL_RANGE: std::ops::RangeInclusive<i64> = 1..=2160;
+
+/// Kurzer, bereinigter Gerätetext aus dem User-Agent (höchstens 200 Zeichen, keine Steuerzeichen).
+pub fn clean_agent(headers: &axum::http::HeaderMap) -> Option<String> {
+    let v = headers.get(header::USER_AGENT)?.to_str().ok()?;
+    let v: String = v.chars().filter(|c| !c.is_control()).take(200).collect();
+    (!v.is_empty()).then_some(v)
+}
+
+/// Neue Sitzung für ein Konto anlegen (nie eine vorhandene ID wiederverwenden). Gibt (Wert für `Set-Cookie`, CSRF-Token) zurück.
+/// `method`: wie angemeldet wurde (password, password+totp, passkey, oidc, ldap), nur zur Anzeige.
+pub async fn create_session(
+    st: &AppState,
+    admin_id: i64,
+    ip: &str,
+    agent: Option<&str>,
+    method: &str,
+) -> ApiResult<(String, String)> {
     let session_id = security::new_session_id();
     let csrf = security::new_csrf_token();
-    let ttl = st.cfg.session_ttl_hours * 3600;
+    let ttl = session_ttl_hours(st).await * 3600;
     sqlx::query(
-        "INSERT INTO sessions (id_hash, admin_id, csrf_token, expires_at) VALUES ($1, $2, $3, now() + make_interval(secs => $4))",
+        "INSERT INTO sessions (id_hash, admin_id, csrf_token, expires_at, ip, user_agent, method) \
+         VALUES ($1, $2, $3, now() + make_interval(secs => $4), $5, $6, $7)",
     )
     .bind(security::sha256(&session_id))
     .bind(admin_id)
     .bind(&csrf)
     .bind(ttl as f64)
+    .bind(ip)
+    .bind(agent)
+    .bind(method)
     .execute(&st.pool)
     .await?;
     Ok((

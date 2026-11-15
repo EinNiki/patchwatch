@@ -28,10 +28,10 @@ const MAX_NAME_CHARS: usize = 60;
 const FRESH_LOGIN_SECS: i64 = 300;
 
 #[derive(Serialize, sqlx::FromRow)]
-struct UserRow {
+pub(super) struct UserRow {
     id: i64,
     username: String,
-    display_name: String,
+    pub(super) display_name: String,
     email: Option<String>,
     auth_kind: String,
     role: String,
@@ -252,7 +252,7 @@ fn is_manager(admins: &[(i64, String)], id: i64) -> bool {
 
 /// Rechteausweitung verhindern: wer ein Konto ändert, sperrt, löscht, freigibt oder dessen Passwort zurücksetzt, muss
 /// alle Rechte dieses Kontos selbst haben (sonst könnte ein Verwalter einen stärkeren Benutzer übernehmen).
-fn require_covers(me: &Admin, t: &UserRow) -> ApiResult<()> {
+pub(super) fn require_covers(me: &Admin, t: &UserRow) -> ApiResult<()> {
     let missing: Vec<&str> = eff_of(t)
         .iter()
         .filter(|p| !me.permissions.contains(p))
@@ -319,7 +319,7 @@ fn gains_sensitive(a: &[Permission], b: &[Permission]) -> bool {
     a.iter().any(|p| p.is_sensitive() && !b.contains(p))
 }
 
-async fn target(tx: &mut PgConnection, id: i64) -> ApiResult<UserRow> {
+pub(super) async fn target(tx: &mut PgConnection, id: i64) -> ApiResult<UserRow> {
     sqlx::query_as::<_, UserRow>(&format!(
         "{SELECT_USER} WHERE id = $1 AND deleted_at IS NULL FOR UPDATE"
     ))
