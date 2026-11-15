@@ -352,7 +352,7 @@ function Orbits({ converge }: { converge: boolean }) {
                   } as React.CSSProperties
                 }
               >
-                <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface shadow-(--shadow-float)">
+                <span className="flex size-10 items-center justify-center rounded-full border border-line bg-surface">
                   <svg viewBox="0 0 24 24" className="size-5" fill={DISTRO_ICONS[name]!.hex}>
                     <path d={DISTRO_ICONS[name]!.path} />
                   </svg>
