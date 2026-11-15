@@ -1,17 +1,17 @@
 # Build-Kontext ist das Repo-Root: docker build -f web/Dockerfile .
-FROM node:22-slim AS deps
+FROM node:26-slim AS deps
 WORKDIR /app
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules node_modules
 COPY web/ ./
 RUN npm run build
 
-FROM node:22-slim
+FROM node:26-slim
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 WORKDIR /app
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin patchwatch
