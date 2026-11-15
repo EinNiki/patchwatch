@@ -94,7 +94,7 @@ write_lib() {
 cat > "$1" <<'PWLIB'
 # patchwatch: Prüffunktionen (von install.sh und patchwatch-agent-update eingebunden).
 # Öffentlicher minisign-Schlüssel der Releases. Solange hier der Platzhalter steht, wird NICHTS installiert.
-PW_PUBKEY="__MINISIGN_PUBLIC_KEY_NOT_CONFIGURED__"
+PW_PUBKEY="RWT//BFiwhinkd6WQwC05CKkAEM8MjbHmvI7o2swbcKnEdNraMmchM3h"
 
 # SHA256 einer Datei, selbst berechnet.
 pw_hash() { sha256sum "$1" | cut -d' ' -f1; }

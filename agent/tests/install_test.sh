@@ -85,7 +85,8 @@ KEY="RWTestKeyOnlyForTests0000000000000000000000000000"
 
 # Platzhalter (so wie ausgeliefert, solange kein Schlüssel eingetragen ist): immer Fehler.
 expect_fail "kein Schlüssel eingetragen" env PATH="$T/bin:$PATH" sh -c ". '$T/lib.sh'; pw_verify_signature '$T/dl/$NAME' '$SIG'"
-grep -q '^PW_PUBKEY="__MINISIGN_PUBLIC_KEY_NOT_CONFIGURED__"' "$INSTALLER" || bad "Platzhalter fehlt im Installer"
+# Ausgeliefert: entweder noch der Platzhalter oder ein minisign-Schlüssel (RW + 54 Base64-Zeichen).
+grep -Eq '^PW_PUBKEY="(__MINISIGN_PUBLIC_KEY_NOT_CONFIGURED__|RW[A-Za-z0-9+/]{54})"$' "$INSTALLER" || bad "PW_PUBKEY im Installer ist weder Platzhalter noch ein gültiger Schlüssel"
 
 PW_PUBKEY="$KEY"
 printf 'sig:%s:%s' "$KEY" "$GOOD" > "$SIG"
