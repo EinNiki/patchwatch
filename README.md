@@ -714,6 +714,73 @@ Mit axe-core gegen Hell, Dunkel und Mobil geprüft: keine Verstöße.
 `PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
 
 <details>
+<summary><b>Beispiel: eigener Reverse-Proxy (nur Postgres, Server und Web)</b></summary>
+
+Gekürzte `docker-compose.yml` ohne den mitgelieferten Caddy. Alle Werte sind Platzhalter; echte Geheimnisse gehören
+nur in die `.env` (nicht ins Repository, nicht in Chats oder Tickets).
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: patchwatch
+      POSTGRES_DB: patchwatch
+    env_file: [.env]                       # liefert POSTGRES_PASSWORD
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patchwatch -d patchwatch"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    security_opt: ["no-new-privileges:true"]
+
+  server:
+    image: ghcr.io/einniki/patchwatch-server:${PATCHWATCH_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PATCHWATCH_DATABASE_URL: postgres://patchwatch:${POSTGRES_PASSWORD}@postgres:5432/patchwatch
+      PATCHWATCH_TRUST_PROXY: "true"       # Client-IP aus X-Forwarded-For (nur hinter eigenem Proxy)
+      PATCHWATCH_PUBLIC_URL: https://patchwatch.example.org
+      PATCHWATCH_SECRET_KEY: ${PATCHWATCH_SECRET_KEY}   # openssl rand -base64 32
+      PATCHWATCH_ADMIN_PASSWORD: ${PATCHWATCH_ADMIN_PASSWORD:-}
+      PATCHWATCH_TIMEZONE: Europe/Berlin
+    ports: ["192.168.1.10:8099:8080"]      # nur LAN-/VPN-Adresse, nicht 0.0.0.0
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  web:
+    image: ghcr.io/einniki/patchwatch-web:${PATCHWATCH_VERSION:-latest}
+    restart: unless-stopped
+    depends_on: [server]
+    ports: ["192.168.1.10:3000:3000"]
+    read_only: true
+    tmpfs: [/tmp, /app/.next/cache]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  pgdata:
+```
+
+```sh
+# .env (Beispielwerte, selbst erzeugen: openssl rand -hex 24 / openssl rand -base64 32)
+POSTGRES_PASSWORD=<zufälliger-hex-wert>
+PATCHWATCH_SECRET_KEY=<base64-wert-mit-32-byte>
+PATCHWATCH_ADMIN_PASSWORD=<mindestens-12-zeichen>
+```
+
+Der Proxy leitet `/api/*` an den Server (hier Port 8099) und alles andere an die Web-UI (Port 3000) und setzt
+`X-Forwarded-For`. Der Server veröffentlicht seine Ports nur auf der LAN-Adresse; `PATCHWATCH_SECRET_KEY` getrennt von der
+Datenbank sichern, sonst sind gespeicherte Geheimnisse (z. B. Kanal-Token, 2FA) nicht lesbar.
+
+</details>
+
+<details>
 <summary><b>UI als Produktionsbuild starten (schnell)</b></summary>
 
 
