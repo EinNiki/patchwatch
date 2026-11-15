@@ -1068,3 +1068,64 @@ button[data-select] {
     transform: translateY(-4px);
   }
 }
+
+/* Eintritt der Anmeldekarte (nur CSS, kein Flackern vor dem Skript): Titel tippt sich Buchstabe für Buchstabe, Logo und Untertitel blenden ein,
+   die Felder fahren nacheinander von links aus. Alles steht nach rund einer Sekunde. `backwards`: danach bleibt kein Zustand (keine abgeschnittenen Fokusringe). */
+@keyframes type-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes login-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+@keyframes login-late {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes field-out {
+  from {
+    opacity: 0;
+    clip-path: inset(-8px 100% -8px -8px);
+    transform: translateX(-14px);
+  }
+  to {
+    clip-path: inset(-8px -8px -8px -8px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wave-ch {
+    animation: type-in 90ms ease-out backwards;
+  }
+  .login-in {
+    animation: login-in 400ms var(--ease-out) backwards;
+  }
+  .login-late {
+    animation: login-late 400ms ease-out 650ms backwards;
+  }
+  .login-form > * {
+    animation: field-out 360ms var(--ease-out) backwards;
+  }
+  .login-form > :nth-child(1) {
+    animation-delay: 380ms;
+  }
+  .login-form > :nth-child(2) {
+    animation-delay: 440ms;
+  }
+  .login-form > :nth-child(3) {
+    animation-delay: 500ms;
+  }
+  .login-form > :nth-child(4) {
+    animation-delay: 560ms;
+  }
+  .login-form > :nth-child(5) {
+    animation-delay: 620ms;
+  }
+  .login-form > :nth-child(n + 6) {
+    animation-delay: 680ms;
+  }
+}

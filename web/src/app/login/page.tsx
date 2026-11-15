@@ -45,7 +45,7 @@ function WaveText({ text }: { text: string }) {
           {wi > 0 ? " " : null}
           <span className="inline-block whitespace-nowrap">
             {[...w].map((ch, ci) => (
-              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n++ * 18}ms` }}>
+              <span key={ci} className="wave-ch" style={{ transitionDelay: `${n * 18}ms`, animationDelay: `${150 + n++ * 42}ms` }}>
                 {ch}
               </span>
             ))}
@@ -450,14 +450,14 @@ export default function LoginPage() {
         {/* Karte: großzügig wie bei modernen Anmeldedialogen (40 px Innenabstand, 24 px Rundung, 24 px Abstand der Blöcke). */}
         <div className="rounded-3xl border border-line bg-surface p-10 shadow-(--shadow-float) max-sm:rounded-2xl max-sm:p-6">
           <div className="mb-8 flex flex-col items-center text-center">
-            <svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="mb-5 rounded-xl shadow-(--shadow-float)">
+            <svg width="64" height="64" viewBox="0 0 32 32" aria-hidden="true" focusable="false" className="login-in mb-5 rounded-xl shadow-(--shadow-float)">
               <rect width="32" height="32" rx="6" fill="var(--accent)" />
               <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="var(--bg)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <h1 aria-label="Willkommen zurück" className="wave m-0 text-3xl font-semibold tracking-tight max-sm:text-2xl">
               <WaveText text="Willkommen zurück" />
             </h1>
-            <p className="m-0 mt-2 text-base text-fg2">
+            <p className="login-late m-0 mt-2 text-base text-fg2">
               Melde dich bei <span className="font-mono">patchwatch</span> an.
             </p>
           </div>
@@ -466,7 +466,7 @@ export default function LoginPage() {
             method="post"
             action="/login"
             onSubmit={(e) => void submit(e)}
-            className="flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm"
+            className="login-form flex flex-col gap-6 [&_label]:gap-2 [&_label]:text-sm"
           >
             <Field label="Benutzername">
               <TextInput name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={64} className="h-12 rounded-xl! px-4 text-base!" />
