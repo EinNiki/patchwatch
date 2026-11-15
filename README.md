@@ -1,45 +1,104 @@
+<div align="center">
+
 # patchwatch
+
+**Kernel- und Patch-Stand aller Linux-Server auf einen Blick, mit CVE-Abgleich.**<br>
+Für Ubuntu, Debian und Proxmox VE. Ein kleiner Agent pro Host, ein Server, eine Web-Oberfläche.
 
 [![CI](https://github.com/EinNiki/patchwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/EinNiki/patchwatch/actions/workflows/ci.yml)
 [![Release](https://github.com/EinNiki/patchwatch/actions/workflows/release.yml/badge.svg)](https://github.com/EinNiki/patchwatch/actions/workflows/release.yml)
 
-Leichtgewichtiges Monitoring für Kernel- und Patch-Stand mehrerer Linux-Server
-(Ubuntu, Debian, Proxmox) mit CVE-Abgleich und Web-UI.
+<a href="docs/media/hosts-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/hosts-dark.png"><img src="docs/media/hosts-light.png" alt="patchwatch: Übersicht aller Hosts"></picture></a>
+
+<sub>Die Bilder passen sich deinem Farbschema an (hell oder dunkel). Anklicken für 4K.</sub>
+
+[Schnellstart](#schnellstart) · [Bilder](#bilder) · [Agent](#agent) · [Server](#server) · [CVE-Abgleich](#cve-abgleich) · [Web-UI](#web-ui) · [Benutzer](#benutzer-und-rechte) · [Sicherheit](#sicherheitshinweise)
+
+</div>
+
+## Das kann patchwatch
+
+- **Sehen, was veraltet ist:** laufender und neuester installierter Kernel, offene Updates, nötige Neustarts, je Host.
+- **CVEs zuordnen:** Abgleich mit den Debian- und Ubuntu-Quellen; Proxmox-Kernel ohne belastbare Quelle werden als „manuell prüfen“ markiert.
+- **Leicht und sicher:** statisches Agent-Binary (ca. 2 MB), kein offener Port am Host, Token statt Passwort, signierte Updates.
+- **Zugang absichern:** Rollen und Einzelrechte, Zwei-Faktor-Code (TOTP), Passkeys, OIDC, LDAP, aktive Geräte einsehen und abmelden.
+- **Benachrichtigt werden:** ntfy, Matrix und Browser-Meldungen bei Statuswechseln und als Tageszusammenfassung.
+
+## Schnellstart
+
+1. **Server starten** (Docker, PostgreSQL inklusive). Beim ersten Start steht das einmalige Admin-Passwort im Log.
+
+   ```sh
+   cp .env.example .env            # POSTGRES_PASSWORD setzen (openssl rand -hex 24)
+   docker compose up -d
+   docker compose logs server
+   ```
+
+2. **Agent hinzufügen:** in der Web-UI *Agents → Agent hinzufügen*, den angezeigten Befehl auf dem Host ausführen.
+   Schritt für Schritt mit Beispielen für [Debian, Ubuntu und Proxmox](#agent-einrichten-schritt-für-schritt-und-beispiele).
+3. **Fertig:** Nach der ersten Datenmeldung erscheint der Host in der Übersicht.
+
+> **Netzwerk:** patchwatch gehört nur ins Heimnetz oder hinter ein VPN, nicht ins offene Internet.
+> Details im Abschnitt [Server](#server).
 
 Status: im Aufbau. Aufbau: `agent/`, `server/`, `web/`, gemeinsame Crates in `crates/`.
 Einrichtung des GitHub-Repos: [docs/github-setup.md](docs/github-setup.md).
 
-## Überblick
+## Bilder
 
-Alle Bilder sind in 3840 × 2160 aufgenommen (Demo-Daten, hell und dunkel). Zum Vergrößern anklicken.
+Demo-Daten, 3840 × 2160.
 
-| | |
-|---|---|
-| [![Hosts](docs/media/hosts-light.png)](docs/media/hosts-light.png)<br>**Hosts:** Status, Kernel, offene Updates und CVEs auf einen Blick | [![Hosts, dunkel](docs/media/hosts-dark.png)](docs/media/hosts-dark.png)<br>Dasselbe im dunklen Farbschema |
-| [![Ubuntu-Host](docs/media/host-ubuntu-light.png)](docs/media/host-ubuntu-light.png)<br>**Ubuntu** (web-01): laufender und neuester Kernel, CVE-Bewertung | [![Debian-Host](docs/media/host-debian-light.png)](docs/media/host-debian-light.png)<br>**Debian** (db-01) |
-| [![Proxmox-Host](docs/media/host-proxmox-light.png)](docs/media/host-proxmox-light.png)<br>**Proxmox VE** (pve-01): Proxmox-Kernel ohne belastbare CVE-Quelle wird als „manuell prüfen“ gekennzeichnet | [![CVE-Detail](docs/media/cve-detail-light.png)](docs/media/cve-detail-light.png)<br>**CVE-Detail** mit betroffenen Hosts |
-| [![CVEs](docs/media/cves-light.png)](docs/media/cves-light.png)<br>**CVEs** mit Filtern | [![Agents](docs/media/agents-light.png)](docs/media/agents-light.png)<br>**Agents** verwalten |
-| [![Benachrichtigungen](docs/media/notifications-light.png)](docs/media/notifications-light.png)<br>**Benachrichtigungen** | [![Benutzer](docs/media/users-light.png)](docs/media/users-light.png)<br>**Benutzer und Rechte** |
+<table>
+<tr>
+<td width="50%"><a href="docs/media/host-ubuntu-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/host-ubuntu-dark.png"><img src="docs/media/host-ubuntu-light.png" alt="Ubuntu-Host: Kernel, Updates, CVE-Bewertung"></picture></a><br><sub>Ubuntu-Host: Kernel, Updates, CVE-Bewertung</sub></td>
+<td width="50%"><a href="docs/media/host-proxmox-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/host-proxmox-dark.png"><img src="docs/media/host-proxmox-light.png" alt="Proxmox VE: Kernel ohne belastbare CVE-Quelle"></picture></a><br><sub>Proxmox VE: Kernel ohne belastbare CVE-Quelle</sub></td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/media/cves-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/cves-dark.png"><img src="docs/media/cves-light.png" alt="CVEs mit Quellen und Filtern"></picture></a><br><sub>CVEs mit Quellen und Filtern</sub></td>
+<td width="50%"><a href="docs/media/agents-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/agents-dark.png"><img src="docs/media/agents-light.png" alt="Agents verwalten"></picture></a><br><sub>Agents verwalten</sub></td>
+</tr>
+</table>
 
-### Anmeldung
+<details>
+<summary><b>Mehr Bilder</b> (Debian, CVE-Detail, Benachrichtigungen, Benutzer, Einstellungen)</summary>
 
-Die Anmeldeseite, optional mit Zwei-Faktor-Code (TOTP, Wiederherstellungscodes), Passkey, OIDC oder LDAP.
+<table>
+<tr>
+<td width="50%"><a href="docs/media/host-debian-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/host-debian-dark.png"><img src="docs/media/host-debian-light.png" alt="Debian-Host"></picture></a><br><sub>Debian-Host</sub></td>
+<td width="50%"><a href="docs/media/cve-detail-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/cve-detail-dark.png"><img src="docs/media/cve-detail-light.png" alt="CVE-Detail mit betroffenen Hosts"></picture></a><br><sub>CVE-Detail mit betroffenen Hosts</sub></td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/media/notifications-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/notifications-dark.png"><img src="docs/media/notifications-light.png" alt="Benachrichtigungen"></picture></a><br><sub>Benachrichtigungen</sub></td>
+<td width="50%"><a href="docs/media/users-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/users-dark.png"><img src="docs/media/users-light.png" alt="Benutzer und Rechte"></picture></a><br><sub>Benutzer und Rechte</sub></td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/media/settings-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/settings-dark.png"><img src="docs/media/settings-light.png" alt="Einstellungen"></picture></a><br><sub>Einstellungen</sub></td>
+<td width="50%"><a href="docs/media/settings-security-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/settings-security-dark.png"><img src="docs/media/settings-security-light.png" alt="Zwei-Faktor und aktive Anmeldungen"></picture></a><br><sub>Zwei-Faktor und aktive Anmeldungen</sub></td>
+</tr>
+</table>
 
-<video src="docs/media/login.webm" controls muted loop playsinline width="100%"></video>
+</details>
 
-[Video öffnen: Anmeldung und Dashboard](docs/media/login.webm) (1920 × 1080, 60 Bilder/s)
+<details>
+<summary><b>Anmeldung und Zwei-Faktor</b> (Bilder und Videos)</summary>
 
-<video src="docs/media/login-2fa.webm" controls muted loop playsinline width="100%"></video>
+Die Anmeldeseite, optional mit Zwei-Faktor-Code (TOTP, Wiederherstellungscodes), Passkey, OIDC oder LDAP. In den
+Einstellungen siehst du alle aktiven Anmeldungen (Gerät, IP, Anmeldeart), meldest einzelne oder alle Geräte ab und
+stellst die Gültigkeit einer Anmeldung in Stunden ein.
 
-[Video öffnen: Anmeldung mit Zwei-Faktor-Code](docs/media/login-2fa.webm) (1920 × 1080, 60 Bilder/s)
+<table>
+<tr>
+<td width="50%"><a href="docs/media/login-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/login-dark.png"><img src="docs/media/login-light.png" alt="Anmeldung"></picture></a><br><sub>Anmeldung</sub></td>
+<td width="50%"><a href="docs/media/login-2fa-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/login-2fa-dark.png"><img src="docs/media/login-2fa-light.png" alt="Zwei-Faktor-Code"></picture></a><br><sub>Zwei-Faktor-Code</sub></td>
+</tr>
+</table>
 
-| | | |
-|---|---|---|
-| [![Anmeldung](docs/media/login-light.png)](docs/media/login-light.png) | [![Anmeldung, dunkel](docs/media/login-dark.png)](docs/media/login-dark.png) | [![Zwei-Faktor-Code](docs/media/login-2fa.png)](docs/media/login-2fa.png) |
+Videos (WebM, 1920 × 1080, 60 Bilder/s):
+[Anmeldung bis Dashboard](docs/media/login.webm) ·
+[Anmeldung mit Zwei-Faktor-Code](docs/media/login-2fa.webm) ·
+[Agent hinzufügen](docs/media/agent-hinzufuegen.webm)
 
-In den Einstellungen richtest du die Zwei-Faktor-Anmeldung ein, siehst alle aktiven Anmeldungen (Gerät, IP, Anmeldeart), meldest einzelne oder alle Geräte ab und stellst die Gültigkeit einer Anmeldung in Stunden ein.
-
-[![Einstellungen: Zwei-Faktor und aktive Anmeldungen](docs/media/settings-security.png)](docs/media/settings-security.png)
+</details>
 
 ## Agent
 
@@ -68,17 +127,17 @@ oder minisign, wird **nichts installiert**.
 
 ### Agent einrichten: Schritt für Schritt und Beispiele
 
-<video src="docs/media/agent-hinzufuegen.webm" controls muted loop playsinline width="100%"></video>
-
-[Video öffnen: Agent in der Oberfläche hinzufügen](docs/media/agent-hinzufuegen.webm) (1920 × 1080, 60 Bilder/s)
+[▶ Video: Agent in der Oberfläche hinzufügen](docs/media/agent-hinzufuegen.webm) (1920 × 1080, 60 Bilder/s)
 
 1. In der Web-UI **Agents → Agent hinzufügen**, den Namen des Hosts eingeben (z. B. `web-03`).
 2. Den angezeigten **Token** kopieren. Er erscheint nur jetzt; der Server speichert nur einen Hash.
 3. Den angezeigten **Installationsbefehl** auf dem Host ausführen (Server-URL ist schon eingetragen). Der Installer fragt den Token ab, die Eingabe wird nicht angezeigt.
 4. Prüfen: `patchwatch-agent status`, danach erscheint der Host nach spätestens einer Datenmeldung in der Liste.
 
-[![Agent hinzufügen](docs/media/agents-add.png)](docs/media/agents-add.png)
-[![Token und Installationsbefehl](docs/media/agents-token.png)](docs/media/agents-token.png)
+<table><tr>
+<td width="50%"><a href="docs/media/agents-add-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/agents-add-dark.png"><img src="docs/media/agents-add-light.png" alt="Agent hinzufügen"></picture></a></td>
+<td width="50%"><a href="docs/media/agents-token-light.png"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/agents-token-dark.png"><img src="docs/media/agents-token-light.png" alt="Token und Installationsbefehl"></picture></a></td>
+</tr></table>
 
 Der Befehl ist auf allen unterstützten Systemen derselbe. Voraussetzung sind `curl` und `minisign` (Signaturprüfung, siehe unten) sowie Root-Rechte.
 
@@ -128,7 +187,9 @@ checkin_wait_secs = 40
 
 Ohne Veröffentlichung eines signierten Releases (siehe „Release-Signatur einrichten“) bricht der Installer absichtlich ab. Die Beispiele zeigen den vorgesehenen Ablauf; auf echten Debian-, Ubuntu- und Proxmox-Systemen habe ich sie hier nicht ausgeführt.
 
-### Release-Signatur einrichten (einmalig, Voraussetzung)
+<details>
+<summary><b>Release-Signatur einrichten (einmalig, Voraussetzung)</b></summary>
+
 
 Warum minisign: ein einzelner kleiner öffentlicher Schlüssel (eine Zeile), im Skript fest eingetragen, ohne Online-Dienst
 oder Transparenzlog (cosign „keyless“ bräuchte Sigstore zur Prüfzeit und ein größeres Werkzeug auf jedem Host); das Paket
@@ -153,7 +214,12 @@ Tests: `sh agent/tests/install_test.sh` (läuft in der CI; ohne Root und Netz, m
 systemd-`LoadCredential` an den Dienst `patchwatch` (kein `DynamicUser`) gereicht.
 Konfiguration: `/etc/patchwatch/agent.toml`, Beispiel in `agent/dist/agent.toml.example`.
 
-### Kurzer Kontakt (Check-in) und „Daten jetzt abrufen“
+
+</details>
+
+<details>
+<summary><b>Kurzer Kontakt (Check-in) und „Daten jetzt abrufen“</b></summary>
+
 
 **Begriffe in der Oberfläche:** „Zuletzt gemeldet“ ist der Zeitpunkt der letzten vollständigen Meldung des Agents (intern „Report“:
 Kernel, Pakete, Updates; täglich und auf Anforderung). „Zuletzt erreichbar“ ist der Zeitpunkt des letzten kurzen Kontakts
@@ -172,6 +238,9 @@ Anforderung genau einmal ausgegeben (Wiederholung nach 10 Minuten ohne Report), 
 Exit-Codes: `1` Konfiguration, `2` Erfassung, `3` Server nicht erreichbar, `4` Server lehnt ab.
 Fehlermeldungen (ohne Token) landen im journald: `journalctl -u patchwatch-agent`.
 `patchwatch-agent --dry-run` gibt den Report als JSON aus, ohne zu senden.
+
+
+</details>
 
 ## Server
 
@@ -207,7 +276,9 @@ curl -b jar -H "x-csrf-token: <csrf_token aus der Antwort>" -H 'content-type: ap
      -d '{"name":"web1"}' https://patchwatch.example.org/api/v1/hosts
 ```
 
-### Aus dem Quellcode starten
+<details>
+<summary><b>Aus dem Quellcode starten</b></summary>
+
 
 `docker-compose.yml` enthält nur `image:`-Zeilen (kein `build:`) und zieht fertige Images aus GHCR
 (`ghcr.io/einniki/patchwatch-server` und `…-web`, gebaut von `.github/workflows/images.yml` und `release.yml`). Es gibt
@@ -233,7 +304,12 @@ Nur der Server geändert (z. B. ein Serverfix)? Dann reichen der erste `docker b
 `docker compose up -d --no-deps --pull never server`. `docker compose pull` (oder `up` ohne `--pull never` mit fehlendem
 Image) holt wieder das GHCR-Image und überschreibt den lokal gebauten Tag.
 
-### Betrieb ohne Docker (systemd)
+
+</details>
+
+<details>
+<summary><b>Betrieb ohne Docker (systemd)</b></summary>
+
 
 Server und Web-Oberfläche laufen auch als normale systemd-Dienste (`patchwatch-server`, `patchwatch-web`, zusammengefasst im
 `patchwatch.target`). Voraussetzungen: systemd, Node.js 22 (nur für die Oberfläche), PostgreSQL 15+, ein Reverse-Proxy mit TLS.
@@ -255,7 +331,12 @@ sudo systemctl start patchwatch.target                     # Status: systemctl s
 - Getestet: Installation, Start, Login im Browser über Caddy, Neustart nach `SIGKILL`, sauberes Stoppen und Entfernen (Ubuntu mit systemd 259,
   Datenbank in einem Wegwerf-Container).
 
-### Agent-Token ändern und prüfen
+
+</details>
+
+<details>
+<summary><b>Agent-Token ändern und prüfen</b></summary>
+
 
 Der Token steht nie in einem Befehlsargument (sichtbar in `ps` und der Shell-History); `--token <wert>` wird abgelehnt.
 
@@ -286,12 +367,20 @@ Statuswechsel erzeugt ein Event und (bei konfiguriertem ntfy) sofort eine Benach
 gibt es eine Tageszusammenfassung zur konfigurierten Uhrzeit. Der Verlauf der Datenmeldungen wird nach
 `report_retention_days` per täglichem Cleanup-Job gelöscht.
 
-### Warum kein Redis?
+
+</details>
+
+<details>
+<summary><b>Warum kein Redis?</b></summary>
+
 
 Es gibt keinen nachweisbaren Bedarf: Die Job-Queue (Benachrichtigungen mit Retry/Backoff,
 Cleanup, Tageszusammenfassung) nutzt `FOR UPDATE SKIP LOCKED`, Events und Wakeups laufen über
 `LISTEN/NOTIFY`. Das Datenaufkommen (ein Report je Host und Tag) braucht keinen Cache. Redis wird
 daher weder benötigt noch eingesetzt; das spart einen Dienst im Betrieb.
+
+
+</details>
 
 ### Sicherheit
 
@@ -393,7 +482,9 @@ erhalten, der Fehler wird gespeichert und unter `GET /api/v1/feeds` als „veral
 der Scheduler hängt). Nie wird eine Quelle stillschweigend als gesund gewertet. Abrufe haben Timeouts,
 Größenlimits und Retry mit Backoff; nach 3 Fehlschlägen in Folge gibt es genau eine Benachrichtigung.
 
-### Bewertungsregeln
+<details>
+<summary><b>Bewertungsregeln</b></summary>
+
 
 Pro Host und CVE wird aus den Daten der Quellen (`cve_source_status`) und dem laufenden Kernel ein Status gebildet
 (`server/src/cve/eval.rs`; die Regeln sind getestet):
@@ -450,7 +541,12 @@ der laufende Kernel kommt aus dem `kernel`-Block des Berichts und wird mit seine
 Grün (kein offener CVE-Befund) zeigt ein Host nur, wenn alle zuständigen Quellen nutzbar sind (siehe nächster
 Abschnitt); sonst „Nicht bewertbar“ (neutraler Chip, nie grün) mit Begründung.
 
-### Filter
+
+</details>
+
+<details>
+<summary><b>Filter</b></summary>
+
 
 Die CVE-Seite filtert je Distribution (Debian, Ubuntu) nach „gefixt“, „offen“ oder „egal“. Filter und Anzeige benutzen
 **dieselbe Definition der Chips** (`chips_sql` in `server/src/routes/cves.rs`): ein Chip je (Quelle, Release), sein Status ist der
@@ -497,7 +593,12 @@ nur die Pakete, auf die sich die Bewertung der Hosts stützt.
 - Der Filter hängt am **Typ** der Quelle (`debian`, `ubuntu`), nicht an ihrer stabilen ID; abgeschaltete oder gelöschte Quellen
   behalten ihre Daten, die weiter angezeigt und gefiltert werden.
 
-### Abruf-Läufe der CVE-Quellen
+
+</details>
+
+<details>
+<summary><b>Abruf-Läufe der CVE-Quellen</b></summary>
+
 
 Jeder Abruf (Zeitplan, „Jetzt abrufen“ je Quelle, „Alle abrufen“) ist ein **Lauf** in der Tabelle `feed_runs`
 (Migration `0017`, nur additiv). Ein Lauf durchläuft die Phasen *Verbinden → Herunterladen → Auswerten → Speichern →
@@ -522,7 +623,12 @@ keine Obergrenze, und der Knopf lieferte in dieser Zeit nur den 409-Fehler ohne 
 je Lauf, eine harte Obergrenze (4 × `CVE_STALL_TIMEOUT_SECS`), beim Start werden verwaiste Läufe als „unterbrochen“
 markiert (`sweep_stale`), und ein zweiter Klick zeigt den laufenden Lauf an, statt einen Fehler.
 
-### Grenzen der CVE-Bewertung
+
+</details>
+
+<details>
+<summary><b>Grenzen der CVE-Bewertung</b></summary>
+
 
 - **Proxmox-Kernel (`-pve`) haben keine belastbare CVE-Quelle.** Sie werden immer als **UNKNOWN** bewertet („manuell
   prüfen“, Link zu den [Proxmox Security Advisories](https://forum.proxmox.com/forums/security-advisories.26/)),
@@ -536,6 +642,9 @@ markiert (`sweep_stale`), und ein zweiter Klick zeigt den laufenden Lauf an, sta
   die Watchlist, bei Debian alle Kernel-CVEs. Gespeichert werden nur Ergebnisse mit Handlungsbezug (verwundbar,
   Fix angekündigt, Neustart nötig, unbekannt) und alle Watchlist-Einträge; die Matrix berechnet weitere Zellen live.
 - Hosts, die einen Kernel aus einem Repository ohne passende Tracker-Daten nutzen (z. B. Backports), werden UNKNOWN.
+
+
+</details>
 
 ## Web-UI
 
@@ -604,7 +713,9 @@ Mit axe-core gegen Hell, Dunkel und Mobil geprüft: keine Verstöße.
 `docker compose up -d postgres server web`: `/api/*` an `127.0.0.1:8080`, der Rest an `127.0.0.1:3000`, und dem Server
 `PATCHWATCH_TRUST_PROXY=true` geben (siehe `deploy/Caddyfile`).
 
-### UI als Produktionsbuild starten (schnell)
+<details>
+<summary><b>UI als Produktionsbuild starten (schnell)</b></summary>
+
 
 `npm run dev` (`next dev`) ist für die Entwicklung gedacht und deutlich träger: ungebündelte Module (~800 KB statt ~175 KB
 JavaScript je Seite), Kompilierung beim ersten Aufruf, Entwicklungs-Overlay. Zum Ausprobieren und Messen der echten
@@ -620,7 +731,12 @@ PORT=3200 PATCHWATCH_API_URL=http://127.0.0.1:8080 npm run start:prod
 `start:prod` ersetzt lokal den Reverse-Proxy (komprimiert Text, reicht `/api` und den Live-WebSocket durch); im Betrieb
 übernimmt das Caddy (`encode zstd gzip`) bzw. das Docker-Image. Messwerte und Messskripte: [`docs/perf.md`](docs/perf.md).
 
-### Entwicklung
+
+</details>
+
+<details>
+<summary><b>Entwicklung</b></summary>
+
 
 ```sh
 docker run -d --name pw-pg -e POSTGRES_USER=patchwatch -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=patchwatch -p 127.0.0.1:5432:5432 postgres:17-alpine
@@ -638,7 +754,13 @@ Der Live-WebSocket läuft in der Entwicklung direkt gegen die API (Next.js leite
 Tests: `cargo test --workspace` (Integrationstests brauchen `DATABASE_URL` auf eine Postgres-Instanz), im Web
 `npm run lint && npm run typecheck && npm run build`.
 
+
+</details>
+
 ## Qualitätsprüfung
+
+<details>
+<summary><b>Prüfungen und Skripte anzeigen</b></summary>
 
 `scripts/layout-check.mjs` und `scripts/a11y.mjs` brauchen einen Stack mit Demo-Hosts **und** CVE-Daten, sonst fehlen auf den
 Host-Seiten die CVE-Listen. `scripts/dev-stack.sh` baut den reproduzierbar auf, ohne Anfragen an echte Feed-Quellen:
@@ -712,6 +834,8 @@ Ubuntu-API (paginiert, `limit` höchstens 20), Ubuntu-Einzelabruf und die OVAL-D
 „Neustart nötig“-, gefixte und unbekannte CVEs, Proxmox bleibt „unbekannt / manuell prüfen“. Die Adressen der eingebauten
 Quellen stehen in der Konfiguration (`PATCHWATCH_CVE_UBUNTU_URL`, `..._OVAL_URL`, `..._DEBIAN_URL`) und dürfen auf Loopback
 zeigen; der SSRF-Schutz für in der UI angelegte Quellen bleibt unverändert.
+
+</details>
 
 ## Benutzer und Rechte
 
