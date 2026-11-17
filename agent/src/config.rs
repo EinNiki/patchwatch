@@ -28,6 +28,16 @@ pub struct Config {
     /// „Jetzt aktualisieren“ gedrückt wird. Mit Wert > 0 entfällt das Intervall; 0 = klassisch (nur `checkin_interval_secs`).
     #[serde(default = "default_checkin_wait")]
     pub checkin_wait_secs: u64,
+    /// Docker-Container und Image-Versionen erfassen. Standard: aus; ohne diesen Schalter öffnet der Agent den Socket nie.
+    #[serde(default)]
+    pub docker_enabled: bool,
+    /// `unix:///var/run/docker.sock` oder ein Socket-Proxy auf Loopback (`http://127.0.0.1:2375`).
+    #[serde(default = "default_docker_endpoint")]
+    pub docker_endpoint: String,
+}
+
+fn default_docker_endpoint() -> String {
+    crate::docker_client::DEFAULT_ENDPOINT.to_owned()
 }
 
 fn default_checkin_wait() -> u64 {
@@ -79,6 +89,7 @@ impl Config {
                 "checkin_wait_secs muss zwischen 0 und 55 liegen".into(),
             ));
         }
+        crate::docker_client::Endpoint::parse(&cfg.docker_endpoint).map_err(AgentError::Config)?;
         Ok(cfg)
     }
 
@@ -138,6 +149,27 @@ mod tests {
             "https://pw.example.org/api/v1/agent/checkin?wait=40"
         );
         assert_eq!(c.report_url(), "https://pw.example.org/api/v1/report");
+    }
+
+    #[test]
+    fn docker_is_off_by_default_and_the_endpoint_is_checked() {
+        let base = "server_url = \"https://x\"\ntoken = \"t\"\n";
+        let c = Config::parse(base).unwrap();
+        assert!(!c.docker_enabled);
+        assert_eq!(c.docker_endpoint, "unix:///var/run/docker.sock");
+        let on = Config::parse(&format!(
+            "{base}docker_enabled = true\ndocker_endpoint = \"http://127.0.0.1:2375\""
+        ))
+        .unwrap();
+        assert!(on.docker_enabled);
+        for bad in [
+            "http://10.0.0.5:2375",
+            "tcp://127.0.0.1:2375",
+            "/var/run/docker.sock",
+        ] {
+            let r = Config::parse(&format!("{base}docker_endpoint = \"{bad}\""));
+            assert!(r.is_err(), "{bad}");
+        }
     }
 
     #[test]

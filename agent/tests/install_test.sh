@@ -206,6 +206,26 @@ grep -q '"\\\$SCHEDULED" = yes \] && \[ "\\\$(conf auto_update)" != yes' "$INSTA
 grep -q 'if \[ "\$AUTO_UPDATE" = "yes" \]; then systemctl enable --now patchwatch-agent-update.timer' "$INSTALLER" && ok || bad "Update-Timer wird nicht nur auf Wunsch aktiviert"
 # Der Installer verlangt Signatur-Datei und Signaturprüfung.
 grep -q 'pw_verify_all "\$TMP/\$NAME"' "$INSTALLER" && ok || bad "Installer prüft nicht Summe und Signatur"
+
+# --- Docker-Abfrage: Standard nein, nur Loopback-Endpunkte, kein stilles usermod ---
+sed -n '/^# --- docker-begin ---/,/^# --- docker-end ---/p' "$INSTALLER" | sed -n '/^pw_docker_endpoint_ok/,/^pw_yes/p' > "$T/docker.sh"
+[ -s "$T/docker.sh" ] || bad "Docker-Funktionen im Installer nicht gefunden"
+# shellcheck disable=SC1091
+. "$T/docker.sh"
+expect_ok "Proxy auf 127.0.0.1" pw_docker_endpoint_ok "http://127.0.0.1:2375"
+expect_ok "Proxy auf localhost" pw_docker_endpoint_ok "http://localhost:2375"
+expect_ok "Proxy auf [::1]" pw_docker_endpoint_ok "http://[::1]:2375"
+for bad_ep in "http://192.168.1.5:2375" "http://docker.example.org:2375" "https://127.0.0.1:2375" "http://127.0.0.1" "http://127.0.0.1:0" "http://127.0.0.1:99999" "http://127.0.0.1:23x5" "http://127.0.0.1.evil.org:2375" "tcp://127.0.0.1:2375"; do
+  expect_fail "Endpunkt $bad_ep" pw_docker_endpoint_ok "$bad_ep"
+done
+expect_ok "j" pw_yes j
+expect_ok "ja" pw_yes ja
+expect_fail "leere Eingabe heißt nein" pw_yes ""
+expect_fail "n" pw_yes n
+grep -q '^DOCKER=""' "$INSTALLER" && ok || bad "Docker ist nicht standardmäßig aus"
+grep -q 'Der Befehl wird NICHT automatisch ausgeführt' "$INSTALLER" && ok || bad "Hinweis zu usermod fehlt"
+# usermod steht nur hinter der ausdrücklichen Bestätigung.
+[ "$(grep -c 'usermod -aG docker patchwatch' "$INSTALLER")" -eq 2 ] && grep -q 'if pw_yes "\$ANSWER"; then usermod' "$INSTALLER" && ok || bad "usermod läuft nicht nur nach ausdrücklichem Ja"
 # Eine einzige Quelle: das Skript im Repo-Wurzelverzeichnis ist dieselbe Datei.
 cmp -s "$INSTALLER" "$HERE/../../install.sh" && ok || bad "install.sh im Wurzelverzeichnis weicht von agent/dist/install.sh ab"
 sh -n "$INSTALLER" && ok || bad "Syntaxfehler im Installer"

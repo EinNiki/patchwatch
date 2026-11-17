@@ -1,0 +1,52 @@
+[
+  {
+    "Id": "b3f1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    "Names": ["/web"],
+    "Image": "nginx:1.27",
+    "ImageID": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "Command": "nginx -g 'daemon off;' --password=GEHEIM-IM-BEFEHL",
+    "Created": 1731500000,
+    "Ports": [{"IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8080, "Type": "tcp"}],
+    "Labels": {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.service": "web",
+      "com.example.secret-label": "GEHEIMES-LABEL",
+      "traefik.http.routers.web.rule": "Host(`intern.example.org`)"
+    },
+    "State": "running",
+    "Status": "Up 3 hours (healthy)",
+    "HostConfig": {"NetworkMode": "shop_default"},
+    "NetworkSettings": {"Networks": {"shop_default": {"IPAddress": "172.18.0.2", "NetworkID": "NETZ-GEHEIM"}}},
+    "Mounts": [{"Type": "bind", "Source": "/home/user/.ssh", "Destination": "/keys", "Mode": "ro"}]
+  },
+  {
+    "Id": "c4a2d3e5f6071829304b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1",
+    "Names": ["/shop-db-1", "/alias"],
+    "Image": "postgres:17-alpine",
+    "ImageID": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "Command": "docker-entrypoint.sh postgres",
+    "Created": 1731400000,
+    "Labels": {"com.docker.compose.project": "shop", "com.docker.compose.service": "db"},
+    "State": "exited",
+    "Status": "Exited (0) 2 days ago"
+  },
+  {
+    "Id": "d5b3e4f607182930415c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2",
+    "Names": ["/tool"],
+    "Image": "ghcr.io/example/tool@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "ImageID": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "Created": 1731300000,
+    "Labels": null,
+    "State": "running",
+    "Status": "Up 5 minutes"
+  },
+  {
+    "Id": "e6c4f5a7081930415263d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3",
+    "Names": ["/sha256:eeeeeeeeeeee"],
+    "Image": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "ImageID": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "Created": 1731200000,
+    "State": "created",
+    "Status": "Created"
+  }
+]

@@ -1,5 +1,5 @@
 use crate::cmd::Runner;
-use crate::collect::{apt_lists, kernel, os_release, packages, proxmox, system, updates};
+use crate::collect::{apt_lists, docker, kernel, os_release, packages, proxmox, system, updates};
 use crate::config::Config;
 use crate::error::AgentError;
 use serde::Serialize;
@@ -30,6 +30,9 @@ pub struct Report {
     pub packages_truncated: bool,
     /// Alter der Paketlisten (Unix-Sekunden der jüngsten Liste); `None`, wenn nicht ermittelbar.
     pub apt_lists_updated_unix: Option<u64>,
+    /// Nur mit `docker_enabled = true`; sonst fehlt der Block ganz (nicht `null`), der Bericht bleibt dann unverändert.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docker: Option<docker::DockerReport>,
 }
 
 /// Pfade des Systems; austauschbar für Tests.
@@ -54,6 +57,22 @@ pub fn system_paths() -> Paths<'static> {
 }
 
 pub fn build(r: &dyn Runner, p: &Paths, cfg: &Config) -> Result<Report, AgentError> {
+    // Der Docker-Client entsteht nur bei eingeschaltetem Docker: sonst wird der Socket nie angefasst.
+    if cfg.docker_enabled {
+        let endpoint = crate::docker_client::Endpoint::parse(&cfg.docker_endpoint)
+            .map_err(AgentError::Config)?;
+        let client = crate::docker_client::HttpDocker::new(endpoint);
+        return build_with(r, p, cfg, Some(&client));
+    }
+    build_with(r, p, cfg, None)
+}
+
+pub fn build_with(
+    r: &dyn Runner,
+    p: &Paths,
+    cfg: &Config,
+    docker_api: Option<&dyn crate::docker_client::DockerApi>,
+) -> Result<Report, AgentError> {
     let read = |path: &Path| {
         std::fs::read_to_string(path)
             .map_err(|e| AgentError::Collect(format!("{} nicht lesbar: {e}", path.display())))
@@ -96,6 +115,7 @@ pub fn build(r: &dyn Runner, p: &Paths, cfg: &Config) -> Result<Report, AgentErr
         packages_truncated: set.as_ref().is_some_and(|s| s.truncated),
         packages: set.map(|s| s.packages),
         apt_lists_updated_unix: apt_lists::newest_list_unix(p.apt_lists),
+        docker: docker_api.map(docker::collect),
     })
 }
 
@@ -132,6 +152,7 @@ pub mod tests_support {
             packages_count: None,
             packages_truncated: false,
             apt_lists_updated_unix: None,
+            docker: None,
         }
     }
 }
@@ -234,5 +255,77 @@ mod tests {
         assert_eq!(with.packages_count, Some(8));
         assert_eq!(with.packages_hash.as_deref().map(str::len), Some(64));
         assert!(list.windows(2).all(|w| w[0].name <= w[1].name), "sortiert");
+    }
+
+    /// Docker aus: der Socket wird nie geöffnet (ein Lauscher zählt Verbindungen) und der Bericht hat keinen docker-Block.
+    /// Docker an: genau eine Anfrage-Folge, der Block steht im Bericht.
+    #[test]
+    fn docker_socket_is_touched_only_when_enabled() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let d = std::env::temp_dir().join(format!("pw-agent-{}-dockerrep", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("boot")).unwrap();
+        fs::write(
+            d.join("os-release"),
+            include_str!("../tests/fixtures/os-release.debian-trixie"),
+        )
+        .unwrap();
+        fs::write(d.join("hostname"), "h\n").unwrap();
+        fs::write(d.join("uptime"), "1.0 1.0\n").unwrap();
+        let sock = d.join("docker.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let h2 = hits.clone();
+        std::thread::spawn(move || {
+            for s in listener.incoming() {
+                let mut s = s.unwrap();
+                h2.fetch_add(1, Ordering::SeqCst);
+                let mut b = [0u8; 512];
+                let _ = s.read(&mut b);
+                let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]");
+            }
+        });
+        let paths = Paths {
+            os_release: &d.join("os-release"),
+            hostname: &d.join("hostname"),
+            boot: &d.join("boot"),
+            reboot_required: &d.join("none"),
+            uptime: &d.join("uptime"),
+            apt_lists: &d.join("none"),
+        };
+        let mut m = HashMap::new();
+        m.insert("uname".into(), "6.12.0\n".into());
+        let toml = |on: bool| {
+            format!(
+                "server_url = \"https://x\"\ntoken = \"t\"\ndocker_enabled = {on}\ndocker_endpoint = \"unix://{}\"",
+                sock.display()
+            )
+        };
+        let off = build(
+            &Fake(m.clone()),
+            &paths,
+            &Config::parse(&toml(false)).unwrap(),
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "Docker aus: kein Zugriff auf den Socket"
+        );
+        assert!(off.docker.is_none());
+        assert!(!serde_json::to_string(&off).unwrap().contains("docker"));
+
+        let on = build(&Fake(m), &paths, &Config::parse(&toml(true)).unwrap()).unwrap();
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "nur die Containerliste, keine Images bei leerer Liste"
+        );
+        let dk = on.docker.unwrap();
+        assert_eq!((dk.state, dk.containers.len()), ("ok", 0));
     }
 }

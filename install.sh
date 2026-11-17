@@ -24,6 +24,8 @@ VERSION="latest"
 SERVER_URL=""
 TOKEN_FILE=""
 AUTO_UPDATE=""
+DOCKER=""
+DOCKER_ENDPOINT=""
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 
@@ -34,6 +36,8 @@ while [ $# -gt 0 ]; do
     --token-file) TOKEN_FILE="${2:-}"; shift 2 ;;
     --auto-update) AUTO_UPDATE=yes; shift ;;
     --no-auto-update) AUTO_UPDATE=no; shift ;;
+    --docker=proxy|--docker=socket|--docker=no) DOCKER="${1#--docker=}"; shift ;;
+    --docker-endpoint) DOCKER_ENDPOINT="${2:-}"; shift 2 ;;
     *) die "unbekannte Option: $1" ;;
   esac
 done
@@ -74,6 +78,46 @@ if [ -z "$TOKEN" ] && [ "$KEEP_TOKEN" = no ]; then
   echo >&2
 fi
 [ -n "$TOKEN" ] || [ "$KEEP_TOKEN" = yes ] || die "kein Token angegeben"
+
+# --- docker-begin ---
+# Docker-Container erfassen ist freiwillig (Standard: nein). Gefragt wird nur bei einer Neuinstallation mit Terminal;
+# ohne Terminal gilt nur --docker=proxy|socket|no. Der Agent liest ausschließlich GET /containers/json und /images/<id>/json.
+# Erlaubt sind nur Loopback-Adressen mit Port (Socket-Proxy auf demselben Host).
+pw_docker_endpoint_ok() {
+  case "$1" in
+    http://127.0.0.1:[0-9]*|http://localhost:[0-9]*|"http://[::1]:"[0-9]*) ;;
+    *) return 1 ;;
+  esac
+  port="${1##*:}"
+  case "$port" in *[!0-9]*|"") return 1 ;; esac
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+}
+pw_yes() { case "$1" in j|J|ja|Ja|JA|y|Y|yes) return 0 ;; *) return 1 ;; esac; }
+if [ -z "$DOCKER" ] && [ ! -e /etc/patchwatch/agent.toml ] && ( : </dev/tty ) 2>/dev/null; then
+  printf 'Docker-Container und Image-Versionen dieses Hosts erfassen? [j/N] ' >&2
+  read -r ANSWER </dev/tty || ANSWER=""
+  if pw_yes "$ANSWER"; then
+    echo "  1) Socket-Proxy auf diesem Host (empfohlen: der Agent bekommt nur Lesezugriff auf Container und Images)" >&2
+    echo "  2) Direkter Docker-Socket (Achtung: Mitglieder der Gruppe docker haben faktisch Root-Rechte)" >&2
+    printf 'Auswahl [1/2]: ' >&2
+    read -r CHOICE </dev/tty || CHOICE=""
+    case "$CHOICE" in 2) DOCKER=socket ;; *) DOCKER=proxy ;; esac
+  else
+    DOCKER=no
+  fi
+fi
+DOCKER_CFG=""
+case "$DOCKER" in
+  proxy)
+    DOCKER_ENDPOINT="${DOCKER_ENDPOINT:-http://127.0.0.1:2375}"
+    pw_docker_endpoint_ok "$DOCKER_ENDPOINT" || die "--docker-endpoint muss http://127.0.0.1:PORT sein (nur Loopback)"
+    DOCKER_CFG="docker_enabled = true
+docker_endpoint = \"$DOCKER_ENDPOINT\"" ;;
+  socket)
+    DOCKER_CFG="docker_enabled = true
+docker_endpoint = \"unix:///var/run/docker.sock\"" ;;
+esac
+# --- docker-end ---
 
 if [ "$VERSION" = "latest" ]; then
   URL_BASE="$BASE/latest/download"
@@ -270,8 +314,26 @@ timeout_secs = 30
 checkin_enabled = true
 checkin_interval_secs = 300
 EOF
+  [ -z "$DOCKER_CFG" ] || printf '%s\n' "$DOCKER_CFG" >> /etc/patchwatch/agent.toml
   chmod 0644 /etc/patchwatch/agent.toml
+elif [ -n "$DOCKER_CFG" ] && ! grep -q '^docker_enabled' /etc/patchwatch/agent.toml; then
+  # Bestehende Konfiguration: nur ergänzen, wenn Docker ausdrücklich angefordert wurde und noch nicht konfiguriert ist.
+  printf '%s\n' "$DOCKER_CFG" >> /etc/patchwatch/agent.toml
 fi
+case "$DOCKER" in
+  proxy)
+    echo "Docker: Der Agent liest von $DOCKER_ENDPOINT. Dort muss ein Socket-Proxy laufen, der nur CONTAINERS und IMAGES erlaubt" >&2
+    echo "  (z. B. tecnativa/docker-socket-proxy mit CONTAINERS=1 IMAGES=1, Port nur an 127.0.0.1 binden). Siehe docs/containers-security.md." >&2 ;;
+  socket)
+    echo "Docker: Der Agentbenutzer braucht Zugriff auf /var/run/docker.sock. Das geht mit:" >&2
+    echo "  usermod -aG docker patchwatch" >&2
+    echo "Die Gruppe docker ist faktisch Root auf diesem Host. Der Befehl wird NICHT automatisch ausgeführt." >&2
+    if ( : </dev/tty ) 2>/dev/null; then
+      printf 'Jetzt ausführen? [j/N] ' >&2
+      read -r ANSWER </dev/tty || ANSWER=""
+      if pw_yes "$ANSWER"; then usermod -aG docker patchwatch && echo "patchwatch ist jetzt in der Gruppe docker." >&2; fi
+    fi ;;
+esac
 
 cat > /etc/systemd/system/patchwatch-agent.service <<'EOF'
 [Unit]

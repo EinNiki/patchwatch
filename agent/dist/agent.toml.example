@@ -12,3 +12,10 @@ checkin_interval_secs = 300
 # Long-Poll: der Server hält den Check-in bis zu so viele Sekunden offen und antwortet sofort, sobald in der UI
 # "Jetzt aktualisieren" gedrückt wird (0-55; 0 = nur alle checkin_interval_secs fragen).
 checkin_wait_secs = 40
+
+# Docker-Container und Image-Versionen melden (Standard: aus; ohne diese Zeile öffnet der Agent den Docker-Socket nie).
+# Es werden nur Name, Status, Image-Angabe, Image-Digests und die Compose-Namen gelesen, nie Umgebungsvariablen,
+# Befehle, Mounts oder andere Labels. Empfohlen: ein Socket-Proxy auf Loopback, der nur Container und Images lesen lässt.
+# docker_enabled = true
+# docker_endpoint = "http://127.0.0.1:2375"           # Socket-Proxy (nur Loopback erlaubt)
+# docker_endpoint = "unix:///var/run/docker.sock"     # direkter Socket (Gruppe docker ist faktisch Root)

@@ -2,6 +2,7 @@ mod checkin;
 mod cmd;
 mod collect;
 mod config;
+mod docker_client;
 mod error;
 mod pkgstate;
 mod report;

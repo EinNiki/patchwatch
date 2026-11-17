@@ -1,0 +1,15 @@
+{
+  "Id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "RepoTags": ["nginx:1.27"],
+  "RepoDigests": ["nginx@sha256:1111111111111111111111111111111111111111111111111111111111111111"],
+  "Os": "linux",
+  "Architecture": "arm64",
+  "Variant": "v8",
+  "Config": {
+    "Env": ["DB_PASSWORD=GEHEIM-IM-IMAGE", "PATH=/usr/bin"],
+    "Cmd": ["nginx"],
+    "Labels": {"maintainer": "GEHEIM-MAINTAINER"}
+  },
+  "RootFS": {"Type": "layers", "Layers": ["sha256:9999"]},
+  "Size": 123456
+}
