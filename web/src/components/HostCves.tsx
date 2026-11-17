@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useDebounced } from "@/lib/useDebounced";
+import { FilterGroup } from "@/components/FilterGroup";
 import { prefetchApi, useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { CVE_STATUS, type IconName } from "@/lib/status";
@@ -65,15 +67,6 @@ function useRows(el: HTMLElement | null): { narrow: boolean; rowH: number } {
     };
   }, [el]);
   return rows;
-}
-
-function useDebounced<T>(v: T, ms: number): T {
-  const [d, setD] = useState(v);
-  useEffect(() => {
-    const t = setTimeout(() => setD(v), ms);
-    return () => clearTimeout(t);
-  }, [v, ms]);
-  return d;
 }
 
 /** Eine Zeile: was gilt, in Worten (Fix-Version und Zustand des Hosts). */
@@ -289,19 +282,7 @@ export function HostCves({ host, initialFilter, notice, details }: { host: Host;
             className="min-h-8 w-64 max-w-full rounded-[3px] border border-control bg-sunk px-2 py-1 text-sm text-fg placeholder:text-fg3 max-md:min-h-11"
           />
         </label>
-        <div role="group" aria-label="Level-Filter" className="flex flex-wrap gap-1">
-          {LEVEL_FILTERS.map((f) => (
-            <button
-              key={f.min}
-              type="button"
-              aria-pressed={levelMin === f.min}
-              onClick={() => setLevelMin(f.min)}
-              className={`min-h-8 rounded-xs border px-2 text-xs font-medium max-md:min-h-11 max-md:px-3 ${levelMin === f.min ? "border-accent bg-accent text-bg" : "border-line bg-sunk text-fg hover:bg-surface"}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <FilterGroup label="Level-Filter" options={LEVEL_FILTERS.map((f) => ({ id: f.min, label: f.label }))} value={levelMin} onChange={setLevelMin} />
         {tile === "fixed" && (groups.data?.groups.length ?? 0) > 1 ? (
           <button type="button" className="ml-auto text-xs underline max-md:min-h-11 max-md:min-w-11" onClick={() => setShowAllFixed((v) => !v)}>
             {showAllFixed ? "Alle zuklappen" : "Alle anzeigen"}

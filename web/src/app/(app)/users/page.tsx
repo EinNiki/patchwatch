@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
+import { Tabs } from "@/components/Tabs";
 import { useAuth } from "@/components/AuthProvider";
 import { can, type RolesResponse } from "@/lib/roles";
 import { UsersTab } from "@/components/users/UsersTab";
@@ -47,45 +48,14 @@ export default function UsersPage() {
     window.addEventListener("hashchange", go);
     return () => window.removeEventListener("hashchange", go);
   }, [router]);
-  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   if (!allowed) return <Forbidden />;
-
-  function onKey(e: React.KeyboardEvent, i: number) {
-    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!d) return;
-    e.preventDefault();
-    const next = TABS[(i + d + TABS.length) % TABS.length];
-    setTab(next.id);
-    refs.current[next.id]?.focus();
-  }
 
   return (
     <>
       <PageHeader title="Benutzer" />
-      <div role="tablist" aria-label="Bereiche der Benutzerverwaltung" className="mb-4 flex gap-1 border-b border-line">
-        {TABS.map((t, i) => (
-          <button
-            key={t.id}
-            ref={(el) => {
-              refs.current[t.id] = el;
-            }}
-            type="button"
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
-            tabIndex={tab === t.id ? 0 : -1}
-            onClick={() => setTab(t.id)}
-            onKeyDown={(e) => onKey(e, i)}
-            className={`-mb-px min-h-8 border-b-2 px-3 text-sm font-semibold max-md:min-h-11 ${tab === t.id ? "border-accent text-fg" : "border-transparent text-fg2 hover:text-fg"}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+      <Tabs label="Bereiche der Benutzerverwaltung" tabs={TABS} value={tab} onChange={setTab}>
         {tab === "users" ? <UsersTab roles={roles.data} /> : <AuditTab />}
-      </div>
+      </Tabs>
     </>
   );
 }

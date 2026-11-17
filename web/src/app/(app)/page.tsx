@@ -321,10 +321,19 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         {h.updates_pending == null ? (
           <span className="text-fg3">–</span>
         ) : (
-          <>
+          <Link
+            href={`/hosts/${h.id}?tab=pakete&filter=${h.updates_security ? "security" : "updates"}`}
+            className="no-underline hover:underline"
+            aria-label={`${h.updates_pending} Updates offen${h.updates_security ? `, davon ${h.updates_security} Sicherheit` : ""}: Pakete von ${h.name}`}
+          >
             <span className={h.updates_pending === 0 ? "text-fg3" : "mono"}>{h.updates_pending} offen</span>
-            {h.updates_security ? <div className="mono font-semibold text-crit max-md:ml-1.5 max-md:inline">{h.updates_security} Sicherheit</div> : null}
-          </>
+            {h.updates_security ? (
+              <div className="mono inline-flex items-center gap-1 font-semibold text-crit max-md:ml-1.5 md:flex">
+                <Icon name="crit" size={14} />
+                {h.updates_security} Sicherheit
+              </div>
+            ) : null}
+          </Link>
         )}
       </td>
       <td className="cell-status" data-href={`/hosts/${h.id}?cve=${h.cve_vulnerable > 0 || h.cve_fix_pending > 0 ? "open" : h.cve_reboot > 0 ? "reboot" : "fixed"}`}>

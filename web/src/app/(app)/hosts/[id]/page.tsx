@@ -3,24 +3,37 @@
 import { PageHeader } from "@/components/PageHeader";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { useApi } from "@/lib/useApi";
 import { absTime } from "@/lib/format";
 import { HostDetails } from "@/components/HostDetails";
 import { HOST_STATUS } from "@/lib/status";
-import type { Feed, HistoryRow, Host, UpdateItem } from "@/lib/types";
+import type { Feed, HistoryRow, Host } from "@/lib/types";
 import { HostCves, parseCveFilter } from "@/components/HostCves";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Mono } from "@/components/Version";
 import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
+import { Tabs } from "@/components/Tabs";
+import { HostPackages } from "@/components/HostPackages";
+import { parsePackageFilter } from "@/lib/packages";
 import { feedNotice } from "@/lib/hostCves";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 
+const TABS = [
+  { id: "cves", label: "CVEs" },
+  { id: "pakete", label: "Pakete" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
+
 export default function HostDetailPage() {
   const { id } = useParams<{ id: string }>();
   const host = useApi<Host>(`/hosts/${id}`, 30_000, LIVE);
-  const initialFilter = parseCveFilter(useSearchParams().get("cve"));
+  const params = useSearchParams();
+  const initialFilter = parseCveFilter(params.get("cve"));
+  // Deep-Link: ?tab=pakete&filter=updates|security|all
+  const [tab, setTab] = useState<TabId>(params.get("tab") === "pakete" ? "pakete" : "cves");
   const history = useApi<HistoryRow[]>(`/hosts/${id}/history?limit=30`, 60_000, LIVE);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
 
@@ -62,22 +75,26 @@ export default function HostDetailPage() {
       <div className="@container/hd">
       <div className="side:grid side:grid-cols-[minmax(0,1fr)_20rem] side:items-start side:gap-x-6">
       <div className="min-w-0">
-      <HostCves
-        host={h}
-        initialFilter={initialFilter}
-        notice={notice}
-        details={
-          <details className="mb-2 rounded-xs border border-line bg-surface side:hidden">
-            <summary className="flex min-h-8 cursor-pointer items-center px-3 text-sm font-semibold max-md:min-h-11">Host-Details</summary>
-            <div className="border-t border-line px-3 py-2">
-              <HostDetails host={h} feeds={feeds.data} notice={notice} />
-            </div>
-          </details>
-        }
-      />
+      <Tabs label="Bereiche des Hosts" tabs={TABS} value={tab} onChange={setTab}>
+        {tab === "cves" ? (
+          <HostCves
+            host={h}
+            initialFilter={initialFilter}
+            notice={notice}
+            details={
+              <details className="mb-2 rounded-xs border border-line bg-surface side:hidden">
+                <summary className="flex min-h-8 cursor-pointer items-center px-3 text-sm font-semibold max-md:min-h-11">Host-Details</summary>
+                <div className="border-t border-line px-3 py-2">
+                  <HostDetails host={h} feeds={feeds.data} notice={notice} />
+                </div>
+              </details>
+            }
+          />
+        ) : (
+          <HostPackages hostId={h.id} initialFilter={parsePackageFilter(params.get("filter"))} />
+        )}
+      </Tabs>
       <div>
-      <UpdatesSection hostId={h.id} pending={h.updates_pending ?? 0} />
-
       <section aria-labelledby="hist" className="mt-6">
         <h2 id="hist" className="mb-2 text-lg font-semibold">
           Verlauf
@@ -133,53 +150,5 @@ export default function HostDetailPage() {
       </div>
       </div>
     </>
-  );
-}
-
-/** Liste der offenen Paket-Updates (vom Agent mitgeschickt; Sicherheitsupdates zuerst). */
-function UpdatesSection({ hostId, pending }: { hostId: number; pending: number }) {
-  const updates = useApi<{ items: UpdateItem[] | null }>(`/hosts/${hostId}/updates`, 0, ["report_received"]);
-  const items = updates.data?.items;
-  if (pending === 0 && !items?.length) return null;
-  return (
-    <section id="updates" aria-labelledby="updates-h" className="mt-6 scroll-mt-4">
-      <h2 id="updates-h" className="mb-2 text-lg font-semibold">
-        Offene Updates
-      </h2>
-      {updates.error && !updates.data ? <ErrorNote message={updates.error} /> : null}
-      {updates.loading ? <Loading what="Updates" /> : null}
-      {items === undefined ? null : items === null ? (
-        <Empty title="Liste nicht verfügbar">Dieser Agent schickt noch keine Paketliste. Mit dem neuesten Agent (erneut install.sh ausführen) erscheint sie nach der nächsten Datenmeldung.</Empty>
-      ) : items.length === 0 ? (
-        <Empty title="Keine offenen Updates">Die zuletzt gemeldeten Daten enthalten keine Paket-Updates.</Empty>
-      ) : (
-        <div className="max-lg:overflow-x-auto">
-          <table className="tbl">
-            <caption>Pakete mit verfügbarem Update{items.length < pending ? ` (die ersten ${items.length} von ${pending})` : ""}</caption>
-            <thead>
-              <tr>
-                <th scope="col"><span className="th-pad">Paket</span></th>
-                <th scope="col"><span className="th-pad">Installiert</span></th>
-                <th scope="col"><span className="th-pad">Neu</span></th>
-                <th scope="col"><span className="th-pad">Quelle</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((u) => (
-                <tr key={u.name}>
-                  <td className="cell-primary">
-                    <Mono>{u.name}</Mono>
-                    {u.security ? <span className="ml-2 text-xs font-semibold text-crit">Sicherheit</span> : null}
-                  </td>
-                  <td><Mono className="text-fg2">{u.from ?? "neu"}</Mono></td>
-                  <td><Mono>{u.to}</Mono></td>
-                  <td className="text-fg2">{u.origin}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
   );
 }

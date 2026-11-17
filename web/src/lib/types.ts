@@ -421,3 +421,36 @@ export interface LdapSettings {
   name: string;
   new_account: "pending" | "viewer" | "reject";
 }
+
+/** Zeile der Paketliste eines Hosts (`GET /hosts/{id}/packages`): installiert und/oder ausstehendes Update. */
+export interface PackageRow {
+  name: string;
+  installed: string | null;
+  arch: string | null;
+  candidate: string | null;
+  /** Art des ausstehenden Updates; ohne Update `null`. */
+  kind: "upgrade" | "new" | "remove" | null;
+  origin: string | null;
+  security: boolean;
+  update_since: string | null;
+}
+
+export interface PackagesResponse {
+  items: PackageRow[];
+  /** Treffer mit Suche und Filter (für „Mehr anzeigen“). */
+  total: number;
+  host: {
+    installed: number;
+    packages_count: number | null;
+    /** Der Agent hat die Liste bei 20.000 Paketen abgeschnitten. */
+    truncated: boolean;
+    packages_updated_at: string | null;
+    /** Neueste Änderung der apt-Paketlisten auf dem Host; `null` = unbekannt. */
+    apt_lists_updated_at: string | null;
+    updates_listed: boolean;
+    updates: number;
+    security: number;
+    new: number;
+    remove: number | null;
+  };
+}
