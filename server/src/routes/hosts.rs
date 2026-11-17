@@ -27,19 +27,35 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
                count(*) FILTER (WHERE status = 'fixed') AS fixed \
         FROM host_cve_status WHERE host_id = h.id) c ON true";
 
-/// Offene Paket-Updates laut letztem Report; `{"items": null}`, wenn der Agent noch keine Liste mitschickt.
+/// Offene Paket-Updates laut letztem Report (Sicherheit zuerst); `{"items": null}`, wenn der Agent keine Liste mitschickt.
 pub async fn updates(
     _: Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
-    let row: Option<(Option<Value>,)> =
-        sqlx::query_as("SELECT updates_list FROM hosts WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&st.pool)
-            .await?;
-    let (list,) = row.ok_or(ApiError::NotFound)?;
-    Ok(Json(json!({ "items": list })))
+    let listed: Option<bool> = sqlx::query_scalar("SELECT updates_listed FROM hosts WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&st.pool)
+        .await?;
+    if !listed.ok_or(ApiError::NotFound)? {
+        return Ok(Json(json!({ "items": null })));
+    }
+    /// Name, Art, installiert, verfügbar, Herkunft, Sicherheit.
+    type UpdateRow = (String, String, Option<String>, Option<String>, String, bool);
+    let rows: Vec<UpdateRow> = sqlx::query_as(
+        "SELECT name, kind, installed, candidate, origin, security FROM host_updates WHERE host_id = $1 \
+         ORDER BY security DESC, CASE kind WHEN 'upgrade' THEN 0 WHEN 'new' THEN 1 ELSE 2 END, name",
+    )
+    .bind(id)
+    .fetch_all(&st.pool)
+    .await?;
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|(name, kind, from, to, origin, security)| {
+            json!({ "name": name, "kind": kind, "from": from, "to": to, "origin": origin, "security": security })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
 }
 
 #[derive(Serialize, sqlx::FromRow)]

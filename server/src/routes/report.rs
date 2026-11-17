@@ -5,10 +5,13 @@ use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-pub const MAX_BODY: usize = 4 * 1024 * 1024;
+/// 20.000 Pakete mit langen Versionen passen unter 8 MiB (typisch ca. 135 Byte je Paket).
+pub const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_PACKAGES: usize = 30_000;
 const MAX_UPDATE_ITEMS: usize = 1000;
 
@@ -25,6 +28,13 @@ struct ReportIn {
     uptime_seconds: Option<i64>,
     proxmox: Option<ProxmoxIn>,
     packages: Option<Vec<PackageIn>>,
+    /// Schema 2: Hash der Paketliste des Agents (die Liste selbst fehlt, wenn sie unverändert ist).
+    packages_hash: Option<String>,
+    packages_count: Option<i32>,
+    #[serde(default)]
+    packages_truncated: bool,
+    /// Schema 2: Unix-Sekunden der jüngsten apt-Paketliste des Hosts.
+    apt_lists_updated_unix: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -56,17 +66,32 @@ struct KernelIn {
 struct UpdatesIn {
     pending: i32,
     security: i32,
+    /// Schema 2: Pakete, die die Simulation entfernen würde.
+    remove: Option<i32>,
     /// Offene Updates im Einzelnen (neuere Agents); fehlt bei älteren.
     items: Option<Vec<UpdateItemIn>>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 struct UpdateItemIn {
     name: String,
+    /// Schema 2: `upgrade`, `new` oder `remove`; fehlt bei Schema 1 (dann aus `from` abgeleitet).
+    kind: Option<String>,
     from: Option<String>,
-    to: String,
+    /// Bei zu entfernenden Paketen leer.
+    to: Option<String>,
     origin: String,
     security: bool,
+}
+
+impl UpdateItemIn {
+    fn kind(&self) -> &str {
+        self.kind.as_deref().unwrap_or(if self.from.is_some() {
+            "upgrade"
+        } else {
+            "new"
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -79,6 +104,8 @@ struct ProxmoxIn {
 struct PackageIn {
     name: String,
     version: String,
+    /// Schema 2: Architektur.
+    arch: Option<String>,
     source: Option<String>,
     source_version: Option<String>,
 }
@@ -114,8 +141,27 @@ fn check_pkg(p: &PkgInfoIn) -> ApiResult<()> {
 }
 
 fn validate(r: &ReportIn) -> ApiResult<()> {
-    if r.schema_version != 1 {
+    if !(1..=2).contains(&r.schema_version) {
         return Err(bad("nicht unterstützte schema_version"));
+    }
+    if let Some(h) = &r.packages_hash {
+        if h.len() != 64
+            || !h
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(bad("ungültiger Wert für packages_hash"));
+        }
+    }
+    if r.packages_count
+        .is_some_and(|c| !(0..=1_000_000).contains(&c))
+    {
+        return Err(bad("ungültige Paketanzahl"));
+    }
+    if r.apt_lists_updated_unix
+        .is_some_and(|t| !(0..=4_102_444_800).contains(&t))
+    {
+        return Err(bad("ungültiger Zeitpunkt der Paketlisten"));
     }
     check_opt(&r.agent_version, 32, ".+-", "agent_version")?;
     check(&r.hostname, 253, "._-", "hostname")?;
@@ -152,6 +198,7 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
         if !(0..=100_000).contains(&u.pending)
             || !(0..=100_000).contains(&u.security)
             || u.security > u.pending
+            || u.remove.is_some_and(|n| !(0..=100_000).contains(&n))
         {
             return Err(bad("ungültige Update-Zähler"));
         }
@@ -163,7 +210,13 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
         for i in items {
             check(&i.name, 128, NAME_CHARS, "Update-Paketname")?;
             check_opt(&i.from, 128, VERSION_CHARS, "Update-Version")?;
-            check(&i.to, 128, VERSION_CHARS, "Update-Version")?;
+            check_opt(&i.to, 128, VERSION_CHARS, "Update-Version")?;
+            if !["upgrade", "new", "remove"].contains(&i.kind()) {
+                return Err(bad("ungültige Update-Art"));
+            }
+            if i.kind() != "remove" && i.to.is_none() {
+                return Err(bad("Update ohne verfügbare Version"));
+            }
             if i.origin.len() > 200 || i.origin.chars().any(char::is_control) {
                 return Err(bad("ungültige Update-Herkunft"));
             }
@@ -182,6 +235,7 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
         for p in pkgs {
             check(&p.name, 128, NAME_CHARS, "Paketname")?;
             check(&p.version, 128, VERSION_CHARS, "Paketversion")?;
+            check_opt(&p.arch, 32, "-_", "Architektur")?;
             check_opt(&p.source, 128, NAME_CHARS, "Quellpaket")?;
             check_opt(&p.source_version, 128, VERSION_CHARS, "Quellversion")?;
         }
@@ -254,7 +308,7 @@ pub async fn post_report(
     ClientIp(ip): ClientIp,
     headers: HeaderMap,
     body: Bytes,
-) -> ApiResult<StatusCode> {
+) -> ApiResult<Response> {
     let host_id = super::agent::authenticate_host(&st, &ip, &headers, "report", 300).await?;
 
     let mut raw: serde_json::Value =
@@ -277,12 +331,6 @@ pub async fn post_report(
     if raw.to_string().len() > MAX_RAW_BYTES {
         return Err(bad("Report enthält zu viele Zusatzdaten"));
     }
-    let updates_list = rep
-        .updates
-        .as_ref()
-        .and_then(|u| u.items.as_ref())
-        .map(|i| serde_json::to_value(i).unwrap_or_default());
-
     let now = Utc::now();
     let k = &rep.kernel;
     let (pkg, newest) = (
@@ -291,13 +339,23 @@ pub async fn post_report(
     );
     let reboot_needed = rep.reboot_required_file || k.reboot_needed_kernel == Some(true);
     let mut tx = st.pool.begin().await?;
+    // Hat der Agent nur den Hash geschickt, der Server aber einen anderen Stand (oder keinen), fehlt die Liste hier:
+    // der Agent soll sie beim nächsten Report mitsenden (z. B. nach einer Datenbank-Wiederherstellung).
+    let stored_hash: Option<String> =
+        sqlx::query_scalar("SELECT packages_hash FROM hosts WHERE id = $1 FOR UPDATE")
+            .bind(host_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let need_packages =
+        rep.packages.is_none() && rep.packages_hash.is_some() && stored_hash != rep.packages_hash;
     sqlx::query(
         "UPDATE hosts SET last_report_at = $2, hostname = $3, os_id = $4, os_version = $5, os_codename = $6, \
          pretty_name = $7, running_kernel = $8, kernel_package = $9, kernel_package_version = $10, \
          kernel_source = $11, kernel_source_version = $12, newest_kernel = $13, newest_kernel_version = $14, \
          reboot_needed_kernel = $15, reboot_required_file = $16, updates_pending = $17, updates_security = $18, \
-         uptime_seconds = $19, is_proxmox = $20, proxmox_version = $21, agent_version = $22, last_checkin_at = $2, updates_list = $23, \
-         report_requested_at = NULL, report_dispatched_at = NULL WHERE id = $1",
+         uptime_seconds = $19, is_proxmox = $20, proxmox_version = $21, agent_version = $22, last_checkin_at = $2, updates_listed = $23, \
+         updates_remove = $24, apt_lists_updated_at = to_timestamp($25), \
+         report_requested_at = CASE WHEN $26 THEN $2 ELSE NULL END, report_dispatched_at = NULL WHERE id = $1",
     )
     .bind(host_id)
     .bind(now)
@@ -321,8 +379,18 @@ pub async fn post_report(
     .bind(rep.proxmox.is_some())
     .bind(rep.proxmox.as_ref().map(|p| &p.version))
     .bind(&rep.agent_version)
-    .bind(&updates_list)
+    .bind(rep.updates.as_ref().is_some_and(|u| u.items.is_some()))
+    .bind(rep.updates.as_ref().and_then(|u| u.remove))
+    .bind(rep.apt_lists_updated_unix.map(|t| t as f64))
+    .bind(need_packages)
     .execute(&mut *tx)
+    .await?;
+    store_updates(
+        &mut tx,
+        host_id,
+        rep.updates.as_ref().and_then(|u| u.items.as_deref()),
+        now,
+    )
     .await?;
 
     if let Some(all_pkgs) = &rep.packages {
@@ -336,14 +404,17 @@ pub async fn post_report(
                 .collect::<Vec<_>>()
         };
         sqlx::query(
-            "INSERT INTO host_packages (host_id, name, version, source_name, source_version, last_seen) \
-             SELECT $1, n, v, s, sv, $6 FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[]) AS t(n, v, s, sv) \
-             ON CONFLICT (host_id, name) DO UPDATE SET version = EXCLUDED.version, \
-               source_name = EXCLUDED.source_name, source_version = EXCLUDED.source_version, last_seen = EXCLUDED.last_seen",
+            "INSERT INTO host_packages (host_id, name, version, arch, source_name, source_version, first_seen, last_seen) \
+             SELECT $1, n, v, a, s, sv, $7, $7 FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) \
+               AS t(n, v, a, s, sv) \
+             ON CONFLICT (host_id, name) DO UPDATE SET version = EXCLUDED.version, arch = EXCLUDED.arch, \
+               source_name = EXCLUDED.source_name, source_version = EXCLUDED.source_version, \
+               first_seen = COALESCE(host_packages.first_seen, EXCLUDED.first_seen), last_seen = EXCLUDED.last_seen",
         )
         .bind(host_id)
         .bind(pkgs.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
         .bind(pkgs.iter().map(|p| p.version.clone()).collect::<Vec<_>>())
+        .bind(col(|p| p.arch.as_deref()))
         .bind(col(|p| p.source.as_deref()))
         .bind(col(|p| p.source_version.as_deref()))
         .bind(now)
@@ -354,6 +425,17 @@ pub async fn post_report(
             .bind(now)
             .execute(&mut *tx)
             .await?;
+        sqlx::query(
+            "UPDATE hosts SET packages_hash = $2, packages_count = $3, packages_truncated = $4, \
+             packages_updated_at = $5 WHERE id = $1",
+        )
+        .bind(host_id)
+        .bind(&rep.packages_hash)
+        .bind(rep.packages_count.unwrap_or(all_pkgs.len() as i32))
+        .bind(rep.packages_truncated)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
     }
 
     let stale_after = crate::schedule::stale_after(&st.pool, st.cfg.stale_after_hours).await;
@@ -378,7 +460,57 @@ pub async fn post_report(
     if let Err(e) = crate::cve::reeval::evaluate_host(&st.pool, host_id, stale_after).await {
         tracing::error!(host = host_id, error = %e, "CVE-Bewertung nach Report fehlgeschlagen");
     }
-    Ok(StatusCode::NO_CONTENT)
+    if need_packages {
+        return Ok(Json(serde_json::json!({ "need_packages": true })).into_response());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Ausstehende Updates des Hosts auf den Stand des Reports bringen (erste Sichtung bleibt erhalten, Verschwundenes
+/// entfällt). Ohne Liste (älterer Agent) gibt es keine Zeilen.
+async fn store_updates(
+    tx: &mut sqlx::PgConnection,
+    host_id: i64,
+    items: Option<&[UpdateItemIn]>,
+    now: chrono::DateTime<Utc>,
+) -> ApiResult<()> {
+    let Some(items) = items else {
+        sqlx::query("DELETE FROM host_updates WHERE host_id = $1")
+            .bind(host_id)
+            .execute(&mut *tx)
+            .await?;
+        return Ok(());
+    };
+    // Ein Name steht höchstens einmal in der Liste (sonst Fehler 21000 beim Upsert): der erste Eintrag gilt.
+    let mut seen = std::collections::HashSet::new();
+    let items: Vec<&UpdateItemIn> = items
+        .iter()
+        .filter(|i| seen.insert(i.name.as_str()))
+        .collect();
+    sqlx::query(
+        "INSERT INTO host_updates (host_id, name, kind, installed, candidate, origin, security, first_seen, last_seen) \
+         SELECT $1, n, k, i, c, o, s, $8, $8 \
+         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::bool[]) AS t(n, k, i, c, o, s) \
+         ON CONFLICT (host_id, name) DO UPDATE SET kind = EXCLUDED.kind, installed = EXCLUDED.installed, \
+           candidate = EXCLUDED.candidate, origin = EXCLUDED.origin, security = EXCLUDED.security, \
+           last_seen = EXCLUDED.last_seen",
+    )
+    .bind(host_id)
+    .bind(items.iter().map(|i| i.name.clone()).collect::<Vec<_>>())
+    .bind(items.iter().map(|i| i.kind().to_owned()).collect::<Vec<_>>())
+    .bind(items.iter().map(|i| i.from.clone()).collect::<Vec<_>>())
+    .bind(items.iter().map(|i| i.to.clone()).collect::<Vec<_>>())
+    .bind(items.iter().map(|i| i.origin.clone()).collect::<Vec<_>>())
+    .bind(items.iter().map(|i| i.security).collect::<Vec<_>>())
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM host_updates WHERE host_id = $1 AND last_seen < $2")
+        .bind(host_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -389,6 +521,7 @@ mod merge_tests {
         PackageIn {
             name: name.into(),
             version: version.into(),
+            arch: None,
             source: None,
             source_version: None,
         }

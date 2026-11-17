@@ -224,7 +224,7 @@ async fn report_rejects_bad_token_and_invalid_input(pool: PgPool) {
     );
 
     // Zu großer Body wird abgelehnt.
-    let huge = "x".repeat(5 * 1024 * 1024);
+    let huge = "x".repeat(9 * 1024 * 1024);
     let req = Request::builder()
         .method(Method::POST)
         .uri("/api/v1/report")
