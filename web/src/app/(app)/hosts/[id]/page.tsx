@@ -16,16 +16,20 @@ import { RelTime } from "@/components/RelTime";
 import { Empty, ErrorNote, Loading } from "@/components/States";
 import { Tabs } from "@/components/Tabs";
 import { HostPackages } from "@/components/HostPackages";
+import { HostContainers } from "@/components/HostContainers";
+import { useAuth } from "@/components/AuthProvider";
+import { can } from "@/lib/roles";
 import { parsePackageFilter } from "@/lib/packages";
 import { feedNotice } from "@/lib/hostCves";
 
 const LIVE = ["report_received", "host_status", "host_cve_status"] as const;
 
-const TABS = [
+const BASE_TABS = [
   { id: "cves", label: "CVEs" },
   { id: "pakete", label: "Pakete" },
 ] as const;
-type TabId = (typeof TABS)[number]["id"];
+const CONTAINER_TAB = { id: "container", label: "Container" } as const;
+type TabId = (typeof BASE_TABS)[number]["id"] | typeof CONTAINER_TAB.id;
 
 export default function HostDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,7 +37,11 @@ export default function HostDetailPage() {
   const params = useSearchParams();
   const initialFilter = parseCveFilter(params.get("cve"));
   // Deep-Link: ?tab=pakete&filter=updates|security|all
-  const [tab, setTab] = useState<TabId>(params.get("tab") === "pakete" ? "pakete" : "cves");
+  const { me } = useAuth();
+  const canContainers = can(me.permissions, "containers.read");
+  const wanted = params.get("tab");
+  const [tab, setTab] = useState<TabId>(wanted === "pakete" ? "pakete" : wanted === "container" && canContainers ? "container" : "cves");
+  const tabs: readonly { id: TabId; label: string }[] = canContainers ? [...BASE_TABS, CONTAINER_TAB] : BASE_TABS;
   const history = useApi<HistoryRow[]>(`/hosts/${id}/history?limit=30`, 60_000, LIVE);
   const feeds = useApi<Feed[]>("/feeds", 60_000);
 
@@ -75,7 +83,7 @@ export default function HostDetailPage() {
       <div className="@container/hd">
       <div className="side:grid side:grid-cols-[minmax(0,1fr)_20rem] side:items-start side:gap-x-6">
       <div className="min-w-0">
-      <Tabs label="Bereiche des Hosts" tabs={TABS} value={tab} onChange={setTab}>
+      <Tabs label="Bereiche des Hosts" tabs={tabs} value={tab} onChange={setTab}>
         {tab === "cves" ? (
           <HostCves
             host={h}
@@ -90,6 +98,8 @@ export default function HostDetailPage() {
               </details>
             }
           />
+        ) : tab === "container" ? (
+          <HostContainers hostId={h.id} />
         ) : (
           <HostPackages hostId={h.id} initialFilter={parsePackageFilter(params.get("filter"))} />
         )}

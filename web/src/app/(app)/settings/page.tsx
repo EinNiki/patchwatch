@@ -145,6 +145,7 @@ function Schedules() {
       }
       if (Object.keys(feed_bulk_intervals).length) body.feed_bulk_intervals = feed_bulk_intervals;
       if (edit.stale !== undefined) body.stale_after_hours = int("Meldet sich nicht", edit.stale, d.stale_after_min_hours, d.stale_after_max_hours);
+      if (edit.containers !== undefined) body.container_interval_hours = int("Image-Prüfung", edit.containers, d.container_interval_min_hours, d.container_interval_max_hours);
       if (edit.session !== undefined) body.session_ttl_hours = int("Anmeldedauer", edit.session, d.session_ttl_min_hours, d.session_ttl_max_hours);
       if (edit.retention !== undefined) body.report_retention_days = int("Aufbewahrung", edit.retention, d.report_retention_min_days, d.report_retention_max_days);
       if (["mode", "every", "at", "tz"].some((k) => edit[k] !== undefined)) {
@@ -219,6 +220,18 @@ function Schedules() {
           {rs.last_run ? <> Letzte Anforderung: <RelTime iso={rs.last_run} />.</> : null}
         </p>
         <p className="text-xs text-fg3">{d.checkin_interval_hint}</p>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-3">
+        <legend className="mb-1 font-semibold">Docker-Images prüfen</legend>
+        <div className="flex flex-wrap gap-3">
+          <Field label="Image-Versionen bei den Registries prüfen alle (Stunden)">
+            <TextInput type="number" inputMode="numeric" min={d.container_interval_min_hours} max={d.container_interval_max_hours} value={val("containers", d.container_interval_hours)} onChange={set("containers")} className={num} />
+          </Field>
+        </div>
+        <p className="text-xs text-fg3">
+          {d.container_interval_min_hours} bis {d.container_interval_max_hours} Stunden, Standard {d.container_interval_default_hours}. Ein Abruf gilt für alle Hosts. Docker Hub begrenzt anonyme Abrufe auf 100 je 6 Stunden und IP-Adresse; patchwatch nutzt höchstens 60 davon und verschiebt den Rest.
+        </p>
       </fieldset>
 
       <fieldset className="flex flex-col gap-3">

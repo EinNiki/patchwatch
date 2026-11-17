@@ -11,7 +11,7 @@ export function FilterGroup<T extends string | number>({
   onChange: (id: T) => void;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex flex-wrap gap-1">
+    <div role="group" aria-label={label} className="flex flex-wrap gap-2">
       {options.map((o) => (
         <button
           key={o.id}

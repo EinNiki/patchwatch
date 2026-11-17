@@ -75,8 +75,37 @@ HOSTS = [
     ("backup-01", report("backup-01", "ubuntu", "24.04", "noble", "Ubuntu 24.04.3 LTS", "6.8.0-79-generic", "linux-image-6.8.0-79-generic", "linux-signed", "6.8.0-79.79", "6.8.0-79-generic", "6.8.0-79.79", 3, 0, 100)),
 ]
 
+def digest(c):
+    return "sha256:" + c * 64
+
+
+def ctr(cid, name, image, image_id, repo_digest, service, project="shop", state="running", text="Up 3 hours", arch="amd64"):
+    return {
+        "id": cid, "name": name, "state": state, "created_unix": 1_731_500_000, "status_text": text, "image": image,
+        "image_id": image_id, "repo_digests": [repo_digest] if repo_digest else [], "os": "linux", "arch": arch,
+        "variant": None, "compose_project": project, "compose_service": service,
+    }
+
+
+# Docker-Blöcke (Schema 2, optional): web-01 läuft mit Docker, web-02 darf den Socket nicht lesen, db-01 hat Docker mit einem Container.
+DOCKER = {
+    "web-01": {"state": "ok", "reason": None, "containers": [
+        ctr("a1b2c3d4e5f6", "shop-web-1", "nginx:latest", digest("1"), "nginx@" + digest("a"), "web"),
+        ctr("b1b2c3d4e5f6", "shop-cache-1", "redis:7.2.3", digest("2"), "redis@" + digest("b"), "cache"),
+        ctr("c1b2c3d4e5f6", "shop-api-1", "ghcr.io/example/api:2.4.1", digest("3"), "ghcr.io/example/api@" + digest("c"), "api"),
+        ctr("d1b2c3d4e5f6", "shop-db-1", "postgres@" + digest("d"), digest("4"), "postgres@" + digest("d"), "db"),
+        ctr("e1b2c3d4e5f6", "tools-1", "registry.example.org/tools/cli:1.0", digest("5"), None, "cli", project="tools", state="exited", text="Exited (0) 2 days ago"),
+    ]},
+    "web-02": {"state": "unavailable", "reason": "no_permission", "containers": []},
+    "db-01": {"state": "ok", "reason": None, "containers": [
+        ctr("f1b2c3d4e5f6", "pg-1", "postgres:16.1.2", digest("6"), "postgres@" + digest("e"), "pg", project="data"),
+    ]},
+}
+
 tokens = {}
 for name, rep in HOSTS:
+    if name in DOCKER:
+        rep = {**rep, "schema_version": 2, "docker": DOCKER[name]}
     status, r = admin("POST", "/hosts", {"name": name})
     if status == 409:  # vorhanden: Token neu erzeugen
         _, hosts = admin("GET", "/hosts")

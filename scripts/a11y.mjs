@@ -11,7 +11,8 @@ const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE ?? "pl
 const axe = readFileSync(process.env.AXE_JS ?? "node_modules/axe-core/axe.min.js", "utf8");
 
 const PAGES = [
-  "/", "/hosts/host:web-01", "/hosts/host:db-01", "/hosts/host:pve-01", "/hosts/host:db-02?cve=reboot", "/hosts/host:db-02?cve=fixed", "/cves", "/cves/CVE-2024-1086", "/agents", "/notifications",
+  "/", "/hosts/host:web-01", "/hosts/host:db-01", "/hosts/host:pve-01", "/hosts/host:db-02?cve=reboot", "/hosts/host:db-02?cve=fixed",
+  "/hosts/host:web-02?tab=pakete&filter=updates", "/hosts/host:web-01?tab=container", "/hosts/host:web-02?tab=container", "/hosts/host:pve-01?tab=container", "/packages", "/containers", "/cves", "/cves/CVE-2024-1086", "/agents", "/notifications",
   "/notifications/ntfy", "/notifications/matrix", "/notifications/discord", "/notifications/browser", "/settings",
 ];
 const viewports = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };

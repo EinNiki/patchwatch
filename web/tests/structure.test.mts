@@ -67,3 +67,15 @@ test("Reiter gibt es nur über den gemeinsamen Baustein Tabs", () => {
     assert.doesNotMatch(readFileSync(f, "utf8"), /role="tablist"/, `${f}: eigene Reiter statt <Tabs>`);
   }
 });
+
+test("Container-Oberfläche ist nur Anzeige: gemeinsame Bausteine, Befehl nur zum Kopieren, einzige Schreibaktion ist der Prüf-Anstoß", () => {
+  const files = ["src/components/HostContainers.tsx", "src/components/ContainerVerdict.tsx", "src/app/(app)/containers/page.tsx"];
+  for (const f of files) {
+    const s = readFileSync(f, "utf8");
+    assert.doesNotMatch(s, /<button[\s>]/, `${f}: rohes <button> statt Button`);
+    assert.doesNotMatch(s, /dangerouslySetInnerHTML/, `${f}: kein ungeprüftes HTML`);
+    const writes = [...s.matchAll(/api\.(post|put|patch|del|delWithBody)\(\s*([`"'][^`"']*)/g)].map((m) => `${m[1]} ${m[2]}`);
+    for (const w of writes) assert.equal(w, "post \"/containers/check", `${f}: unerwartete Schreibaktion ${w}`);
+  }
+  assert.match(readFileSync("src/components/ContainerVerdict.tsx", "utf8"), /<CodeField/, "Befehl wird über CodeField angezeigt (kopieren, nie ausführen)");
+});

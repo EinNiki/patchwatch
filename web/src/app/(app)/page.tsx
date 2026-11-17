@@ -323,10 +323,11 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
         ) : (
           <Link
             href={`/hosts/${h.id}?tab=pakete&filter=${h.updates_security ? "security" : "updates"}`}
-            className="no-underline hover:underline"
-            aria-label={`${h.updates_pending} Updates offen${h.updates_security ? `, davon ${h.updates_security} Sicherheit` : ""}: Pakete von ${h.name}`}
+            className="no-underline hover:underline max-md:inline-block max-md:min-h-6"
+            aria-label={`${h.updates_pending} offen${h.updates_security ? ` ${h.updates_security} Sicherheit` : ""}: Pakete von ${h.name}`}
           >
             <span className={h.updates_pending === 0 ? "text-fg3" : "mono"}>{h.updates_pending} offen</span>
+            {" "}
             {h.updates_security ? (
               <div className="mono inline-flex items-center gap-1 font-semibold text-crit max-md:ml-1.5 md:flex">
                 <Icon name="crit" size={14} />
@@ -335,6 +336,18 @@ function HostRow({ h, feedOk, flash }: { h: Host; feedOk: boolean; flash: boolea
             ) : null}
           </Link>
         )}
+        {h.docker_state === "ok" && h.containers_outdated != null ? (
+          <Link
+            href={`/hosts/${h.id}?tab=container`}
+            className="mt-0.5 block text-xs no-underline hover:underline max-md:ml-1.5 max-md:inline"
+            aria-label={`Container: ${h.containers_outdated} veraltet, Container von ${h.name}`}
+          >
+            <span className={h.containers_outdated > 0 ? "inline-flex items-center gap-1 text-warn" : "text-fg3"}>
+              {h.containers_outdated > 0 ? <Icon name="warn" size={14} /> : null}
+              Container: {h.containers_outdated} veraltet
+            </span>
+          </Link>
+        ) : null}
       </td>
       <td className="cell-status" data-href={`/hosts/${h.id}?cve=${h.cve_vulnerable > 0 || h.cve_fix_pending > 0 ? "open" : h.cve_reboot > 0 ? "reboot" : "fixed"}`}>
         <CveCell h={h} feedOk={feedOk} />

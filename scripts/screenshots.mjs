@@ -23,7 +23,7 @@ const DEFAULT_PAGES = [
   "notifications=/notifications", "notification-ntfy=/notifications/ntfy", "notification-matrix=/notifications/matrix",
   "notification-browser=/notifications/browser", "settings=/settings", "menu=/",
 ].join(",");
-const pages = (process.env.PW_PAGES ?? DEFAULT_PAGES).split(",").map((p) => p.split("=", 2));
+const pages = (process.env.PW_PAGES ?? DEFAULT_PAGES).split(",").map((p) => [p.slice(0, p.indexOf("=")), p.slice(p.indexOf("=") + 1)]); // am ersten "=" teilen: Pfade dürfen eine Abfrage mit "=" enthalten
 /** Interaktionen vor dem Foto; `mobileOnly`: nur im schmalen Viewport. */
 const ACTIONS = {
   "agents-waiting": async (page) => {

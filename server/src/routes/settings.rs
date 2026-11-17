@@ -67,6 +67,7 @@ pub async fn get(
         "stale_after_hours": schedule::stale_after_hours(&st.pool, st.cfg.stale_after_hours).await,
         "stale_after_default_hours": st.cfg.stale_after_hours,
         "container_interval_hours": schedule::container_interval_hours(&st.pool).await,
+        "container_interval_default_hours": crate::containers::worker::DEFAULT_INTERVAL_HOURS,
         "container_interval_min_hours": schedule::CONTAINER_HOURS_RANGE.start(),
         "container_interval_max_hours": schedule::CONTAINER_HOURS_RANGE.end(),
         "stale_after_min_hours": schedule::STALE_HOURS_RANGE.start(),

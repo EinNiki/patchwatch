@@ -6,7 +6,7 @@
 // Vor jedem Lauf den Server neu starten (scripts/dev-stack.sh restart-server): setzt das Login-Limit zurück. Die Anmeldung
 // geschieht einmal je Prozess; die Sitzung (storageState) wird von allen Gruppen und Kontexten wiederverwendet.
 // Umgebung: PW_BASE, PW_USER (admin), PW_PASSWORD oder PW_PWFILE, AXE_JS, PW_VARIANTS (Kommaliste von Varianten-IDs zum Eingrenzen).
-// Gruppen (nacheinander, je Gruppe ein Browser, danach geschlossen): login, hosts, host-detail, cves, cve-detail, cve-sources,
+// Gruppen (nacheinander, je Gruppe ein Browser, danach geschlossen): login, hosts, host-detail, packages, containers, cves, cve-detail, cve-sources,
 // agents, notifications, settings, notfound, sidebar. Exit 1 bei Verstößen; offene Verstöße bleiben rot, nichts wird ausgeblendet.
 //
 // Prüfungen (Nummern wie im Auftrag):
@@ -223,7 +223,13 @@ const GROUPS = {
     { name: "Host mit Neustart (db-02)", path: "/hosts/host:db-02?cve=reboot" },
     { name: "Host Proxmox (pve-01)", path: "/hosts/host:pve-01" },
     { name: "Host ohne Daten (neu-01)", path: "/hosts/host:neu-01" },
+    { name: "Host Reiter Pakete (web-02)", path: "/hosts/host:web-02?tab=pakete&filter=updates" },
+    { name: "Host Reiter Container (web-01)", path: "/hosts/host:web-01?tab=container" },
+    { name: "Host Reiter Container, Docker nicht lesbar (web-02)", path: "/hosts/host:web-02?tab=container" },
+    { name: "Host Reiter Container, Docker aus (pve-01)", path: "/hosts/host:pve-01?tab=container" },
   ] },
+  packages: { states: [{ name: "Pakete", path: "/packages" }] },
+  containers: { states: [{ name: "Container", path: "/containers" }] },
   cves: { states: [
     { name: "CVEs Liste", path: "/cves" },
     { name: "CVEs Filter-Fenster offen", path: "/cves", shift: false, prep: openFilter },

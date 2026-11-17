@@ -53,6 +53,10 @@ export interface Host {
   cve_unknown: number;
   cve_reboot: number;
   cve_fixed: number;
+  /** Zustand der Docker-Erfassung; `null` = nicht aktiviert (oder kein Recht `containers.read`). */
+  docker_state?: "ok" | "unavailable" | null;
+  /** Container mit neuerem Image; nur bei aktiver Docker-Erfassung. */
+  containers_outdated?: number | null;
 }
 
 export interface HistoryRow {
@@ -224,6 +228,10 @@ export interface Settings {
   stale_after_default_hours: number;
   stale_after_min_hours: number;
   stale_after_max_hours: number;
+  container_interval_hours: number;
+  container_interval_default_hours: number;
+  container_interval_min_hours: number;
+  container_interval_max_hours: number;
   feeds: { source: string; label: string; interval_minutes: number; default_minutes: number; bulk_interval_minutes: number | null; bulk_default_minutes: number | null }[];
   feed_interval_min_minutes: number;
   feed_interval_max_minutes: number;
@@ -465,4 +473,51 @@ export interface PackageOverviewRow {
   /** Hosts mit ausstehendem Update bzw. Sicherheitsupdate. */
   updates: number;
   security: number;
+}
+
+/** Bewertung eines Containers (`status` benennt die Art; siehe README „Bewertungsregeln“). */
+export type ContainerVerdict =
+  | { status: "pinned" | "unsupported" | "pending" | "deferred" | "current" | "incomparable" | "incomplete" | "no_local_digest" }
+  | { status: "error"; text: string }
+  | { status: "update_available"; platform_confirmed: boolean }
+  | { status: "newer_version"; patch: string | null; minor: string | null; major: string | null };
+
+export interface ContainerItem {
+  host_id: number;
+  host_name: string;
+  name: string;
+  state: string;
+  status_text: string;
+  created_at: string | null;
+  image: string;
+  compose_project: string | null;
+  compose_service: string | null;
+  last_seen: string;
+  verdict: ContainerVerdict;
+  checked_at: string | null;
+  /** Nur zum Kopieren; patchwatch führt ihn nie aus. */
+  command: string | null;
+}
+
+/** `GET /hosts/{id}/containers`; `docker` ist `null`, wenn die Erfassung auf dem Host nicht aktiviert ist. */
+export interface HostContainersResponse {
+  docker: { state: "ok" | "unavailable"; reason: string | null; checked_at: string | null } | null;
+  items: ContainerItem[];
+  outdated: number;
+}
+
+/** `GET /containers`: ein Eintrag je Image. */
+export interface ContainerImageGroup {
+  image: string;
+  verdict: ContainerVerdict;
+  checked_at: string | null;
+  updates: number;
+  hosts: number;
+  containers: ContainerItem[];
+}
+
+export interface ContainersOverview {
+  items: ContainerImageGroup[];
+  total: number;
+  outdated_images: number;
 }

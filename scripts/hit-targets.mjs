@@ -8,7 +8,7 @@ const { chromium } = createRequire(import.meta.url)(process.env.PW_MODULE);
 const pw = readFileSync(process.env.PW_PWFILE, "utf8").trim();
 const base = process.env.PW_BASE ?? "http://127.0.0.1:3300";
 const widths = (process.env.HT_WIDTHS ?? "1440,390").split(",").map(Number);
-const PAGES = ["/", "/agents", "/cves", "/notifications", "/settings", "/users"];
+const PAGES = ["/", "/hosts/host:web-01?tab=container", "/hosts/host:web-02?tab=pakete&filter=updates", "/packages", "/containers", "/agents", "/cves", "/notifications", "/settings", "/users"];
 
 /** Läuft im Browser. */
 function scan() {
@@ -66,7 +66,9 @@ try {
     await page.getByLabel("Passwort").fill(pw);
     await page.getByRole("button", { name: "Anmelden", exact: true }).click();
     await page.waitForURL((u) => !u.pathname.startsWith("/login"));
-    for (const p of PAGES) {
+    // "host:<Name>" im Pfad wird zur Host-ID aufgelöst.
+    const ids = Object.fromEntries(await page.evaluate(async () => (await (await fetch("/api/v1/hosts")).json()).map((h) => [h.name, h.id])));
+    for (const p of PAGES.map((x) => x.replace(/host:([\w.-]+)/, (_, n) => ids[n] ?? (console.error(`Host ${n} fehlt`), process.exit(1))))) {
       await page.goto(`${base}${p}`);
       if (process.env.HT_NOEXT) await page.addStyleTag({ content: "button::before{display:none!important}" });
       await page.waitForTimeout(1200);
