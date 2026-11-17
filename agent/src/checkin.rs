@@ -83,7 +83,8 @@ pub fn run<R: Serialize>(
         return Ok(Outcome::NothingRequested);
     }
     let report = make_report()?;
-    send::send(cfg, token, &report)?;
+    let reply = send::send(cfg, token, &report)?;
+    crate::pkgstate::delivered(crate::pkgstate::state_dir().as_deref(), &reply);
     Ok(Outcome::ReportSent)
 }
 

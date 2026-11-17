@@ -46,15 +46,28 @@ pub fn ask_checkin(cfg: &Config, token: &str) -> Result<bool, AgentError> {
     Ok(answer.is_ok_and(|a| a.report_requested))
 }
 
+/// Antwort auf einen angenommenen Report. Gelesen wird nur `need_packages` (der Server hat zum gemeldeten Hash keine
+/// Paketliste und möchte sie beim nächsten Report); jede andere oder fehlende Angabe gilt als "nein".
+#[derive(Debug, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct Reply {
+    #[serde(default)]
+    pub need_packages: bool,
+}
+
 /// Sendet den Report per HTTPS POST mit Bearer-Token. Der Token taucht in keiner Fehlermeldung auf.
-pub fn send<T: Serialize>(cfg: &Config, token: &str, report: &T) -> Result<(), AgentError> {
+pub fn send<T: Serialize>(cfg: &Config, token: &str, report: &T) -> Result<Reply, AgentError> {
     let agent = http_agent(cfg);
     match agent
         .post(&cfg.report_url())
         .header("Authorization", &format!("Bearer {token}"))
         .send_json(report)
     {
-        Ok(_) => Ok(()),
+        Ok(mut resp) => Ok(resp
+            .body_mut()
+            .with_config()
+            .limit(MAX_RESPONSE_BYTES)
+            .read_json::<Reply>()
+            .unwrap_or_default()),
         Err(ureq::Error::StatusCode(code)) => Err(AgentError::Rejected(code)),
         Err(e) => Err(AgentError::Network(e.to_string())),
     }

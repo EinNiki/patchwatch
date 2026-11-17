@@ -1,0 +1,10 @@
+ii 	bash	amd64	5.2.21-2	bash	5.2.21-2
+ii 	libc6	amd64	2.41-12	glibc	2.41-12
+ii 	libc6	i386	2.41-12	glibc	2.41-12
+ii 	docker-ce	amd64	5:27.3.1-1~debian.13~trixie	docker-ce	5:27.3.1-1~debian.13~trixie
+ii 	containerd.io	amd64	1.7.22-1	containerd.io	1.7.22-1
+ii 	iperf3	amd64	3.18-2	iperf3	3.18-2
+hi 	openssh-server	amd64	1:10.0p1-5	openssh	1:10.0p1-5
+ii 	nginx	amd64	1.26.3-3	nginx	1.26.3-3
+rc 	oldtool	amd64	0.9-1	oldtool	0.9-1
+un 	gone				

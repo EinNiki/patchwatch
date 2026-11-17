@@ -265,7 +265,7 @@ fi
 if [ ! -e /etc/patchwatch/agent.toml ]; then
   cat > /etc/patchwatch/agent.toml <<EOF
 server_url = "$SERVER_URL"
-include_packages = false
+include_packages = true
 timeout_secs = 30
 checkin_enabled = true
 checkin_interval_secs = 300

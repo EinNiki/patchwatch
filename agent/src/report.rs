@@ -1,11 +1,12 @@
 use crate::cmd::Runner;
-use crate::collect::{kernel, os_release, packages, proxmox, system, updates};
+use crate::collect::{apt_lists, kernel, os_release, packages, proxmox, system, updates};
 use crate::config::Config;
 use crate::error::AgentError;
 use serde::Serialize;
 use std::path::Path;
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// 2: Paket-Hash, Architektur, Art der Updates, Alter der Paketlisten. Felder sind optional; ein Server mit Schema 1 und 2 versteht beide.
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize)]
 pub struct Report {
@@ -19,8 +20,16 @@ pub struct Report {
     pub updates: Option<updates::Updates>,
     pub uptime_seconds: Option<u64>,
     pub proxmox: Option<proxmox::Proxmox>,
-    /// Nur gesetzt, wenn `include_packages = true`.
+    /// Nur gesetzt, wenn `include_packages = true` (und beim Senden nur, wenn sich die Liste geändert hat).
     pub packages: Option<Vec<packages::Package>>,
+    /// SHA-256 der Paketliste; der Server erkennt daran, ob er die Liste schon hat.
+    pub packages_hash: Option<String>,
+    /// Anzahl der installierten Pakete vor dem Abschneiden.
+    pub packages_count: Option<u32>,
+    /// Die Liste wurde auf `packages::MAX_PACKAGES` gekürzt.
+    pub packages_truncated: bool,
+    /// Alter der Paketlisten (Unix-Sekunden der jüngsten Liste); `None`, wenn nicht ermittelbar.
+    pub apt_lists_updated_unix: Option<u64>,
 }
 
 /// Pfade des Systems; austauschbar für Tests.
@@ -30,6 +39,7 @@ pub struct Paths<'a> {
     pub boot: &'a Path,
     pub reboot_required: &'a Path,
     pub uptime: &'a Path,
+    pub apt_lists: &'a Path,
 }
 
 pub fn system_paths() -> Paths<'static> {
@@ -39,6 +49,7 @@ pub fn system_paths() -> Paths<'static> {
         boot: Path::new("/boot"),
         reboot_required: Path::new("/var/run/reboot-required"),
         uptime: Path::new("/proc/uptime"),
+        apt_lists: Path::new("/var/lib/apt/lists"),
     }
 }
 
@@ -62,6 +73,11 @@ pub fn build(r: &dyn Runner, p: &Paths, cfg: &Config) -> Result<Report, AgentErr
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
 
+    let set = if cfg.include_packages {
+        packages::collect(r)
+    } else {
+        None
+    };
     Ok(Report {
         schema_version: SCHEMA_VERSION,
         agent_version: env!("CARGO_PKG_VERSION"),
@@ -75,12 +91,49 @@ pub fn build(r: &dyn Runner, p: &Paths, cfg: &Config) -> Result<Report, AgentErr
             .ok()
             .and_then(|t| system::parse_uptime(&t)),
         proxmox: proxmox::collect(r),
-        packages: if cfg.include_packages {
-            packages::collect(r)
-        } else {
-            None
-        },
+        packages_hash: set.as_ref().map(|s| s.hash.clone()),
+        packages_count: set.as_ref().map(|s| s.total as u32),
+        packages_truncated: set.as_ref().is_some_and(|s| s.truncated),
+        packages: set.map(|s| s.packages),
+        apt_lists_updated_unix: apt_lists::newest_list_unix(p.apt_lists),
     })
+}
+
+/// Hilfen für Tests in anderen Modulen.
+#[cfg(test)]
+pub mod tests_support {
+    use super::*;
+
+    pub fn sample_report() -> Report {
+        Report {
+            schema_version: SCHEMA_VERSION,
+            agent_version: "0.0.0",
+            hostname: "h".into(),
+            collected_at_unix: 0,
+            os: os_release::OsInfo {
+                id: "debian".into(),
+                version_id: None,
+                codename: None,
+                pretty_name: None,
+            },
+            kernel: kernel::KernelInfo {
+                running_release: "6.1.0".into(),
+                running_package: None,
+                newest_installed_release: None,
+                newest_installed_package: None,
+                reboot_needed_kernel: None,
+            },
+            reboot_required_file: false,
+            updates: None,
+            uptime_seconds: None,
+            proxmox: None,
+            packages: None,
+            packages_hash: None,
+            packages_count: None,
+            packages_truncated: false,
+            apt_lists_updated_unix: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -144,9 +197,15 @@ mod tests {
             boot: &boot,
             reboot_required: &d.join("reboot-required"),
             uptime: &d.join("uptime"),
+            apt_lists: &d.join("apt-lists"),
         };
         let cfg = Config::parse("server_url = \"https://x\"\ntoken = \"t\"").unwrap();
-        let rep = build(&Fake(m), &paths, &cfg).unwrap();
+        // Paketlisten mit festem Zeitpunkt für das Alter.
+        fs::create_dir_all(d.join("apt-lists")).unwrap();
+        let list = fs::File::create(d.join("apt-lists/x_dists_trixie_InRelease")).unwrap();
+        list.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+            .unwrap();
+        let rep = build(&Fake(m.clone()), &paths, &cfg).unwrap();
 
         assert_eq!(rep.hostname, "pve1");
         assert_eq!(rep.os.codename.as_deref(), Some("trixie"));
@@ -156,5 +215,24 @@ mod tests {
         assert_eq!(rep.updates.unwrap().security, 1);
         assert_eq!(rep.kernel.reboot_needed_kernel, Some(false));
         assert!(rep.packages.is_none());
+        assert!(rep.packages_hash.is_none() && !rep.packages_truncated);
+        assert_eq!(rep.schema_version, 2);
+        assert_eq!(rep.apt_lists_updated_unix, Some(1_700_000_000));
+
+        // Mit include_packages: Liste, Hash und Anzahl stammen aus derselben Erfassung.
+        let key = "dpkg-query ${db:Status-Abbrev}\t${Package}\t${Architecture}\t${Version}\t${source:Package}\t${source:Version}\n";
+        m.insert(
+            key.into(),
+            include_str!("../tests/fixtures/dpkg-query.debian-trixie").into(),
+        );
+        let cfg =
+            Config::parse("server_url = \"https://x\"\ntoken = \"t\"\ninclude_packages = true")
+                .unwrap();
+        let with = build(&Fake(m), &paths, &cfg).unwrap();
+        let list = with.packages.as_ref().unwrap();
+        assert_eq!(list.len(), 8);
+        assert_eq!(with.packages_count, Some(8));
+        assert_eq!(with.packages_hash.as_deref().map(str::len), Some(64));
+        assert!(list.windows(2).all(|w| w[0].name <= w[1].name), "sortiert");
     }
 }

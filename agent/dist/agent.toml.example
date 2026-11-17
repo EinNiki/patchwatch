@@ -1,7 +1,8 @@
 # /etc/patchwatch/agent.toml  (enthält keinen Token; der liegt in /etc/patchwatch/token, ändern mit: sudo patchwatch-agent set-token)
 server_url = "https://patchwatch.example.org"
-# Liste aller installierten Pakete mitsenden (für die spätere CVE-Matrix über alle Pakete)
-include_packages = false
+# Liste der installierten Pakete mitsenden (Reiter "Pakete" je Host, Übersicht "Pakete"). Die volle Liste geht nur dann
+# an den Server, wenn sie sich geändert hat (sonst nur ein Hash); höchstens 20.000 Pakete. Ohne diese Zeile gilt "false".
+include_packages = true
 timeout_secs = 30
 # Check-in: fragt den Server regelmäßig, ob ein Report gewünscht ist ("Jetzt aktualisieren" in der Web-UI).
 # Der Server kann nur "Report jetzt senden" mitteilen. Abschalten: checkin_enabled = false

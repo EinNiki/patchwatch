@@ -3,6 +3,7 @@ mod cmd;
 mod collect;
 mod config;
 mod error;
+mod pkgstate;
 mod report;
 mod send;
 mod setcmd;
@@ -94,6 +95,12 @@ fn run() -> Result<(), AgentError> {
 
     let cfg = config::Config::load(&config_path)?;
     let build = || report::build(&cmd::System, &report::system_paths(), &cfg);
+    // Zum Senden: die volle Paketliste nur, wenn sie sich seit der letzten Übertragung geändert hat.
+    let build_for_send = || {
+        let mut r = build()?;
+        pkgstate::gate(pkgstate::state_dir().as_deref(), &mut r);
+        Ok(r)
+    };
     if checkin_mode {
         if dry_run {
             return Err(AgentError::Config(
@@ -104,13 +111,13 @@ fn run() -> Result<(), AgentError> {
             return Ok(());
         }
         let token = cfg.resolve_token()?;
-        let r = checkin::run_system(&cfg, &token, build).map(|_| ());
+        let r = checkin::run_system(&cfg, &token, build_for_send).map(|_| ());
         if r.is_err() {
             status::record_run(&r);
         }
         return r;
     }
-    let report = build()?;
+    let mut report = build()?;
     if dry_run {
         let json = serde_json::to_string_pretty(&report)
             .map_err(|e| AgentError::Collect(e.to_string()))?;
@@ -118,7 +125,10 @@ fn run() -> Result<(), AgentError> {
         return Ok(());
     }
     let token = cfg.resolve_token()?;
-    let r = send::send(&cfg, &token, &report);
+    pkgstate::gate(pkgstate::state_dir().as_deref(), &mut report);
+    let r = send::send(&cfg, &token, &report).map(|reply| {
+        pkgstate::delivered(pkgstate::state_dir().as_deref(), &reply);
+    });
     status::record_run(&r);
     r
 }
