@@ -69,7 +69,7 @@ pub async fn roles(_: Authed<authz::p::UsersManage>) -> Json<Value> {
     use Permission::*;
     // (Gruppe, [(Recht, Beschriftung, Erklärung)]): Quelle der Wahrheit für die Oberfläche (Schalter und Vorlagen).
     type Entry = (Permission, &'static str, &'static str);
-    let groups: [(&str, &[Entry]); 6] = [
+    let groups: [(&str, &[Entry]); 7] = [
         (
             "Hosts",
             &[
@@ -82,6 +82,13 @@ pub async fn roles(_: Authed<authz::p::UsersManage>) -> Json<Value> {
         (
             "Agents",
             &[(AgentsTokens, "Agent-Token erneuern", "Das Token eines Agents ersetzen; das alte gilt sofort nicht mehr.")],
+        ),
+        (
+            "Container",
+            &[
+                (ContainersRead, "Container ansehen", "Docker-Container und Image-Versionen der Hosts lesen."),
+                (ContainersCheck, "Image-Versionen prüfen", "Eine Prüfung der Image-Versionen bei der Registry anstoßen (es wird nie etwas aktualisiert)."),
+            ],
         ),
         (
             "CVEs und Quellen",

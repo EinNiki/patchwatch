@@ -11,6 +11,8 @@ pub enum Permission {
     HostsDelete,
     HostsRun,
     AgentsTokens,
+    ContainersRead,
+    ContainersCheck,
     CvesRead,
     CvesWatch,
     SourcesRead,
@@ -31,12 +33,14 @@ pub enum Permission {
 use Permission::*;
 
 /// Alle Rechte (Reihenfolge = Anzeige in der Rechtevorschau).
-pub const ALL: [Permission; 20] = [
+pub const ALL: [Permission; 22] = [
     HostsRead,
     HostsWrite,
     HostsDelete,
     HostsRun,
     AgentsTokens,
+    ContainersRead,
+    ContainersCheck,
     CvesRead,
     CvesWatch,
     SourcesRead,
@@ -63,6 +67,8 @@ impl Permission {
             HostsDelete => "hosts.delete",
             HostsRun => "hosts.run",
             AgentsTokens => "agents.tokens",
+            ContainersRead => "containers.read",
+            ContainersCheck => "containers.check",
             CvesRead => "cves.read",
             CvesWatch => "cves.watch",
             SourcesRead => "sources.read",
@@ -95,14 +101,15 @@ impl Permission {
         match self {
             HostsWrite | HostsRun | AgentsTokens => &[HostsRead],
             HostsDelete => &[HostsWrite],
+            ContainersCheck => &[ContainersRead],
             CvesWatch => &[CvesRead],
             SourcesWrite | SourcesRun => &[SourcesRead],
             SourcesSecrets => &[SourcesWrite],
             ChannelsWrite | ChannelsTest => &[ChannelsRead],
             ChannelsSecrets => &[ChannelsWrite],
             SettingsWrite | OidcManage => &[SettingsRead],
-            HostsRead | CvesRead | SourcesRead | ChannelsRead | SettingsRead | UsersManage
-            | AuditRead => &[],
+            HostsRead | ContainersRead | CvesRead | SourcesRead | ChannelsRead | SettingsRead
+            | UsersManage | AuditRead => &[],
         }
     }
 
@@ -216,7 +223,7 @@ macro_rules! markers {
 /// Marker-Typen für `Authed<authz::p::HostsRead>` usw.
 pub mod p {
     markers! {
-        HostsRead, HostsWrite, HostsDelete, HostsRun, AgentsTokens, CvesRead, CvesWatch, SourcesRead, SourcesWrite,
+        HostsRead, HostsWrite, HostsDelete, HostsRun, AgentsTokens, ContainersRead, ContainersCheck, CvesRead, CvesWatch, SourcesRead, SourcesWrite,
         SourcesRun, SourcesSecrets, ChannelsRead, ChannelsWrite, ChannelsTest, ChannelsSecrets, SettingsRead, SettingsWrite, UsersManage, OidcManage, AuditRead,
     }
 }

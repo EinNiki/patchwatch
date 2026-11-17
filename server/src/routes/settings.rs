@@ -66,6 +66,9 @@ pub async fn get(
         "report_retention_max_days": RETENTION_RANGE.end(),
         "stale_after_hours": schedule::stale_after_hours(&st.pool, st.cfg.stale_after_hours).await,
         "stale_after_default_hours": st.cfg.stale_after_hours,
+        "container_interval_hours": schedule::container_interval_hours(&st.pool).await,
+        "container_interval_min_hours": schedule::CONTAINER_HOURS_RANGE.start(),
+        "container_interval_max_hours": schedule::CONTAINER_HOURS_RANGE.end(),
         "stale_after_min_hours": schedule::STALE_HOURS_RANGE.start(),
         "stale_after_max_hours": schedule::STALE_HOURS_RANGE.end(),
         "feeds": feeds,
@@ -86,6 +89,7 @@ pub struct Body {
     session_ttl_hours: Option<i64>,
     report_retention_days: Option<i64>,
     stale_after_hours: Option<i64>,
+    container_interval_hours: Option<i64>,
     /// Quelle -> Minuten.
     feed_intervals: Option<BTreeMap<String, i64>>,
     /// Quelle -> Minuten des täglichen Massendaten-Imports (nur Hybridquellen).
@@ -110,6 +114,9 @@ pub async fn put(
     }
     if let Some(h) = body.stale_after_hours {
         schedule::validate_stale_hours(h).map_err(ApiError::BadRequest)?;
+    }
+    if let Some(h) = body.container_interval_hours {
+        schedule::validate_container_hours(h).map_err(ApiError::BadRequest)?;
     }
     if let Some(h) = body.session_ttl_hours {
         if !super::auth::SESSION_TTL_RANGE.contains(&h) {
@@ -172,6 +179,9 @@ pub async fn put(
     }
     if let Some(h) = body.stale_after_hours {
         schedule::set(&mut *tx, schedule::STALE_KEY, &json!(h)).await?;
+    }
+    if let Some(h) = body.container_interval_hours {
+        schedule::set(&mut *tx, schedule::CONTAINERS_KEY, &json!(h)).await?;
     }
     for (source, minutes) in body.feed_intervals.iter().flatten() {
         schedule::set(&mut *tx, &schedule::feed_key(source), &json!(minutes)).await?;

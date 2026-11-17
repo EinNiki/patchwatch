@@ -1,5 +1,6 @@
 //! Registry-Prüfung im Hintergrund: ein Abruf je (Registry, Repository, Tag) für alle Hosts, Zwischenspeicher in
 //! `container_image_checks`, Fehler mit Wartezeit, Abruflimit für Docker Hub. Es wird nie ein Image gezogen.
+use super::announce;
 use super::eval::{Base, PlatformFacts};
 use super::reference;
 use super::registry::{RegError, Registries, Session};
@@ -40,14 +41,15 @@ struct Wanted {
     variant: Option<String>,
 }
 
-type Key = (String, String, String);
+/// (Registry, Repository, Tag)
+pub type Key = (String, String, String);
 
 /// Alle zu prüfenden Tags der sichtbaren Container (nach Registry, Repository, Tag gruppiert).
 /// Je Schlüssel die Container (mit Plattform und lokalen Digests), die diese Prüfung braucht.
 async fn wanted(pool: &PgPool, now: DateTime<Utc>) -> sqlx::Result<BTreeMap<Key, Vec<Wanted>>> {
     let rows: Vec<Wanted> = sqlx::query_as(
-        "SELECT DISTINCT image_ref, repo_digests, os, arch, variant FROM host_containers \
-         WHERE last_seen > $1 AND image_ref <> ''",
+        "SELECT DISTINCT c.image_ref, c.repo_digests, c.os, c.arch, c.variant FROM host_containers c \
+         JOIN hosts h ON h.id = c.host_id WHERE c.last_seen > $1 AND h.docker_state = 'ok' AND c.image_ref <> ''",
     )
     .bind(now - Duration::days(VISIBLE_DAYS))
     .fetch_all(pool)
@@ -58,7 +60,9 @@ async fn wanted(pool: &PgPool, now: DateTime<Utc>) -> sqlx::Result<BTreeMap<Key,
             continue;
         };
         // Mit Digest festgelegt, unbekannte Registry oder nicht vergleichbarer Tag: keine Anfrage.
-        let Some(tag) = r.tag.clone() else { continue };
+        let Some(tag) = r.tag.clone().filter(|_| r.digest.is_none()) else {
+            continue;
+        };
         if !r.supported() || tags::classify(&tag) == Kind::Incomparable {
             continue;
         }
@@ -359,61 +363,122 @@ pub async fn run_due(
     Ok(sum)
 }
 
-/// Lädt die gespeicherten Tatsachen zu einem Tag (für die Bewertung).
-pub async fn load_facts(
-    pool: &PgPool,
-    key: &Key,
-    platform: Option<&str>,
-) -> sqlx::Result<(Option<Base>, Option<PlatformFacts>)> {
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        status: String,
-        error: Option<String>,
-        registry_digest: Option<String>,
-        manifest_kind: Option<String>,
-        newest_patch: Option<String>,
-        newest_minor: Option<String>,
-        newest_major: Option<String>,
-        tags_incomplete: bool,
-        platform_config_digest: Option<String>,
-    }
-    let q = "SELECT status, error, registry_digest, manifest_kind, newest_patch, newest_minor, newest_major, tags_incomplete, \
-             platform_config_digest FROM container_image_checks WHERE registry = $1 AND repository = $2 AND tag = $3 AND platform = $4";
-    let base: Option<Row> = sqlx::query_as(q)
-        .bind(&key.0)
-        .bind(&key.1)
-        .bind(&key.2)
-        .bind("")
-        .fetch_optional(pool)
+/// Alle gespeicherten Tatsachen der Registry-Prüfungen (klein: je Image und Plattform eine Zeile), für die Bewertung
+/// vieler Container mit einer einzigen Abfrage.
+pub struct Facts {
+    rows: BTreeMap<(String, String, String, String), Stored>,
+}
+
+struct Stored {
+    base: Base,
+    platform: PlatformFacts,
+    checked_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct FactRow {
+    registry: String,
+    repository: String,
+    tag: String,
+    platform: String,
+    checked_at: DateTime<Utc>,
+    status: String,
+    error: Option<String>,
+    registry_digest: Option<String>,
+    manifest_kind: Option<String>,
+    newest_patch: Option<String>,
+    newest_minor: Option<String>,
+    newest_major: Option<String>,
+    tags_incomplete: bool,
+    platform_config_digest: Option<String>,
+}
+
+impl Facts {
+    pub async fn load(pool: &PgPool) -> sqlx::Result<Self> {
+        let rows: Vec<FactRow> = sqlx::query_as(
+            "SELECT registry, repository, tag, platform, checked_at, status, error, registry_digest, manifest_kind, \
+             newest_patch, newest_minor, newest_major, tags_incomplete, platform_config_digest FROM container_image_checks",
+        )
+        .fetch_all(pool)
         .await?;
-    let plat: Option<Row> = match platform {
-        Some(p) => {
-            sqlx::query_as(q)
-                .bind(&key.0)
-                .bind(&key.1)
-                .bind(&key.2)
-                .bind(p)
-                .fetch_optional(pool)
-                .await?
+        let rows = rows
+            .into_iter()
+            .map(|r| {
+                let k = (r.registry, r.repository, r.tag, r.platform);
+                let stored = Stored {
+                    base: Base {
+                        status: r.status.clone(),
+                        error: r.error,
+                        registry_digest: r.registry_digest,
+                        manifest_kind: r.manifest_kind,
+                        newest: Newest {
+                            patch: r.newest_patch,
+                            minor: r.newest_minor,
+                            major: r.newest_major,
+                        },
+                        tags_incomplete: r.tags_incomplete,
+                    },
+                    platform: PlatformFacts {
+                        status: r.status,
+                        config_digest: r.platform_config_digest,
+                    },
+                    checked_at: r.checked_at,
+                };
+                (k, stored)
+            })
+            .collect();
+        Ok(Self { rows })
+    }
+
+    fn get(&self, key: &Key, platform: &str) -> Option<&Stored> {
+        self.rows.get(&(
+            key.0.clone(),
+            key.1.clone(),
+            key.2.clone(),
+            platform.to_owned(),
+        ))
+    }
+
+    /// Stand der Registry zu einem Tag und Zeitpunkt der Prüfung.
+    pub fn base(&self, key: &Key) -> Option<(&Base, DateTime<Utc>)> {
+        self.get(key, "").map(|s| (&s.base, s.checked_at))
+    }
+
+    /// Manifest der Host-Plattform (`os/arch[/variant]`), falls es abgefragt wurde.
+    pub fn platform(&self, key: &Key, platform: &str) -> Option<&PlatformFacts> {
+        self.get(key, platform).map(|s| &s.platform)
+    }
+}
+
+/// Hintergrundschleife: alle fünf Minuten die fälligen Tags prüfen (das Intervall stellt man in den Einstellungen ein)
+/// und neue Stände ankündigen. Ohne Container mit Docker-Erfassung passiert nichts und es wird nichts abgefragt.
+pub async fn run(state: crate::state::AppState) {
+    loop {
+        let hours = crate::schedule::container_interval_hours(&state.pool).await;
+        let now = Utc::now();
+        match run_due(
+            &state.pool,
+            &state.registries,
+            now,
+            Duration::hours(hours),
+            None,
+        )
+        .await
+        {
+            Ok(s) if s.checked + s.failed + s.deferred > 0 => {
+                tracing::info!(
+                    geprueft = s.checked,
+                    fehlgeschlagen = s.failed,
+                    verschoben = s.deferred,
+                    "Image-Prüfung abgeschlossen"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "Image-Prüfung fehlgeschlagen"),
         }
-        None => None,
-    };
-    Ok((
-        base.map(|r| Base {
-            status: r.status,
-            error: r.error,
-            registry_digest: r.registry_digest,
-            manifest_kind: r.manifest_kind,
-            newest: Newest {
-                patch: r.newest_patch,
-                minor: r.newest_minor,
-                major: r.newest_major,
-            },
-            tags_incomplete: r.tags_incomplete,
-        }),
-        plat.map(|r| PlatformFacts {
-            status: r.status,
-            config_digest: r.platform_config_digest,
-        }),
-    ))
+        if let Err(e) = announce::announce(&state.pool, now).await {
+            tracing::warn!(error = %e, "Ankündigung neuer Images fehlgeschlagen");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+    }
 }

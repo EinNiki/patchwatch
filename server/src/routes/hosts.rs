@@ -16,7 +16,7 @@ const HOST_SELECT: &str = "SELECT h.id, h.name, h.hostname, h.os_id, h.os_versio
     (COALESCE(h.reboot_required_file, false) OR COALESCE(h.reboot_needed_kernel, false)) AS reboot_needed, \
     h.updates_pending, h.updates_security, h.uptime_seconds, h.is_proxmox, h.proxmox_version, \
     h.status, h.status_changed_at, h.last_report_at, h.created_at, \
-    h.agent_version, h.last_checkin_at, h.report_requested_at, \
+    h.agent_version, h.last_checkin_at, h.report_requested_at, h.docker_state, \
     COALESCE(c.vulnerable, 0) AS cve_vulnerable, COALESCE(c.fix_pending, 0) AS cve_fix_pending, \
     COALESCE(c.unknown, 0) AS cve_unknown, COALESCE(c.reboot, 0) AS cve_reboot, COALESCE(c.fixed, 0) AS cve_fixed \
     FROM hosts h LEFT JOIN LATERAL ( \
@@ -92,6 +92,11 @@ pub struct HostRow {
     cve_unknown: i64,
     cve_reboot: i64,
     cve_fixed: i64,
+    /// Zustand der Docker-Erfassung (`ok`, `unavailable`); `null` = nicht aktiviert oder kein Recht `containers.read`.
+    docker_state: Option<String>,
+    /// Container mit neuerem Image (nur mit Recht `containers.read` und aktiver Docker-Erfassung).
+    #[sqlx(skip)]
+    containers_outdated: Option<i64>,
     /// Warum die CVE-Lage unbekannt ist ("Quelle Ubuntu unvollständig / veraltet / fehlerhaft"); sonst `null`.
     #[sqlx(skip)]
     cve_source_issue: Option<String>,
@@ -111,18 +116,48 @@ async fn with_source_issues(st: &AppState, mut rows: Vec<HostRow>) -> ApiResult<
     Ok(rows)
 }
 
+/// Docker-Angaben nur mit dem Recht `containers.read`: Zustand und Zahl der Container mit neuerem Image.
+async fn with_containers(
+    st: &AppState,
+    admin: &crate::extract::Admin,
+    mut rows: Vec<HostRow>,
+    host: Option<i64>,
+) -> ApiResult<Vec<HostRow>> {
+    if !admin.can(authz::Permission::ContainersRead) {
+        for r in &mut rows {
+            r.docker_state = None;
+        }
+        return Ok(rows);
+    }
+    if rows.iter().any(|r| r.docker_state.as_deref() == Some("ok")) {
+        let mut outdated: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+        for c in crate::containers::view::load(&st.pool, host, Utc::now()).await? {
+            if c.verdict.is_update() {
+                *outdated.entry(c.host_id).or_default() += 1;
+            }
+        }
+        for r in &mut rows {
+            if r.docker_state.as_deref() == Some("ok") {
+                r.containers_outdated = Some(outdated.get(&r.id).copied().unwrap_or(0));
+            }
+        }
+    }
+    Ok(rows)
+}
+
 pub async fn list(
-    _: Authed<authz::p::HostsRead>,
+    Authed(admin, _): Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
 ) -> ApiResult<Json<Vec<HostRow>>> {
     let rows = sqlx::query_as::<_, HostRow>(&format!("{HOST_SELECT} ORDER BY h.name"))
         .fetch_all(&st.pool)
         .await?;
-    Ok(Json(with_source_issues(&st, rows).await?))
+    let rows = with_source_issues(&st, rows).await?;
+    Ok(Json(with_containers(&st, &admin, rows, None).await?))
 }
 
 pub async fn detail(
-    _: Authed<authz::p::HostsRead>,
+    Authed(admin, _): Authed<authz::p::HostsRead>,
     State(st): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<HostRow>> {
@@ -131,7 +166,8 @@ pub async fn detail(
         .fetch_optional(&st.pool)
         .await?
         .ok_or(ApiError::NotFound)?;
-    let mut rows = with_source_issues(&st, vec![row]).await?;
+    let rows = with_source_issues(&st, vec![row]).await?;
+    let mut rows = with_containers(&st, &admin, rows, Some(id)).await?;
     Ok(Json(rows.remove(0)))
 }
 

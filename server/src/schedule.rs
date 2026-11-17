@@ -12,8 +12,11 @@ use std::ops::RangeInclusive;
 pub const FEED_INTERVAL_RANGE: RangeInclusive<i64> = 15..=1440;
 pub const REPORT_EVERY_HOURS_RANGE: RangeInclusive<i64> = 1..=168;
 pub const STALE_HOURS_RANGE: RangeInclusive<i64> = 1..=720;
+/// Prüfintervall der Container-Images bei den Registries (Stunden).
+pub const CONTAINER_HOURS_RANGE: RangeInclusive<i64> = 1..=168;
 
 pub const STALE_KEY: &str = "stale_after_hours";
+pub const CONTAINERS_KEY: &str = "schedule.containers.interval_hours";
 pub const REPORTS_KEY: &str = "schedule.reports";
 pub const REPORTS_LAST_RUN_KEY: &str = "schedule.reports.last_run";
 
@@ -167,6 +170,18 @@ pub fn validate_stale_hours(hours: i64) -> Result<(), String> {
     }
 }
 
+pub fn validate_container_hours(hours: i64) -> Result<(), String> {
+    if CONTAINER_HOURS_RANGE.contains(&hours) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Image-Prüfung: {} bis {} Stunden",
+            CONTAINER_HOURS_RANGE.start(),
+            CONTAINER_HOURS_RANGE.end()
+        ))
+    }
+}
+
 async fn get(pool: &PgPool, key: &str) -> Option<Value> {
     sqlx::query_scalar::<_, Value>("SELECT value FROM settings WHERE key = $1")
         .bind(key)
@@ -218,6 +233,15 @@ pub async fn stale_after_hours(pool: &PgPool, fallback: i64) -> i64 {
         .and_then(|v| v.as_i64())
         .filter(|h| STALE_HOURS_RANGE.contains(h))
         .unwrap_or(fallback)
+}
+
+/// Prüfintervall der Container-Images in Stunden (Standard 6, siehe `containers::worker`).
+pub async fn container_interval_hours(pool: &PgPool) -> i64 {
+    get(pool, CONTAINERS_KEY)
+        .await
+        .and_then(|v| v.as_i64())
+        .filter(|h| CONTAINER_HOURS_RANGE.contains(h))
+        .unwrap_or(crate::containers::worker::DEFAULT_INTERVAL_HOURS)
 }
 
 pub async fn stale_after(pool: &PgPool, fallback: i64) -> Duration {
@@ -327,6 +351,10 @@ mod tests {
         assert!(validate_stale_hours(0).is_err());
         assert!(validate_stale_hours(1).is_ok());
         assert!(validate_stale_hours(720).is_ok());
+        assert!(validate_container_hours(0).is_err());
+        assert!(validate_container_hours(1).is_ok());
+        assert!(validate_container_hours(168).is_ok());
+        assert!(validate_container_hours(169).is_err());
         assert!(validate_stale_hours(721).is_err());
     }
 

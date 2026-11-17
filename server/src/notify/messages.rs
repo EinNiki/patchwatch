@@ -168,6 +168,41 @@ pub fn security_update_message(p: &serde_json::Value) -> Message {
     }
 }
 
+/// Neues Image zu einer Referenz (einmal je Referenz und neuem Stand). Nur Hinweis, es wird nie etwas aktualisiert.
+pub fn image_update_message(p: &serde_json::Value) -> Message {
+    let count = p
+        .get("containers")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let hosts_count = p
+        .get("hosts_count")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let names: Vec<&str> = p
+        .get("hosts")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    let more = hosts_count - names.len() as i64;
+    let mut hosts = names.join(", ");
+    if more > 0 {
+        hosts.push_str(&format!(" und {more} weitere"));
+    }
+    let mut body = format!(
+        "{count} Container auf {hosts_count} Host{} ({hosts}) laufen mit einem älteren Stand.",
+        if hosts_count == 1 { "" } else { "s" }
+    );
+    if let Some(n) = p.get("newer").and_then(serde_json::Value::as_str) {
+        body.push_str(&format!(" Neueste Version: {n}."));
+    }
+    Message {
+        title: format!("Neues Image verfügbar: {}", str_of(p, "image")),
+        body,
+        priority: 3,
+        tags: vec!["package"],
+    }
+}
+
 pub fn test_message() -> Message {
     Message {
         title: "patchwatch: Testnachricht".to_owned(),

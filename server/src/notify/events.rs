@@ -1,8 +1,8 @@
 //! Ereignisarten, die ein Kanal abonnieren kann, und die Zuordnung der internen Events dazu.
 
 use super::messages::{
-    cve_change_message, feed_failing_message, host_cve_message, security_update_message,
-    status_change_message, Message,
+    cve_change_message, feed_failing_message, host_cve_message, image_update_message,
+    security_update_message, status_change_message, Message,
 };
 use serde_json::Value;
 use std::collections::HashSet;
@@ -14,8 +14,9 @@ pub const FIX_AVAILABLE: &str = "fix_available";
 pub const FEED_FAILING: &str = "feed_failing";
 pub const DAILY_SUMMARY: &str = "daily_summary";
 pub const SECURITY_UPDATE_NEW: &str = "security_update_new";
+pub const IMAGE_UPDATE: &str = "image_update";
 
-pub const ALL: [&str; 7] = [
+pub const ALL: [&str; 8] = [
     HOST_STATUS,
     AGENT_SILENT,
     WATCHLIST_CVE,
@@ -23,10 +24,11 @@ pub const ALL: [&str; 7] = [
     FEED_FAILING,
     DAILY_SUMMARY,
     SECURITY_UPDATE_NEW,
+    IMAGE_UPDATE,
 ];
 
 /// Ereignisarten, die für neu angelegte Kanäle nicht vorausgewählt sind (sie können häufig auftreten).
-pub const DEFAULT_OFF: [&str; 1] = [SECURITY_UPDATE_NEW];
+pub const DEFAULT_OFF: [&str; 2] = [SECURITY_UPDATE_NEW, IMAGE_UPDATE];
 
 fn str_of<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
@@ -83,6 +85,7 @@ pub fn route(
         }
         "feed_failing" => Some((FEED_FAILING, feed_failing_message(payload))),
         "security_updates_new" => Some((SECURITY_UPDATE_NEW, security_update_message(payload))),
+        "image_update" => Some((IMAGE_UPDATE, image_update_message(payload))),
         _ => None,
     }
 }
@@ -211,7 +214,23 @@ mod tests {
             m.body
         );
         assert!(ALL.contains(&SECURITY_UPDATE_NEW));
-        assert_eq!(DEFAULT_OFF, [SECURITY_UPDATE_NEW]);
+        assert_eq!(DEFAULT_OFF, [SECURITY_UPDATE_NEW, IMAGE_UPDATE]);
+    }
+
+    #[test]
+    fn new_images_have_their_own_category_and_are_off_by_default() {
+        let ev = json!({"image": "nginx:1.27.3", "containers": 3, "hosts": ["a", "b"], "hosts_count": 2,
+            "newer": "1.27.5"});
+        let (cat, m) = route("image_update", &ev, false).unwrap();
+        assert_eq!(cat, IMAGE_UPDATE);
+        assert_eq!(m.title, "Neues Image verfügbar: nginx:1.27.3");
+        assert!(
+            m.body.contains("3 Container auf 2 Hosts (a, b)"),
+            "{}",
+            m.body
+        );
+        assert!(m.body.contains("1.27.5"), "{}", m.body);
+        assert!(ALL.contains(&IMAGE_UPDATE) && DEFAULT_OFF.contains(&IMAGE_UPDATE));
     }
 
     #[test]

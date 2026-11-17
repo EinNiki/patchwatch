@@ -25,6 +25,8 @@ pub struct AppState {
     pub checkin_slots: Arc<tokio::sync::Semaphore>,
     /// Öffentliche Schlüssel des OIDC-Anbieters (JWKS) mit Ablauf und Neuabruf-Begrenzung.
     pub jwks: Arc<crate::oidc::JwksCache>,
+    /// Zugang zu den Registries für die Image-Prüfung (Tests setzen hier einen lokalen Mock).
+    pub registries: crate::containers::registry::Registries,
 }
 
 /// Globale Obergrenze offener Check-in-Long-Polls.
@@ -52,6 +54,7 @@ impl AppState {
             checkin_waiters: Arc::default(),
             checkin_slots: Arc::new(tokio::sync::Semaphore::new(MAX_OPEN_CHECKINS)),
             jwks: Arc::default(),
+            registries: crate::containers::registry::Registries::production(),
         })
     }
 }

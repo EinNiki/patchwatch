@@ -1,5 +1,6 @@
 mod agent;
 mod auth;
+mod containers;
 pub mod cves;
 mod feeds;
 mod health;
@@ -104,6 +105,9 @@ pub fn router(state: AppState) -> Router {
         .route("/hosts/{id}/updates", get(hosts::updates))
         .route("/hosts/{id}/packages", get(packages::host_packages))
         .route("/packages", get(packages::overview))
+        .route("/hosts/{id}/containers", get(containers::host_containers))
+        .route("/containers", get(containers::overview))
+        .route("/containers/check", post(containers::check))
         .route(
             "/hosts/{id}/cves/{cve}/review",
             put(hosts::review).delete(hosts::unreview),

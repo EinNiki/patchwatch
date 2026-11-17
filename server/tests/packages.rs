@@ -666,6 +666,7 @@ async fn a_new_channel_does_not_subscribe_to_the_security_update_event(pool: PgP
     assert!(!all.is_empty());
     for ch in all {
         assert!(!ch.subscribes("security_update_new"), "{}", ch.kind);
+        assert!(!ch.subscribes("image_update"), "{}", ch.kind);
         assert!(
             ch.subscribes("host_status"),
             "andere Ereignisse bleiben vorausgewählt"

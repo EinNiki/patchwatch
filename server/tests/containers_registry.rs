@@ -6,9 +6,9 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
 use axum::Router;
 use chrono::{Duration, Utc};
-use patchwatch_server::containers::eval::{evaluate, Local, Verdict};
+use patchwatch_server::containers::eval::{evaluate, Base, Local, PlatformFacts, Verdict};
 use patchwatch_server::containers::registry::Registries;
-use patchwatch_server::containers::worker::{load_facts, run_due, DOCKER_HUB_GET_BUDGET};
+use patchwatch_server::containers::worker::{run_due, Facts, DOCKER_HUB_GET_BUDGET};
 use sqlx::PgPool;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -121,10 +121,12 @@ fn standard(index_digest: &'static str, arm_cfg: &'static str) -> Mock {
 }
 
 async fn host(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("INSERT INTO hosts (name, token_hash) VALUES ('h', 'x') RETURNING id")
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        "INSERT INTO hosts (name, token_hash, docker_state) VALUES ('h', 'x', 'ok') RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -153,6 +155,19 @@ async fn container(
     .execute(pool)
     .await
     .unwrap();
+}
+
+/// Gespeicherte Tatsachen zu einem Tag (und optional einer Plattform) aus der Datenbank.
+async fn load_facts(
+    pool: &PgPool,
+    key: &(String, String, String),
+    platform: Option<&str>,
+) -> sqlx::Result<(Option<Base>, Option<PlatformFacts>)> {
+    let f = Facts::load(pool).await?;
+    Ok((
+        f.base(key).map(|b| b.0.clone()),
+        platform.and_then(|p| f.platform(key, p).cloned()),
+    ))
 }
 
 fn key(tag: &str, repo: &str) -> (String, String, String) {
@@ -307,11 +322,12 @@ async fn one_fetch_for_many_hosts_and_cached(pool: PgPool) {
     let mock = standard(IDX, CFG_ARM);
     let regs = Registries::for_tests(&serve(mock.clone()).await);
     let h1 = host(&pool).await;
-    let h2: i64 =
-        sqlx::query_scalar("INSERT INTO hosts (name, token_hash) VALUES ('h2', 'y') RETURNING id")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let h2: i64 = sqlx::query_scalar(
+        "INSERT INTO hosts (name, token_hash, docker_state) VALUES ('h2', 'y', 'ok') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let d = format!("app@{IDX}");
     container(
         &pool,
