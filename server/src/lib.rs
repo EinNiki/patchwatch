@@ -3,6 +3,7 @@ pub mod audit;
 pub mod authz;
 pub mod avatar;
 pub mod config;
+pub mod containers;
 pub mod cve;
 pub mod db;
 pub mod error;

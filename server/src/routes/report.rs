@@ -35,6 +35,8 @@ struct ReportIn {
     packages_truncated: bool,
     /// Schema 2: Unix-Sekunden der jüngsten apt-Paketliste des Hosts.
     apt_lists_updated_unix: Option<i64>,
+    /// Nur bei eingeschaltetem Docker (Opt-in im Agent); fehlt der Block, ist Docker aus.
+    docker: Option<crate::containers::intake::DockerIn>,
 }
 
 #[derive(Deserialize)]
@@ -222,6 +224,9 @@ fn validate(r: &ReportIn) -> ApiResult<()> {
             }
         }
     }
+    if let Some(d) = &r.docker {
+        crate::containers::intake::validate(d)?;
+    }
     if r.uptime_seconds.is_some_and(|u| u < 0) {
         return Err(bad("ungültige Uptime"));
     }
@@ -319,6 +324,8 @@ pub async fn post_report(
     // Die Paketliste gehört nicht in die Historie.
     if let Some(o) = raw.as_object_mut() {
         o.remove("packages");
+        // Container gehören in eigene Tabellen, nicht in die Historie.
+        o.remove("docker");
         if let Some(u) = o.get_mut("updates").and_then(|u| u.as_object_mut()) {
             u.remove("items");
         }
@@ -440,6 +447,8 @@ pub async fn post_report(
         .execute(&mut *tx)
         .await?;
     }
+
+    crate::containers::intake::store(&mut tx, host_id, rep.docker.as_ref(), now).await?;
 
     let stale_after = crate::schedule::stale_after(&st.pool, st.cfg.stale_after_hours).await;
     let status = hostops::recompute_host(&mut tx, host_id, stale_after, now).await?;
