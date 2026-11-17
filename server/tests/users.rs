@@ -138,6 +138,8 @@ fn matrix() -> Vec<(Method, &'static str, Permission, bool)> {
         (Method::GET, "/api/v1/hosts/1/cves", HostsRead, true),
         (Method::GET, "/api/v1/hosts/1/cves/groups", HostsRead, true),
         (Method::GET, "/api/v1/hosts/1/updates", HostsRead, true),
+        (Method::GET, "/api/v1/hosts/1/packages", HostsRead, true),
+        (Method::GET, "/api/v1/packages", HostsRead, true),
         (Method::GET, "/api/v1/matrix", HostsRead, true),
         (Method::POST, "/api/v1/hosts", HostsWrite, false),
         (Method::DELETE, "/api/v1/hosts/1", HostsDelete, true),

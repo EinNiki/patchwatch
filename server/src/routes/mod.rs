@@ -10,6 +10,7 @@ mod matrix;
 mod mfa;
 mod notifications;
 mod oidc;
+mod packages;
 mod passkey;
 mod report;
 pub mod settings;
@@ -101,6 +102,8 @@ pub fn router(state: AppState) -> Router {
         .route("/hosts/{id}/cves", get(hosts::cves))
         .route("/hosts/{id}/cves/groups", get(hosts::cve_groups))
         .route("/hosts/{id}/updates", get(hosts::updates))
+        .route("/hosts/{id}/packages", get(packages::host_packages))
+        .route("/packages", get(packages::overview))
         .route(
             "/hosts/{id}/cves/{cve}/review",
             put(hosts::review).delete(hosts::unreview),

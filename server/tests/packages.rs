@@ -440,3 +440,161 @@ async fn migration_0027_keeps_existing_rows_and_adopts_old_update_lists(pool: Pg
         .unwrap();
     assert!(listed);
 }
+
+async fn get(app: &Router, session: &str, uri: &str) -> Resp {
+    call(app, Method::GET, uri, &[("cookie", session)], None).await
+}
+
+fn names(r: &Resp) -> Vec<String> {
+    r.json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn host_packages_merge_filter_sort_and_page(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    let id = add_host(&pool, "web1").await;
+    let pk = vec![
+        pkg("bash", "5.2", "amd64"),
+        pkg("openssl", "3.0.1", "amd64"),
+        pkg("curl", "8", "amd64"),
+        pkg("a_b", "1", "amd64"),
+    ];
+    send(&app, report(Some(pk), Some(HASH_A), Some(items()))).await;
+    let s = login(&app, &pool).await;
+    let base = format!("/api/v1/hosts/{id}/packages");
+
+    // Alle: installierte und das noch nicht installierte neue Paket, das zu entfernende steht auch drin.
+    let all = get(&app, &s, &base).await;
+    assert_eq!(all.json["total"], 6);
+    assert_eq!(
+        names(&all),
+        ["a_b", "bash", "curl", "newpkg", "oldpkg", "openssl"]
+    );
+    let h = &all.json["host"];
+    assert_eq!(
+        (
+            h["installed"].as_i64(),
+            h["updates"].as_i64(),
+            h["security"].as_i64(),
+            h["new"].as_i64()
+        ),
+        (Some(4), Some(3), Some(1), Some(1))
+    );
+    assert!(h["apt_lists_updated_at"].is_string());
+
+    // Nur mit Update / nur Sicherheit.
+    assert_eq!(
+        names(&get(&app, &s, &format!("{base}?update=1&sort=security&dir=desc")).await),
+        ["openssl", "newpkg", "oldpkg"]
+    );
+    let sec = get(&app, &s, &format!("{base}?security=1")).await;
+    assert_eq!(names(&sec), ["openssl"]);
+    assert_eq!(sec.json["items"][0]["installed"], "3.0.1");
+    assert_eq!(sec.json["items"][0]["candidate"], "3.0.2");
+    assert_eq!(sec.json["total"], 1);
+
+    // Suche: Platzhalterzeichen sind wörtlich (`_` trifft nur `a_b`, `%` nichts).
+    assert_eq!(
+        names(&get(&app, &s, &format!("{base}?q=a_b")).await),
+        ["a_b"]
+    );
+    assert_eq!(
+        get(&app, &s, &format!("{base}?q=%25")).await.json["total"],
+        0
+    );
+    assert_eq!(
+        names(&get(&app, &s, &format!("{base}?q=SSL")).await),
+        ["openssl"]
+    );
+
+    // Seiten und Richtung.
+    let page = get(&app, &s, &format!("{base}?limit=2&offset=2&dir=desc")).await;
+    assert_eq!(names(&page), ["newpkg", "curl"]);
+    assert_eq!(page.json["total"], 6);
+
+    // Sortierung nur aus der Liste, Einschleusen schlägt fehl; unbekannter Host = 404.
+    for bad in [
+        "sort=name;DROP%20TABLE%20hosts",
+        "sort=password",
+        "dir=sideways",
+    ] {
+        assert_eq!(
+            get(&app, &s, &format!("{base}?{bad}")).await.status,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+    assert_eq!(
+        get(
+            &app,
+            &s,
+            &format!("{base}?q=%27%3B%20DROP%20TABLE%20hosts%3B--")
+        )
+        .await
+        .json["total"],
+        0
+    );
+    let still: i64 = sqlx::query_scalar("SELECT count(*) FROM hosts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(still, 1);
+    assert_eq!(
+        get(&app, &s, "/api/v1/hosts/999999/packages").await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn overview_counts_hosts_versions_and_updates_across_hosts(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    let a = add_host(&pool, "web1").await;
+    let b: i64 = sqlx::query_scalar(
+        "INSERT INTO hosts (name, token_hash) VALUES ('web2', 'x') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    send(
+        &app,
+        report(
+            Some(vec![
+                pkg("openssl", "3.0.1", "amd64"),
+                pkg("bash", "5.2", "amd64"),
+            ]),
+            Some(HASH_A),
+            Some(items()),
+        ),
+    )
+    .await;
+    // Zweiter Host direkt in der Datenbank: andere Version, kein Update.
+    sqlx::query("INSERT INTO host_packages (host_id, name, version, last_seen) VALUES ($1, 'openssl', '3.0.0', now())")
+        .bind(b)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let _ = a;
+    let s = login(&app, &pool).await;
+    let all = get(&app, &s, "/api/v1/packages?q=openssl").await;
+    assert_eq!(
+        all.json["items"][0],
+        json!({"name": "openssl", "hosts": 2, "versions": 2, "updates": 1, "security": 1})
+    );
+    assert_eq!(
+        names(&get(&app, &s, "/api/v1/packages?security=1").await),
+        ["openssl"]
+    );
+    assert_eq!(
+        names(&get(&app, &s, "/api/v1/packages?update=1&sort=name").await),
+        ["newpkg", "oldpkg", "openssl"]
+    );
+    assert_eq!(
+        get(&app, &s, "/api/v1/packages?sort=1%3B--").await.status,
+        StatusCode::BAD_REQUEST
+    );
+}
