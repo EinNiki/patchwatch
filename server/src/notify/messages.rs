@@ -140,6 +140,34 @@ pub async fn daily_summary_message(pool: &sqlx::PgPool) -> sqlx::Result<Message>
     })
 }
 
+/// Neue Sicherheitsupdates auf einem Host (je Report gebündelt, höchstens fünf Namen).
+pub fn security_update_message(p: &serde_json::Value) -> Message {
+    let count = p
+        .get("count")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let names: Vec<&str> = p
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    let more = count - names.len() as i64;
+    let mut list = names.join(", ");
+    if more > 0 {
+        list.push_str(&format!(" und {more} weitere"));
+    }
+    Message {
+        title: format!("Neue Sicherheitsupdates auf Host {}", str_of(p, "name")),
+        body: format!(
+            "{count} neue{} Sicherheitsupdate{}: {list}",
+            if count == 1 { "s" } else { "" },
+            if count == 1 { "" } else { "s" }
+        ),
+        priority: 4,
+        tags: vec!["warning"],
+    }
+}
+
 pub fn test_message() -> Message {
     Message {
         title: "patchwatch: Testnachricht".to_owned(),

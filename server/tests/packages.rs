@@ -598,3 +598,77 @@ async fn overview_counts_hosts_versions_and_updates_across_hosts(pool: PgPool) {
         StatusCode::BAD_REQUEST
     );
 }
+
+async fn security_events(pool: &PgPool) -> Vec<Value> {
+    sqlx::query_scalar("SELECT payload FROM events WHERE kind = 'security_updates_new' ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+fn sec_item(name: &str) -> Value {
+    json!({"name": name, "kind": "upgrade", "from": "1", "to": "2", "origin": "Debian-Security:13/trixie-security", "security": true})
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn only_newly_appearing_security_updates_raise_the_event(pool: PgPool) {
+    let app = router(state(pool.clone()));
+    add_host(&pool, "web1").await;
+    // Erster Report: Bestand, keine Neuigkeit.
+    send(&app, report(None, None, Some(json!([sec_item("a")])))).await;
+    assert!(security_events(&pool).await.is_empty());
+    // Gleicher Stand: nichts. Dazu kommen b und ein normales Update: nur b zählt.
+    send(&app, report(None, None, Some(json!([sec_item("a")])))).await;
+    let plain = json!({"name": "p", "kind": "upgrade", "from": "1", "to": "2", "origin": "Debian:13/stable", "security": false});
+    send(
+        &app,
+        report(
+            None,
+            None,
+            Some(json!([sec_item("a"), sec_item("b"), plain])),
+        ),
+    )
+    .await;
+    let ev = security_events(&pool).await;
+    assert_eq!(ev.len(), 1);
+    assert_eq!(
+        (
+            ev[0]["count"].as_i64(),
+            &ev[0]["packages"],
+            ev[0]["name"].as_str()
+        ),
+        (Some(1), &json!(["b"]), Some("web1"))
+    );
+    // Später mehr als fünf auf einmal: gebündelt, fünf Namen, volle Zahl.
+    let many: Vec<Value> = ["a", "b"]
+        .iter()
+        .chain(["c", "d", "e", "f", "g", "h"].iter())
+        .map(|n| sec_item(n))
+        .collect();
+    send(&app, report(None, None, Some(json!(many)))).await;
+    let ev = security_events(&pool).await;
+    assert_eq!(ev.len(), 2);
+    assert_eq!(
+        (
+            ev[1]["count"].as_i64(),
+            ev[1]["packages"].as_array().unwrap().len()
+        ),
+        (Some(6), 5)
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_new_channel_does_not_subscribe_to_the_security_update_event(pool: PgPool) {
+    let st = state(pool.clone());
+    let all = patchwatch_server::notify::store::load_all(&pool, &st.cfg)
+        .await
+        .unwrap();
+    assert!(!all.is_empty());
+    for ch in all {
+        assert!(!ch.subscribes("security_update_new"), "{}", ch.kind);
+        assert!(
+            ch.subscribes("host_status"),
+            "andere Ereignisse bleiben vorausgewählt"
+        );
+    }
+}

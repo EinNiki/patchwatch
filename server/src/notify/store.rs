@@ -76,6 +76,7 @@ fn default_events(kind: &str) -> Vec<String> {
     events::ALL
         .iter()
         .filter(|e| kind != "browser" || **e != events::DAILY_SUMMARY)
+        .filter(|e| !events::DEFAULT_OFF.contains(e))
         .map(|e| (*e).to_owned())
         .collect()
 }

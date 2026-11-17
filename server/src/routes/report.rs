@@ -341,11 +341,12 @@ pub async fn post_report(
     let mut tx = st.pool.begin().await?;
     // Hat der Agent nur den Hash geschickt, der Server aber einen anderen Stand (oder keinen), fehlt die Liste hier:
     // der Agent soll sie beim nächsten Report mitsenden (z. B. nach einer Datenbank-Wiederherstellung).
-    let stored_hash: Option<String> =
-        sqlx::query_scalar("SELECT packages_hash FROM hosts WHERE id = $1 FOR UPDATE")
-            .bind(host_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    let (stored_hash, first_report): (Option<String>, bool) = sqlx::query_as(
+        "SELECT packages_hash, last_report_at IS NULL FROM hosts WHERE id = $1 FOR UPDATE",
+    )
+    .bind(host_id)
+    .fetch_one(&mut *tx)
+    .await?;
     let need_packages =
         rep.packages.is_none() && rep.packages_hash.is_some() && stored_hash != rep.packages_hash;
     sqlx::query(
@@ -390,6 +391,8 @@ pub async fn post_report(
         host_id,
         rep.updates.as_ref().and_then(|u| u.items.as_deref()),
         now,
+        // Der allererste Report eines Hosts meldet den Bestand, keine Neuigkeit.
+        !first_report,
     )
     .await?;
 
@@ -473,6 +476,7 @@ async fn store_updates(
     host_id: i64,
     items: Option<&[UpdateItemIn]>,
     now: chrono::DateTime<Utc>,
+    announce_new_security: bool,
 ) -> ApiResult<()> {
     let Some(items) = items else {
         sqlx::query("DELETE FROM host_updates WHERE host_id = $1")
@@ -486,6 +490,20 @@ async fn store_updates(
     let items: Vec<&UpdateItemIn> = items
         .iter()
         .filter(|i| seen.insert(i.name.as_str()))
+        .collect();
+    // Sicherheitsupdates, die vor diesem Report noch nicht als solche bekannt waren (neu oder jetzt als Sicherheit
+    // eingestuft). Nur diese lösen das Ereignis aus; ein gleichbleibender Stand meldet nichts erneut.
+    let known_security: std::collections::HashSet<String> =
+        sqlx::query_scalar("SELECT name FROM host_updates WHERE host_id = $1 AND security")
+            .bind(host_id)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect();
+    let fresh_security: Vec<&str> = items
+        .iter()
+        .filter(|i| i.security && i.kind() != "remove" && !known_security.contains(&i.name))
+        .map(|i| i.name.as_str())
         .collect();
     sqlx::query(
         "INSERT INTO host_updates (host_id, name, kind, installed, candidate, origin, security, first_seen, last_seen) \
@@ -510,6 +528,22 @@ async fn store_updates(
         .bind(now)
         .execute(&mut *tx)
         .await?;
+    if announce_new_security && !fresh_security.is_empty() {
+        // Höchstens fünf Namen in der Nutzlast; die Zahl nennt den vollen Umfang.
+        sqlx::query(
+            "INSERT INTO events (kind, payload) \
+             SELECT 'security_updates_new', jsonb_build_object('host_id', id, 'name', name, 'count', $2::int, 'packages', $3::jsonb) \
+             FROM hosts WHERE id = $1",
+        )
+        .bind(host_id)
+        .bind(fresh_security.len() as i32)
+        .bind(serde_json::json!(fresh_security.iter().take(5).collect::<Vec<_>>()))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("SELECT pg_notify('pw_events', '')")
+            .execute(&mut *tx)
+            .await?;
+    }
     Ok(())
 }
 

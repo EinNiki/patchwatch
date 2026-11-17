@@ -24,4 +24,5 @@ export const EVENTS: { id: string; label: string; hint: string }[] = [
   { id: "fix_available", label: "Fix verfügbar", hint: "Nur für Releases, die auf einem deiner Hosts laufen." },
   { id: "feed_failing", label: "CVE-Feed fällt aus", hint: "Ein Feed liefert wiederholt Fehler." },
   { id: "daily_summary", label: "Tageszusammenfassung", hint: "Einmal täglich zur eingestellten Uhrzeit." },
+  { id: "security_update_new", label: "Neue Sicherheitsupdates auf einem Host", hint: "Je Bericht gebündelt; kann häufig auftreten, deshalb zunächst aus." },
 ];

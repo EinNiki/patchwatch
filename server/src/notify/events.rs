@@ -1,7 +1,8 @@
 //! Ereignisarten, die ein Kanal abonnieren kann, und die Zuordnung der internen Events dazu.
 
 use super::messages::{
-    cve_change_message, feed_failing_message, host_cve_message, status_change_message, Message,
+    cve_change_message, feed_failing_message, host_cve_message, security_update_message,
+    status_change_message, Message,
 };
 use serde_json::Value;
 use std::collections::HashSet;
@@ -12,15 +13,20 @@ pub const WATCHLIST_CVE: &str = "watchlist_cve";
 pub const FIX_AVAILABLE: &str = "fix_available";
 pub const FEED_FAILING: &str = "feed_failing";
 pub const DAILY_SUMMARY: &str = "daily_summary";
+pub const SECURITY_UPDATE_NEW: &str = "security_update_new";
 
-pub const ALL: [&str; 6] = [
+pub const ALL: [&str; 7] = [
     HOST_STATUS,
     AGENT_SILENT,
     WATCHLIST_CVE,
     FIX_AVAILABLE,
     FEED_FAILING,
     DAILY_SUMMARY,
+    SECURITY_UPDATE_NEW,
 ];
+
+/// Ereignisarten, die für neu angelegte Kanäle nicht vorausgewählt sind (sie können häufig auftreten).
+pub const DEFAULT_OFF: [&str; 1] = [SECURITY_UPDATE_NEW];
 
 fn str_of<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
@@ -76,6 +82,7 @@ pub fn route(
             Some((category, cve_change_message(kind, payload)))
         }
         "feed_failing" => Some((FEED_FAILING, feed_failing_message(payload))),
+        "security_updates_new" => Some((SECURITY_UPDATE_NEW, security_update_message(payload))),
         _ => None,
     }
 }
@@ -188,6 +195,23 @@ mod tests {
                 .0,
             WATCHLIST_CVE
         );
+    }
+
+    #[test]
+    fn new_security_updates_have_their_own_category_and_are_off_by_default() {
+        let ev = json!({"host_id": 1, "name": "web1", "count": 7,
+            "packages": ["a", "b", "c", "d", "e"]});
+        let (cat, m) = route("security_updates_new", &ev, false).unwrap();
+        assert_eq!(cat, SECURITY_UPDATE_NEW);
+        assert_eq!(m.title, "Neue Sicherheitsupdates auf Host web1");
+        assert!(
+            m.body
+                .contains("7 neue Sicherheitsupdates: a, b, c, d, e und 2 weitere"),
+            "{}",
+            m.body
+        );
+        assert!(ALL.contains(&SECURITY_UPDATE_NEW));
+        assert_eq!(DEFAULT_OFF, [SECURITY_UPDATE_NEW]);
     }
 
     #[test]
