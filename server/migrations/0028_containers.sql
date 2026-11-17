@@ -37,6 +37,8 @@ CREATE TABLE container_image_checks (
     checked_at             TIMESTAMPTZ NOT NULL,
     status                 TEXT NOT NULL,
     registry_digest        TEXT,
+    -- `index` (Manifest-Liste, mehrere Plattformen) oder `manifest` (eine Plattform), laut Antwort der Registry.
+    manifest_kind          TEXT,
     platform_digest        TEXT,
     platform_config_digest TEXT,
     newest_patch           TEXT,
