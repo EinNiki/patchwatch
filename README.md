@@ -22,6 +22,7 @@ Für Ubuntu, Debian und Proxmox VE. Ein kleiner Agent pro Host, ein Server, eine
 - **CVEs zuordnen:** Abgleich mit den Debian- und Ubuntu-Quellen; Proxmox-Kernel ohne belastbare Quelle werden als „manuell prüfen“ markiert.
 - **Leicht und sicher:** statisches Agent-Binary (ca. 2 MB), kein offener Port am Host, Token statt Passwort, signierte Updates.
 - **Zugang absichern:** Rollen und Einzelrechte, Zwei-Faktor-Code (TOTP), Passkeys, OIDC, LDAP, aktive Geräte einsehen und abmelden.
+- **Pakete und Docker-Container sehen:** installierte Pakete, offene Updates (Sicherheit gekennzeichnet) und die Image-Versionen der Container je Host und über alle Hosts, nur zur Anzeige.
 - **Benachrichtigt werden:** ntfy, Matrix und Browser-Meldungen bei Statuswechseln und als Tageszusammenfassung.
 
 ## Schnellstart
@@ -241,6 +242,96 @@ Fehlermeldungen (ohne Token) landen im journald: `journalctl -u patchwatch-agent
 
 
 </details>
+
+## Systempakete und Updates
+
+Der Agent liest installierte Pakete (`dpkg-query`, nur Zeilen mit Status `ii`: Name, Architektur, Version, Quellpaket) und
+simuliert die Updates mit `apt-get -s dist-upgrade` (ohne Root, ohne Sperre, ohne `apt update`). Daraus entstehen je Eintrag
+**Art** (Update, neu, entfernen), installierte und verfügbare Version, Herkunft und das Merkmal **Sicherheit** (die Suite
+enthält „security“, auch `-infra-security` und ESM). Zusätzlich meldet er das **Alter der Paketlisten** (neueste
+Änderungszeit unter `/var/lib/apt/lists`). patchwatch führt nie ein Update aus und nie `apt update`: Sind die Listen auf dem
+Host alt (Warnung ab 7 Tagen), erscheinen neue Updates erst nach `apt update` auf dem Host.
+
+- **Pakete senden:** `install.sh` schreibt für neue Konfigurationen `include_packages = true`. Bestehende `agent.toml` bleiben
+  unverändert und behalten ihren Wert; `include_packages = false` schaltet das Senden der Paketliste ab (die Update-Zähler und
+  die Update-Liste kommen weiterhin).
+- **Volllisten nur bei Änderung:** Der Agent merkt sich den SHA-256 der zuletzt vom Server angenommenen Liste (nur nach HTTP 2xx,
+  im `StateDirectory`) und sendet sonst nur `packages_hash`. Fehlt dem Server die Liste (z. B. Datenbank wiederhergestellt),
+  fordert er sie über den vorhandenen Weg „Bericht anfordern“ an. Ist der Zustand nicht beschreibbar, wird die Liste immer
+  gesendet. Berichte sind **Schema 2** (Schema 1 bleibt gültig, alle neuen Felder sind optional).
+- **Grenzen:** Agent höchstens 20.000 Pakete (`packages_truncated`, in der Oberfläche sichtbar) und 1000 Update-Einträge (die
+  Zähler zeigen immer die wahre Zahl); Server: Body ≤ 8 MiB, Pakete ≤ 30.000.
+- **Oberfläche:** Host-Seite → Reiter **Pakete** (Suche, Filter „Nur mit Update“ / „Nur Sicherheit“ / „Alle“, Sortierung,
+  Seiten; Deep-Link `?tab=pakete&filter=updates`), Menüpunkt **Pakete** (alle Hosts: auf wie vielen Hosts installiert, mit Update,
+  mit Sicherheitsupdate, Streuung der Versionen), Hostliste mit „n offen, davon m Sicherheit“. Recht: `hosts.read`.
+- **Ereignis „Neue Sicherheitsupdates auf einem Host“** (je Bericht gebündelt, höchstens fünf Namen): in der Kanalauswahl
+  **standardmäßig aus**.
+- **Bewertungsregeln:** Pakete und Updates beeinflussen **keine** CVE-Bewertung und keinen Host-Status außer dem bestehenden
+  Hinweis „Sicherheitsupdates offen“ (Zähler aus dem Agent). Migration 0027 ist rein additiv; `hosts.updates_list` bleibt
+  unberührt liegen und wird nicht mehr gelesen.
+- **Reihenfolge beim Update:** zuerst den **Server** aktualisieren, dann die Agents (ein alter Server nimmt Schema 2 nicht an).
+
+## Docker-Container und Image-Versionen
+
+Optional und **standardmäßig aus**. Der Agent liest ausschließlich `GET /containers/json` und `GET /images/<id>/json` (feste
+Positivliste, alles andere wird abgelehnt) und kopiert nur schmale Felder: Name, Container-ID (12 Zeichen), Zustand,
+Erstellzeit, bereinigter Statustext, Image wie angegeben, Image-ID, `RepoDigests`, Plattform und aus den Labels **nur**
+`com.docker.compose.project` und `.service`. **Nie** gelesen oder gesendet werden Umgebungsvariablen, Mounts, Befehle,
+übrige Labels und Netzwerke. Zur Startzeit: `/containers/json` liefert nur `Created`; `StartedAt` gäbe es nur über
+`/containers/<id>/json` (enthält Env und Mounts) und wird bewusst nicht abgerufen.
+
+**Einschalten** (`install.sh` fragt auf einem Terminal bei der Erstinstallation „Docker-Container erfassen? [j/N]“; ohne
+Terminal nur mit `--docker=proxy|socket`):
+
+```toml
+# /etc/patchwatch/agent.toml
+docker_enabled = true
+docker_endpoint = "http://127.0.0.1:2375"   # empfohlen: Socket-Proxy, nur lesend, nur Loopback
+# docker_endpoint = "unix:///var/run/docker.sock"   # direkter Socket
+```
+
+Empfohlen ist ein Socket-Proxy (z. B. `tecnativa/docker-socket-proxy` mit `CONTAINERS=1`, `IMAGES=1`, Port nur an
+`127.0.0.1`). Der direkte Socket erfordert die Gruppe `docker`, und die ist **faktisch Root** auf dem Host; `install.sh` nennt
+den Befehl `usermod -aG docker patchwatch` und führt ihn nur nach ausdrücklichem „ja“ aus. Ist Docker aus oder nicht
+erreichbar, zeigt die Oberfläche einen Hinweis mit Grund (Socket fehlt, keine Berechtigung, Zeitüberschreitung, unerwartete
+Antwort). Details und Annahmen: [docs/containers-security.md](docs/containers-security.md).
+
+**Image-Versionen** prüft der **Server** bei den Registries `docker.io`, `ghcr.io` und `quay.io` (anonym, nur https; alles
+andere ist „nicht prüfbar, Registry nicht unterstützt“). Ein Abruf gilt für alle Hosts (Zwischenspeicher je Registry,
+Repository und Tag), höchstens eine Anfrage gleichzeitig je Registry, Wartezeit nach Fehlern, `Retry-After` wird beachtet.
+Standard alle 6 Stunden, einstellbar von 1 bis 168 Stunden unter *Einstellungen → Docker-Images prüfen*; „Jetzt prüfen“ stößt
+die Prüfung früher an (je Image frühestens alle 5 Minuten).
+
+| Fall | Aussage |
+|---|---|
+| Mit `@sha256:` festgelegt | „Gepinnt“ (nur Information, kein Vergleich) |
+| Gleitender Tag (`latest`, `1.27`, `1`): `HEAD` auf das Manifest, Digest gleich einem lokalen `RepoDigest` | „Aktuell“ |
+| Digest weicht ab, Ergebnis ist ein Index: Manifest der Host-Plattform (OS, Architektur, Variante) gelesen, Konfigurations-Digest gleich der lokalen Image-ID | „Aktuell“ (nur eine andere Plattform wurde neu gebaut) |
+| … sonst | „Neueres Image für diesen Tag“ |
+| Plattform nicht bestimmbar | „Neueres Image“ mit dem Zusatz „für die Plattform des Hosts nicht bestätigt“ |
+| Feste Version (mindestens drei Zahlenglieder, z. B. `1.27.3`, `v2.4.1-alpine`) | Tag-Liste (`n=1000`, höchstens 5 Seiten): neueste Patch-, Minor- und Major-Version getrennt; gleiches Präfix und gleiche Variante, Vorabversionen (`rc`, `beta`, `alpha`, `dev`, `pre`, `snapshot`, `nightly`) ausgeschlossen |
+| Tag-Liste unvollständig | „nicht prüfbar“, nie ein falsches „aktuell“ |
+| Datum, Hash, nicht lesbarer Tag | „nicht prüfbar (nicht vergleichbar)“ |
+| Lokal kein Registry-Digest (selbst gebaut) | „nicht prüfbar“ |
+| Registry antwortet nicht, drosselt, Antwort zu groß | „Fehler“ mit Klartext, ohne Antwortinhalt |
+
+**Docker Hub und Abruflimit:** Laut docs.docker.com/docker-hub/usage/pulls gelten für anonyme Abrufe **100 Pulls je 6 Stunden**
+und IPv4-Adresse bzw. IPv6-/64. Dort steht: „Using GET emulates a real pull and counts towards the limit. Using HEAD won't.“
+Darum nutzt die Standardprüfung nur `HEAD`; `GET` (Index, Manifest, Tag-Liste, Token) nur im Abweichungsfall. Zu `tags/list`
+und zum Token-Abruf steht dort nichts, sie werden vorsichtshalber als zählend behandelt. patchwatch verbraucht höchstens
+**60** zählende Abrufe je 6 Stunden (aus den gespeicherten Zählern berechnet, also auch nach einem Neustart); darüber heißt es
+„später geprüft“. Für `ghcr.io` und `quay.io` gibt es keine eigene Zählung, aber denselben Schutz gegen Gleichzeitigkeit und
+Drosselung; Aussagen zu deren Grenzen werden nicht gemacht.
+
+- **Rechte:** `containers.read` (ansehen) und `containers.check` (Prüfung anstoßen, setzt `containers.read` voraus); Vorlagen:
+  Nur Lesen = ansehen, Betreiber = ansehen und prüfen, Administrator = alles.
+- **Oberfläche:** Host-Seite → Reiter **Container**, Menüpunkt **Container** (nach Image gruppiert, „nur mit Update“), in der
+  Hostliste die Zeile „Container: n veraltet“ (nur bei aktiver Erfassung). Zum Aktualisieren zeigt die Oberfläche **nur Text**
+  zum Kopieren: `docker compose pull <Dienst> && docker compose up -d <Dienst>` (Dienstname gegen `^[A-Za-z0-9._-]{1,64}$`
+  geprüft). patchwatch zieht nie ein Image und startet, stoppt oder ändert nie einen Container.
+- **Ereignis „Neues Image verfügbar“:** einmal je Image und neuem Stand, **standardmäßig aus**.
+- **Bewertungsregeln:** Container-Aussagen sind Hinweise und ändern **keinen** Host-Status und keine CVE-Bewertung. Docker-Daten
+  sind sichtbar, solange der Host sie in den letzten 7 Tagen gemeldet hat; nichts wird gelöscht (Migration 0028 ist additiv).
 
 ## Server
 
@@ -811,7 +902,7 @@ Zwei weitere Prüfungen, gleiche Umgebung (`scripts/dev-stack.sh restart-server`
 # Responsiv: alle Seiten und Zustände x 12 Breiten (320 bis 2560), Querformat, Zoom 200 %, Schriftzoom 200 %, hell/dunkel,
 # reduzierte Bewegung. Prüft Überlauf, abgeschnittenen Text, Fenster im Viewport, Trefferflächen < 768 px, Knopfhöhen,
 # Tabellenrand, axe (serious/critical) und Layoutsprung; schreibt eine Ergebnistabelle. Gruppen einzeln: login, hosts,
-# host-detail, cves, cve-detail, cve-sources, agents, notifications, settings, notfound, sidebar. Keine verändernden Aktionen.
+# host-detail, packages, containers, cves, cve-detail, cve-sources, agents, notifications, settings, notfound, sidebar. Keine verändernden Aktionen.
 node scripts/responsive-all.mjs ergebnis.md [gruppe,gruppe]
 # Pixelvergleich mit docs/design/snapshot-2026-11-11/screenshots (1440/390 px, hell/dunkel); Abweichung in %, Schwelle 2 %.
 # Die Demo-Daten unterscheiden sich vom Snapshot, Treffer sind zu deuten (PW_DIFFDIR schreibt Differenzbilder).
@@ -874,14 +965,14 @@ blendet Aktionen ohne Recht nur aus. Rechte und Status werden bei **jeder** Anfr
 Rollenwechsel, Sperren, Löschen, Passwortwechsel und -reset beenden alle Sitzungen des Benutzers sofort.
 
 Es gibt drei **Vorlagen** (Administrator, Betreiber, Nur Lesen); jeder Benutzer kann zusätzlich **einzelne Rechte** haben („Eigene“).
-Im Dialog setzt die Vorlage die Schalter, danach lässt sich jedes der 20 Rechte einzeln ändern. Schreiben, Ausführen und Löschen
+Im Dialog setzt die Vorlage die Schalter, danach lässt sich jedes der 22 Rechte einzeln ändern. Schreiben, Ausführen und Löschen
 setzen das jeweilige Lesen voraus (die Abhängigkeit steht an einer Stelle im Server, die Schalter folgen ihr). Ältere Konten ohne
 eigene Auswahl folgen weiter ihrer Rolle; Migration 0024 ändert kein bestehendes Konto.
 
 | Vorlage | Rechte |
 |---|---|
-| Nur Lesen | Hosts, CVEs, Quellen-Zustand, Kanäle, Einstellungen ansehen |
-| Betreiber | wie Nur Lesen, dazu Hosts anlegen/löschen und abrufen, Agent-Token erneuern, CVEs beobachten, Quellen und Kanäle ändern und abrufen/testen, Schlüssel setzen, Einstellungen und Zeitpläne ändern |
+| Nur Lesen | Hosts, Container, CVEs, Quellen-Zustand, Kanäle, Einstellungen ansehen |
+| Betreiber | wie Nur Lesen, dazu Hosts anlegen/löschen und abrufen, Agent-Token erneuern, Image-Prüfung anstoßen, CVEs beobachten, Quellen und Kanäle ändern und abrufen/testen, Schlüssel setzen, Einstellungen und Zeitpläne ändern |
 | Administrator | alle Rechte, auch Benutzer verwalten (`users.manage`), OIDC einrichten (`oidc.manage`), Aktivitätsprotokoll (`audit.read`) |
 
 Keine Vorlage und kein Recht zeigt Geheimnisse (Token, Passwörter, Client-Secret): Die API gibt sie nie aus, nur „gesetzt/nicht

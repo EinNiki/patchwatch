@@ -8,7 +8,7 @@ Maßgeblich ist immer der **Server**; die Oberfläche blendet nur aus, sperrt mi
 - Rollen (Administrator, Betreiber, Nur Lesen) sind **Vorlagen**. Jeder Benutzer hat zusätzlich optional eine eigene Rechtemenge
   (`admin_users.permissions`, `NULL` = folgt der Vorlage der Rolle). Alle bestehenden Konten behalten `NULL`: das Verhalten
   ändert sich beim Update nicht.
-- Katalog: 20 Rechte in 6 Gruppen (Hosts, Agents, CVEs und Quellen, Benachrichtigungen, Einstellungen, Benutzer). Die Liste mit
+- Katalog: 22 Rechte in 7 Gruppen (Hosts, Agents, Container, CVEs und Quellen, Benachrichtigungen, Einstellungen, Benutzer). Die Liste mit
   Beschriftung, Erklärung, Voraussetzungen und Kennzeichnung „sensibel“ liefert `GET /roles`; die Oberfläche erfindet nichts.
 - „Geheimnisse sehen“ gibt es **nicht**: Die API liefert nie Klartext (Token, Passwörter, Client-Secret), nur „gesetzt / nicht
   gesetzt“. Darum gibt es kein Recht dafür und keinen Schalter (Test: `web/tests/structure.test.mts`). Getrennt vergeben wird nur
