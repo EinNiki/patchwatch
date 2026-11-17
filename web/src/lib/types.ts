@@ -454,3 +454,15 @@ export interface PackagesResponse {
     remove: number | null;
   };
 }
+
+/** Zeile der Paketübersicht über alle Hosts (`GET /packages`). */
+export interface PackageOverviewRow {
+  name: string;
+  /** Hosts, auf denen das Paket installiert ist. */
+  hosts: number;
+  /** Verschiedene installierte Versionen (Streuung). */
+  versions: number;
+  /** Hosts mit ausstehendem Update bzw. Sicherheitsupdate. */
+  updates: number;
+  security: number;
+}

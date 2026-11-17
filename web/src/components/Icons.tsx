@@ -72,7 +72,7 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   }
 }
 
-export type NavIconName = "hosts" | "cves" | "agents" | "users" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "collapse" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill" | "more" | "key" | "trash" | "lock" | "unlock" | "edit" | "play" | "power";
+export type NavIconName = "hosts" | "packages" | "cves" | "agents" | "users" | "bell" | "settings" | "menu" | "close" | "refresh" | "plus" | "external" | "chevron" | "collapse" | "logout" | "sort" | "asc" | "desc" | "filter" | "star" | "star-fill" | "more" | "key" | "trash" | "lock" | "unlock" | "edit" | "play" | "power";
 
 /** Navigations- und Aktions-Icons: eigene Linienformen, immer mit Text daneben (nie allein). */
 export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number }) {
@@ -96,6 +96,13 @@ export function NavIcon({ name, size = 16 }: { name: NavIconName; size?: number 
           <rect x="2" y="2.5" width="12" height="4.5" rx="1" />
           <rect x="2" y="9" width="12" height="4.5" rx="1" />
           <path d="M4.6 4.75v.1M4.6 11.25v.1" />
+        </svg>
+      );
+    case "packages":
+      return (
+        <svg {...common}>
+          <path d="M8 1.8l5.5 2.7v7L8 14.2l-5.5-2.7v-7z" />
+          <path d="M2.5 4.5L8 7.2l5.5-2.7M8 7.2v7" />
         </svg>
       );
     case "cves":
