@@ -12,6 +12,35 @@ use tower::ServiceExt;
 const TOKEN: &str = "pw_test-token-nur-fuer-tests-0123456789abcdef";
 const PASSWORD: &str = "ein-langes-test-passwort";
 
+#[sqlx::test(migrations = "./migrations")]
+async fn inventory_distinguishes_missing_empty_and_replaced_package_reports(pool: PgPool) {
+    let app = router(state(pool.clone(), &[]));
+    let id = add_host(&pool, "inventory", TOKEN).await;
+    let auth = bearer(TOKEN);
+    let mut rep = report("inventory", "6.8.0-31.31", "6.8.0-31.31", 0, 0);
+    for packages in [
+        json!([{"name":"nginx","version":"1.0-1","source":"nginx","source_version":"1.0-1"}]),
+        Value::Null,
+        json!([]),
+    ] {
+        rep["packages"] = packages.clone();
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/report",
+            &[("authorization", &auth)],
+            Some(rep.clone()),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.json);
+        let (n, reported): (i64, bool) = sqlx::query_as("SELECT \
+            (SELECT count(*) FROM host_packages WHERE host_id = h.id), packages_reported_at = last_report_at \
+            FROM hosts h WHERE id = $1").bind(id).fetch_one(&pool).await.unwrap();
+        assert_eq!(n, if packages == json!([]) { 0 } else { 1 });
+        assert_eq!(reported, !packages.is_null());
+    }
+}
+
 fn state(pool: PgPool, env: &'static [(&'static str, &'static str)]) -> AppState {
     let cfg = Config::from_sources(None, &|k| {
         env.iter()

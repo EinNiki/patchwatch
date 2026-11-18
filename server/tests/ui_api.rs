@@ -12,6 +12,291 @@ use tower::ServiceExt;
 
 const PASSWORD: &str = "ein-langes-test-passwort";
 
+async fn inventory_package(pool: &PgPool, host_id: i64, name: &str, source: &str, version: &str) {
+    sqlx::query(
+        "UPDATE hosts SET last_report_at = COALESCE(last_report_at, now()), \
+        packages_reported_at = COALESCE(packages_reported_at, last_report_at, now()) WHERE id = $1",
+    )
+    .bind(host_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO host_packages (host_id, name, version, source_name, source_version, last_seen) \
+        SELECT id, $2, '99.0', $3, $4, packages_reported_at FROM hosts WHERE id = $1")
+        .bind(host_id).bind(name).bind(source).bind(version).execute(pool).await.unwrap();
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn software_inventory_maps_source_versions_and_never_confirms_stale_fixes(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let id = host(&pool, "web1", "noble").await;
+    inventory_package(&pool, id, "libexample1", "example", "1.0-1").await;
+    src(
+        &pool,
+        "CVE-2026-99991",
+        "ubuntu",
+        "noble",
+        "example",
+        "fixed",
+        Some("1.0-2"),
+    )
+    .await;
+    // An unrelated distribution with the same release string must never affect this package.
+    src(
+        &pool,
+        "CVE-2026-99992",
+        "debian",
+        "noble",
+        "example",
+        "vulnerable",
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE hosts SET updates_list = $2 WHERE id = $1")
+        .bind(id)
+        .bind(json!([{"name":"libexample1","to":"99.1","security":true}]))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let uri = format!("/api/v1/software?host_id={id}");
+    let (r, _) = call(&app, Method::GET, &uri, Some(&s), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["items"][0]["status"], "vulnerable");
+    assert_eq!(r.json["items"][0]["candidate"], "99.1");
+    assert_eq!(r.json["items"][0]["security_update"], true);
+    assert_eq!(r.json["items"][0]["findings"].as_array().unwrap().len(), 1);
+    sqlx::query("UPDATE host_packages SET source_version = '1.0-2' WHERE host_id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (r, _) = call(&app, Method::GET, &uri, Some(&s), None).await;
+    assert_eq!(r.json["items"][0]["status"], "known_fixed");
+    // A later report without packages retains the inventory but cannot attest to a fix.
+    sqlx::query(
+        "UPDATE hosts SET last_report_at = last_report_at + interval '1 second' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (r, _) = call(&app, Method::GET, &uri, Some(&s), None).await;
+    assert_eq!(r.json["items"][0]["stale"], true);
+    assert_eq!(r.json["items"][0]["status"], "unknown");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn software_inventory_prioritizes_findings_for_the_installed_version(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let id = host(&pool, "web1", "noble").await;
+    inventory_package(&pool, id, "example", "example", "2.0-1").await;
+    // Advisory order puts resolved findings first. The two fixed source rows
+    // must land in different groups after comparing the installed version.
+    for (cve, status, fix) in [
+        ("CVE-2026-10001", "not_affected", None),
+        ("CVE-2026-10002", "fixed", Some("1.0-1")),
+        ("CVE-2026-10003", "unknown", None),
+        ("CVE-2026-10004", "fixed", Some("3.0-1")),
+        ("CVE-2026-10005", "vulnerable", None),
+    ] {
+        src(&pool, cve, "ubuntu", "noble", "example", status, fix).await;
+    }
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/software?host_id={id}"),
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    let findings = r.json["items"][0]["findings"].as_array().unwrap();
+    let actual: Vec<_> = findings
+        .iter()
+        .map(|finding| {
+            (
+                finding["id"].as_str().unwrap(),
+                finding["status"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actual,
+        [
+            ("CVE-2026-10004", "vulnerable"),
+            ("CVE-2026-10005", "vulnerable"),
+            ("CVE-2026-10003", "unknown"),
+            ("CVE-2026-10001", "not_affected"),
+            ("CVE-2026-10002", "fixed"),
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn software_inventory_bounds_search_and_missing_assessments(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let id = host(&pool, "web1", "noble").await;
+    let empty_id = host(&pool, "empty", "noble").await;
+    inventory_package(&pool, id, "nginx", "nginx", "1.0-1").await;
+    inventory_package(&pool, id, "nodejs", "nodejs", "22.0-1").await;
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/software?limit=1",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json["total"], 2);
+    assert_eq!(r.json["items"].as_array().unwrap().len(), 1);
+    assert_eq!(r.json["items"][0]["status"], "unknown");
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/software?q=NGINX",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.json["total"], 1);
+    let (r, _) = call(&app, Method::GET, "/api/v1/software?q=%25", Some(&s), None).await;
+    assert_eq!(r.json["total"], 0, "search treats percent as a literal");
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/software?host_id={empty_id}"),
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.json["total"], 0);
+    assert_eq!(
+        r.json["hosts"].as_array().unwrap().len(),
+        2,
+        "host selector remains usable"
+    );
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/software?offset=-1",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let (r, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/software?host_id=999999",
+        Some(&s),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn software_inventory_checks_permissions_and_hides_advisories(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let id = host(&pool, "web1", "noble").await;
+    inventory_package(&pool, id, "nginx", "nginx", "1.0-1").await;
+    src(
+        &pool,
+        "CVE-2026-99993",
+        "ubuntu",
+        "noble",
+        "nginx",
+        "vulnerable",
+        None,
+    )
+    .await;
+    let (r, _) = call(&app, Method::GET, "/api/v1/software", None, None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    sqlx::query(
+        "UPDATE admin_users SET permissions = ARRAY['hosts.read'] WHERE username = 'admin'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (r, _) = call(&app, Method::GET, "/api/v1/software", Some(&s), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json["security_visible"], false);
+    assert!(r.json["items"][0]["findings"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    sqlx::query("UPDATE admin_users SET permissions = ARRAY['cves.read'] WHERE username = 'admin'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (r, _) = call(&app, Method::GET, "/api/v1/software", Some(&s), None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn software_inventory_ignores_disabled_sources_and_missing_source_versions(pool: PgPool) {
+    let (app, s) = setup(&pool).await;
+    let id = host(&pool, "web1", "noble").await;
+    inventory_package(&pool, id, "libfoo", "foo", "1").await;
+    src(
+        &pool,
+        "CVE-2026-99994",
+        "ubuntu",
+        "noble",
+        "foo",
+        "fixed",
+        Some("2"),
+    )
+    .await;
+    sqlx::query("UPDATE host_packages SET source_version = NULL WHERE host_id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (r, _) = call(&app, Method::GET, "/api/v1/software", Some(&s), None).await;
+    assert_eq!(
+        r.json["items"][0]["status"], "unknown",
+        "binary version 99 cannot prove source version >= 2"
+    );
+    sqlx::query(
+        "INSERT INTO cve_sources (id, kind, label, enabled) VALUES ('off', 'ubuntu', 'Off', false)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE cve_source_status SET source_id = 'off'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (r, _) = call(&app, Method::GET, "/api/v1/software", Some(&s), None).await;
+    assert!(r.json["items"][0]["findings"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(r.json["items"][0]["status"], "unknown");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn software_inventory_works_with_one_database_connection(pool: PgPool) {
+    let single = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(pool.connect_options().as_ref().clone())
+        .await
+        .unwrap();
+    let (app, s) = setup(&single).await;
+    let id = host(&single, "small-pool", "noble").await;
+    inventory_package(&single, id, "nginx", "nginx", "1.0-1").await;
+    let (r, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        call(&app, Method::GET, "/api/v1/software", Some(&s), None),
+    )
+    .await
+    .expect("inventory must not acquire a second connection inside its snapshot");
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    single.close().await;
+}
+
 struct Resp {
     status: StatusCode,
     json: Value,

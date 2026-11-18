@@ -4,6 +4,7 @@ pub mod cves;
 mod feeds;
 mod health;
 pub mod hosts;
+pub mod inventories;
 mod ldap;
 mod live;
 mod matrix;
@@ -13,6 +14,7 @@ mod oidc;
 mod passkey;
 mod report;
 pub mod settings;
+pub mod software;
 mod users;
 
 use crate::extract::ClientIp;
@@ -93,6 +95,20 @@ pub fn router(state: AppState) -> Router {
                 )),
         )
         .route("/hosts", get(hosts::list).post(hosts::create))
+        .route("/software", get(software::list))
+        .route("/software/inventories", get(inventories::list))
+        .route("/software/inventories/{id}/scan", post(inventories::scan))
+        .route(
+            "/hosts/{id}/inventories/{key}",
+            put(inventories::put)
+                .delete(inventories::remove)
+                .layer(axum::extract::DefaultBodyLimit::max(crate::sbom::MAX_BODY)),
+        )
+        .route(
+            "/agent/inventories/{key}",
+            put(inventories::agent_put)
+                .layer(axum::extract::DefaultBodyLimit::max(crate::sbom::MAX_BODY)),
+        )
         .route("/hosts/request-report", post(hosts::request_report_all))
         .route("/hosts/{id}", get(hosts::detail).delete(hosts::remove))
         .route("/hosts/{id}/request-report", post(hosts::request_report))

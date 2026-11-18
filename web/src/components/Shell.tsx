@@ -28,6 +28,7 @@ interface Item {
 const NAV: Item[] = [
   { href: "/", label: "Hosts", icon: "hosts", match: (p) => p === "/" || p.startsWith("/hosts") },
   { href: "/cves", label: "CVEs", icon: "cves", match: (p) => p.startsWith("/cves") },
+  { href: "/software", label: "Software", icon: "software", match: (p) => p.startsWith("/software"), needs: "hosts.read" },
   { href: "/agents", label: "Agents", icon: "agents", match: (p) => p.startsWith("/agents") },
   { href: "/users", label: "Benutzer", icon: "users", match: (p) => p.startsWith("/users"), needs: "users.manage" },
   { href: "/notifications", label: "Benachrichtigungen", icon: "bell", match: (p) => p.startsWith("/notifications") },

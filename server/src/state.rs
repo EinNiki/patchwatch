@@ -19,6 +19,7 @@ pub struct AppState {
     pub live: tokio::sync::broadcast::Sender<Arc<str>>,
     /// Begrenzt gleichzeitige WebSocket-Verbindungen.
     pub live_slots: Arc<tokio::sync::Semaphore>,
+    pub software_scan_slots: Arc<tokio::sync::Semaphore>,
     /// Offene Check-in-Long-Polls: höchstens ein wartender Aufruf je Host (neuer ersetzt alten) ...
     pub checkin_waiters: Arc<std::sync::Mutex<std::collections::HashMap<i64, u64>>>,
     /// ... und höchstens `MAX_OPEN_CHECKINS` gleichzeitig; weitere Aufrufe werden sofort beantwortet.
@@ -49,6 +50,7 @@ impl AppState {
             kind_locks: Arc::default(),
             live: tokio::sync::broadcast::channel(256).0,
             live_slots: Arc::new(tokio::sync::Semaphore::new(64)),
+            software_scan_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             checkin_waiters: Arc::default(),
             checkin_slots: Arc::new(tokio::sync::Semaphore::new(MAX_OPEN_CHECKINS)),
             jwks: Arc::default(),

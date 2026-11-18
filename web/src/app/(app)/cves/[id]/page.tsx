@@ -78,10 +78,11 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
 
       <section aria-labelledby="hosts-h" className="mb-6">
         <h2 id="hosts-h" className="mb-2 text-lg font-semibold">
-          Betroffene Hosts
+          Kernelbewertungen der Hosts
         </h2>
+        <p className="mb-2 text-sm text-fg2">Bewertungen installierter Anwendungen findest du im <Link href="/software">Software-Inventar</Link>.</p>
         {hosts.length === 0 ? (
-          <Empty title="Kein Host betroffen oder bewertet">Für diese CVE liegt keine Bewertung eines Hosts vor.</Empty>
+          <Empty title="Keine Kernelbewertung vorhanden">Für diese CVE liegt keine Bewertung eines laufenden Host-Kernels vor.</Empty>
         ) : (
           <div className="@container/tbl max-xl:overflow-x-auto">
             <table className="tbl stack">
@@ -126,7 +127,7 @@ export default function CveDetailPage({ params }: { params: Promise<{ id: string
         ) : (
           <div className="@container/tbl max-xl:overflow-x-auto">
             <table className="tbl stack">
-              <caption>Status je Quelle, Release und Paket (mit Variante: Standard-Kernel, Cloud-, HWE- oder Backport-Serie)</caption>
+              <caption>Status je Quelle, Release und Paket; Kernelpakete zusätzlich mit Variante</caption>
               <thead>
                 <tr>
                   <th scope="col"><span className="th-pad">Quelle</span></th>
