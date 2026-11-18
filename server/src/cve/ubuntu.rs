@@ -11,8 +11,8 @@
 use super::http::{self, Limits};
 use super::oval::{self, Imported, OvalParams};
 use super::{
-    is_cve_id, is_kernel_source, truncate, valid_version, Backfill, BulkRelease, CveSource, Entry,
-    FeedError, FeedState, FetchCtx, FetchOutcome, Incr, Record, SourceStatus,
+    is_cve_id, truncate, valid_source_package, valid_version, Backfill, BulkRelease, CveSource,
+    Entry, FeedError, FeedState, FetchCtx, FetchOutcome, Incr, Record, SourceStatus,
 };
 use crate::config::CveConfig;
 use async_trait::async_trait;
@@ -134,9 +134,9 @@ pub async fn reopen_legacy_imports(
 }
 
 fn page_url(base: &str, limit: usize, offset: usize) -> String {
-    // Der Filter `package=linux` ist geprüft: kein Kernel-Paket hat mehr CVEs als `linux` (siehe README).
+    // Include application packages as well as kernels.
     format!(
-        "{base}/security/cves.json?package=linux&limit={limit}&offset={offset}&order=descending&sort_by=updated"
+        "{base}/security/cves.json?limit={limit}&offset={offset}&order=descending&sort_by=updated"
     )
 }
 
@@ -198,7 +198,7 @@ fn parse_time(s: &str) -> Option<DateTime<Utc>> {
         })
 }
 
-/// Ein CVE-Objekt (Listen- und Einzelabruf haben dasselbe Format); behält nur Kernel-Pakete.
+/// Ein CVE-Objekt (Listen- und Einzelabruf haben dasselbe Format), einschließlich Anwendungen.
 pub fn parse_cve(v: &Value) -> Option<Record> {
     let id = v.get("id")?.as_str()?;
     if !is_cve_id(id) {
@@ -217,7 +217,7 @@ pub fn parse_cve(v: &Value) -> Option<Record> {
     };
     for pkg in v.get("packages")?.as_array()? {
         let name = pkg.get("name").and_then(Value::as_str).unwrap_or("");
-        if !is_kernel_source(name) {
+        if !valid_source_package(name) {
             continue;
         }
         for s in pkg
@@ -879,9 +879,9 @@ mod tests {
             .unwrap_or_else(|| panic!("{release}/{package}"))
     }
 
-    /// Echte Antwort: nur Kernel-Pakete, kein `upstream`, kein DNE.
+    /// Echte Antwort: alle Softwarepakete, kein `upstream`, kein DNE.
     #[test]
-    fn real_page_keeps_only_kernel_entries() {
+    fn real_page_keeps_distribution_entries() {
         let recs: Vec<Record> = page()["cves"]
             .as_array()
             .unwrap()
@@ -891,7 +891,7 @@ mod tests {
         assert_eq!(recs.len(), 5);
         for r in &recs {
             assert!(
-                r.entries.iter().all(|e| is_kernel_source(&e.package)),
+                r.entries.iter().all(|e| valid_source_package(&e.package)),
                 "{}",
                 r.cve_id
             );
@@ -899,10 +899,24 @@ mod tests {
             assert!(r.entries.iter().all(|e| e.raw["status"] != "DNE"));
             assert!(r.updated_at.is_some(), "{}", r.cve_id);
         }
-        assert!(recs.iter().all(|r| r
-            .entries
-            .iter()
-            .all(|e| e.package != "openssl" && e.package != "linux-firmware")));
+    }
+
+    #[test]
+    fn application_packages_are_kept() {
+        let r = parse_cve(&json!({"id": "CVE-2026-99999", "packages": [
+            {"name": "nginx", "statuses": [
+                {"release_codename": "noble", "status": "released", "description": "1.24.0-1ubuntu1.4"},
+                {"release_codename": "upstream", "status": "needed"}
+            ]},
+            {"name": "nodejs", "statuses": [{"release_codename": "noble", "status": "needed"}]}
+        ]})).unwrap();
+        assert_eq!(r.entries.len(), 2);
+        assert_eq!(r.entries[0].package, "nginx");
+        assert_eq!(
+            r.entries[0].fix_version.as_deref(),
+            Some("1.24.0-1ubuntu1.4")
+        );
+        assert_eq!(r.entries[1].status, SourceStatus::Vulnerable);
     }
 
     #[test]

@@ -306,6 +306,15 @@ pub fn is_kernel_source(name: &str) -> bool {
             .any(|n| name == *n || name.strip_prefix(n).is_some_and(|r| r.starts_with('-')))
 }
 
+/// A source package identifier from Debian or Ubuntu, before it enters the database.
+pub fn valid_source_package(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+.-".contains(c))
+}
+
 /// `CVE-YYYY-NNNN…`; Quellen wie Debian enthalten auch Nicht-CVE-IDs (`TEMP-…`), die wir überspringen.
 pub fn is_cve_id(id: &str) -> bool {
     crate::routes::valid_cve_id(id)

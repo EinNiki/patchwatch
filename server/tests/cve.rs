@@ -514,7 +514,7 @@ async fn feed_change_leads_to_event_and_host_status_change(pool: PgPool) {
     assert_eq!(
         out[0].1,
         Outcome::Updated {
-            changed_rows: 2,
+            changed_rows: 3,
             events: 0
         },
         "Erstimport erzeugt keine Event-Flut"
@@ -524,14 +524,14 @@ async fn feed_change_leads_to_event_and_host_status_change(pool: PgPool) {
         Some("vulnerable")
     );
     assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
-    // Nur Kernel-Pakete werden gespeichert, nicht openssl.
+    // Anwendungspakete werden ebenfalls gespeichert; die Kernelbewertung bleibt unabhängig.
     assert_eq!(
         count(
             &pool,
             "SELECT count(*) FROM cve_source_status WHERE package <> 'linux'"
         )
         .await,
-        0
+        1
     );
 
     // 2. Feed meldet für noble jetzt "released 6.8.0-35.35": Änderung vulnerable -> fixed.
@@ -645,7 +645,7 @@ async fn feed_failure_keeps_old_state_and_is_visible(pool: PgPool) {
     );
     assert_eq!(
         count(&pool, "SELECT count(*) FROM cve_source_status").await,
-        1
+        2
     );
     assert_eq!(host_status(&pool, hid).await, "cve_vulnerable");
     let (err, fails, still): (Option<String>, i32, chrono::DateTime<Utc>) =
@@ -741,7 +741,7 @@ async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
         matches!(
             out[0].1,
             Outcome::Incomplete {
-                changed_rows: 40,
+                changed_rows: 80,
                 ..
             }
         ),
@@ -777,7 +777,7 @@ async fn ubuntu_stops_at_cursor_and_reports_backlog(pool: PgPool) {
         matches!(
             out[0].1,
             Outcome::Updated {
-                changed_rows: 3,
+                changed_rows: 6,
                 events: 3
             }
         ),
@@ -960,7 +960,7 @@ async fn ubuntu_backlog_larger_than_page_limit_is_worked_off_over_runs(pool: PgP
         matches!(
             out[0].1,
             Outcome::Updated {
-                changed_rows: 3,
+                changed_rows: 6,
                 ..
             }
         ),
@@ -1002,7 +1002,7 @@ async fn ubuntu_run_interrupted_midway_keeps_progress(pool: PgPool) {
         matches!(
             out[0].1,
             Outcome::Incomplete {
-                changed_rows: 40,
+                changed_rows: 80,
                 ..
             }
         ),
@@ -4267,7 +4267,7 @@ async fn hybrid_first_import_is_complete_green_and_maps_status(pool: PgPool) {
         0
     );
     // Die API liefert den Rest.
-    assert_eq!(status_rows(&pool, "CVE-2026-20003").await.len(), 1);
+    assert_eq!(status_rows(&pool, "CVE-2026-20003").await.len(), 2);
 
     let row = ubuntu_feed_row(&app, &h).await;
     assert_eq!(row["state"], "ok");

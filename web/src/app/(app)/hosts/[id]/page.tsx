@@ -44,6 +44,7 @@ export default function HostDetailPage() {
     <>
       <p className="mb-2">
         <Link href="/">← Alle Hosts</Link>
+        <Link href={`/software?host_id=${id}`} className="ml-4">Software anzeigen</Link>
       </p>
       <PageHeader
         title={h.name}

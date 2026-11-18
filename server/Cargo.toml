@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 debversion = { path = "../crates/debversion" }
+packageurl = "0.7.1"
 anyhow = "1"
 async-trait = "0.1"
 argon2 = "0.5"

@@ -15,11 +15,17 @@ pub fn parse(out: &str) -> Vec<Package> {
             let mut it = l.split('\t');
             let (name, version) = (it.next()?, it.next()?);
             let opt = |s: Option<&str>| s.filter(|v| !v.is_empty()).map(str::to_owned);
+            let source = opt(it.next());
+            let source_version = opt(it.next());
+            // dpkg also lists removed packages whose configuration remains.
+            if it.next().is_some_and(|status| status != "installed") {
+                return None;
+            }
             (!name.is_empty() && !version.is_empty()).then(|| Package {
                 name: name.to_owned(),
                 version: version.to_owned(),
-                source: opt(it.next()),
-                source_version: opt(it.next()),
+                source,
+                source_version,
             })
         })
         .collect()
@@ -31,7 +37,7 @@ pub fn collect(r: &dyn Runner) -> Option<Vec<Package>> {
         &[
             "-W",
             "-f",
-            "${Package}\t${Version}\t${source:Package}\t${source:Version}\n",
+            "${Package}\t${Version}\t${source:Package}\t${source:Version}\t${db:Status-Status}\n",
         ],
     )?;
     Some(parse(&out))
@@ -47,5 +53,12 @@ mod tests {
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].name, "bash");
         assert_eq!(p[0].source.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn excludes_removed_and_unconfigured_packages() {
+        let p = parse("nginx\t1.2\tnginx\t1.2\tinstalled\nold\t1\told\t1\tconfig-files\nbroken\t1\tbroken\t1\tunpacked\n");
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].name, "nginx");
     }
 }

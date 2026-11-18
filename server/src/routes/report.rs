@@ -326,6 +326,11 @@ pub async fn post_report(
     .await?;
 
     if let Some(all_pkgs) = &rep.packages {
+        sqlx::query("UPDATE hosts SET packages_reported_at = $2 WHERE id = $1")
+            .bind(host_id)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
         // Multiarch hosts list one name once per architecture (the agent omits it, and the key is (host_id, name)).
         // ON CONFLICT cannot touch a row twice (SQLSTATE 21000), so exactly one entry per name is kept; the rule
         // never lets a vulnerable version disappear (see `merge_duplicate_packages`).

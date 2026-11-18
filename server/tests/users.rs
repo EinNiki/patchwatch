@@ -167,6 +167,26 @@ fn matrix() -> Vec<(Method, &'static str, Permission, bool)> {
             true,
         ),
         (Method::GET, "/api/v1/cves", CvesRead, true),
+        (Method::GET, "/api/v1/software", HostsRead, true),
+        (Method::GET, "/api/v1/software/inventories", HostsRead, true),
+        (
+            Method::PUT,
+            "/api/v1/hosts/1/inventories/nope",
+            HostsWrite,
+            false,
+        ),
+        (
+            Method::DELETE,
+            "/api/v1/hosts/1/inventories/nope",
+            HostsWrite,
+            true,
+        ),
+        (
+            Method::POST,
+            "/api/v1/software/inventories/999999/scan",
+            SourcesRun,
+            true,
+        ),
         (Method::GET, "/api/v1/cves/scope-count", CvesRead, true),
         (Method::GET, "/api/v1/cves/CVE-2024-0001", CvesRead, true),
         (Method::GET, "/api/v1/watchlist", CvesRead, true),
@@ -334,6 +354,7 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
     let exempt = [
         "/report",
         "/agent/checkin",
+        "/agent/inventories/{key}",
         "/auth/login",
         "/auth/2fa",
         "/auth/sessions",
@@ -396,7 +417,9 @@ fn every_registered_route_is_in_the_matrix_or_explicitly_exempt() {
 #[test]
 fn every_handler_requires_a_permission_extractor() {
     let modsrc = include_str!("../src/routes/mod.rs");
-    let files: [(&str, &str); 14] = [
+    let files: [(&str, &str); 16] = [
+        ("inventories", include_str!("../src/routes/inventories.rs")),
+        ("software", include_str!("../src/routes/software.rs")),
         ("auth", include_str!("../src/routes/auth.rs")),
         ("cves", include_str!("../src/routes/cves.rs")),
         ("feeds", include_str!("../src/routes/feeds.rs")),
@@ -425,6 +448,7 @@ fn every_handler_requires_a_permission_extractor() {
         "oidc::login",
         "oidc::callback",
         "agent::checkin",
+        "inventories::agent_put",
         "report::post_report",
         "health::healthz",
         "health::readyz",

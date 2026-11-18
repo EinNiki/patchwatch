@@ -31,8 +31,10 @@ Apple-Muster (Tab-Bars, SF Symbols, Systemfarben, Kapsel-Buttons), „mutige“ 
 - **Einstellungen:** je Abschnitt zweispaltig (links Titel + Kurzbeschreibung, rechts Formular). **Benachrichtigungen:** ab 1024 px Kanalliste
   links, Formular rechts; mobil einspaltig.
 - **Hosts:** kompakte Kennzahlenleiste (verwundbar, Sicherheitsupdates, Neustart nötig, meldet sich nicht, zuletzt gemeldet; es gibt bewusst keine Kachel „unbekannt“), zugleich Filter; darunter die Tabelle.
-- **Seitenleiste** (`nav`, `aria-label="Hauptnavigation"`): Marke `patchwatch` (mono), **Hosts · CVEs · Agents ·
-  Benachrichtigungen · Einstellungen**. „Benachrichtigungen“ hat eine zweite Ebene (ntfy, Matrix, Gotify, Discord, Live im Browser),
+- **Seitenleiste** (`nav`, `aria-label="Hauptnavigation"`): Marke `patchwatch` (mono), **Hosts · CVEs · Software · Agents · Benutzer ·
+  Benachrichtigungen · Einstellungen**. Software zeigt das durchsuchbare Paketinventar mit Hostfilter,
+  Seiten und aufklappbaren Sicherheitsmeldungen. Fehlende Bewertungen bleiben sichtbar unbekannt.
+  „Benachrichtigungen“ hat eine zweite Ebene (ntfy, Matrix, Gotify, Discord, Live im Browser),
   mehr Ebenen gibt es nicht; die Gruppe hat einen eigenen Auf/Zu-Knopf (`aria-expanded`), ihr Zustand steht in `localStorage`
   (`pw-nav:notifications`) und wird beim Seitenwechsel nicht zurückgesetzt; auf Unterseiten ist sie immer offen.
   Aktive Seite: `aria-current="page"`, fetter Text und eine **gleitende Fläche** (ein Element hinter den Zeilen mit 2-px-Leiste in
@@ -265,6 +267,10 @@ Schreibaktionen ohne Recht werden ausgeblendet (nie nur deaktiviert); der Server
 
 **Hinweiskasten (`role="note"`):** ruhig, neutral (`border-line`, `bg-sunk`), für Zustände ohne Fehler (z. B. `PATCHWATCH_SECRET_KEY` fehlt);
 Warn- und Fehlertöne nur für echte Warnungen und Fehler.
+
+## Software-Inventare
+
+Die Software-Seite führt benannte Inventare für Anwendungen, Container-Images und manuelle Installationen über der gemeinsamen Komponentenliste. Import und Ersetzen nutzen `Dialog`, Entfernen `ConfirmDialog` mit Inventarnamen. Mehrere Versionen und Fundorte bleiben getrennte Zeilen; ohne eindeutige Paketkennung bleibt die Bewertung unbekannt. Eine erfolgreiche OSV-Abfrage ohne Treffer erhält einen neutralen Status. Aktionsreihen umbrechen auf schmalen Bildschirmen.
 
 ## Knöpfe
 

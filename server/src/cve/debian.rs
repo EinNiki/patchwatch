@@ -1,11 +1,11 @@
 //! Debian Security Tracker (`/tracker/data/json`, ca. 87 MB entpackt, 14 MB gzip).
 //! Liefert keinen ETag, aber `Last-Modified` (geprüft); `If-Modified-Since` ergibt bei Unverändertem 304.
-//! Geparst wird streamend: nur Kernel-Quellpakete werden materialisiert, der Rest wird übersprungen.
+//! Geparst wird streamend, jeweils ein Quellpaket; alle Softwarepakete werden berücksichtigt.
 
 use super::http::{self, header_str, Limits};
 use super::{
-    is_cve_id, is_kernel_source, truncate, valid_version, CveSource, Entry, FeedError, FeedState,
-    FetchCtx, FetchOutcome, Record, SourceStatus,
+    is_cve_id, truncate, valid_source_package, valid_version, CveSource, Entry, FeedError,
+    FeedState, FetchCtx, FetchOutcome, Record, SourceStatus,
 };
 use crate::config::CveConfig;
 use async_trait::async_trait;
@@ -127,7 +127,7 @@ impl<'de> Visitor<'de> for RootVisitor {
             saw_linux: false,
         };
         while let Some(pkg) = map.next_key::<String>()? {
-            if !is_kernel_source(&pkg) {
+            if !valid_source_package(&pkg) {
                 map.next_value::<IgnoredAny>()?;
                 continue;
             }
@@ -252,7 +252,7 @@ mod tests {
             .unwrap_or_else(|| panic!("{cve} {pkg} {rel}"))
     }
 
-    /// Echte Tracker-Daten: nur Kernel-Pakete, Nicht-CVE-IDs (TEMP-…) übersprungen.
+    /// Echte Tracker-Daten: auch Anwendungen, Nicht-CVE-IDs (TEMP-…) übersprungen.
     #[test]
     fn real_subset_filters_packages_and_ids() {
         let rs = parsed();
@@ -260,11 +260,11 @@ mod tests {
         assert!(rs
             .iter()
             .flat_map(|r| &r.entries)
-            .all(|e| is_kernel_source(&e.package)));
+            .any(|e| e.package == "openssl"));
         assert!(rs
             .iter()
             .flat_map(|r| &r.entries)
-            .all(|e| e.package != "openssl" && e.package != "linux-atm"));
+            .all(|e| valid_source_package(&e.package)));
     }
 
     #[test]
